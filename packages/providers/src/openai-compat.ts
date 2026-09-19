@@ -198,8 +198,9 @@ function finalize(suggestions: Suggestion[], req: SuggestRequest): Suggestion[] 
     const prev = best.get(key);
     if (!prev || s.confidence > prev.confidence) best.set(key, { ...s, value: s.value.trim() });
   }
+  // Every suggestion carries a value except a bare scroll.
   return [...best.values()]
-    .filter((s) => s.value !== '')
+    .filter((s) => s.value !== '' || (s.kind === 'interact' && s.verb === 'scroll'))
     .sort((a, b) => b.confidence - a.confidence);
 }
 

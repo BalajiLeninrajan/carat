@@ -37,9 +37,11 @@ export {
   ELEMENT_ROLES,
   VERBS_BY_ROLE,
   elementKey,
+  impliedVerb,
   interactionChipText,
   isElementRole,
   isInteractVerb,
+  isOffScreen,
   verbFits,
 } from './interact';
 export type { ChipText } from './interact';

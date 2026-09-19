@@ -26,6 +26,7 @@ export interface FieldDescriptor {
   v?: string; // current value, <= 40
   f?: 1; // focused
   w?: 's' | 'm' | 'l'; // width bucket
+  o?: 1; // off-screen: outside the viewport when the snapshot was taken
 }
 
 /** Roles carat can act on. Derived from the tag, the input type or an explicit ARIA role; nothing else is described. */
@@ -58,6 +59,7 @@ export interface ElementDescriptor {
   op?: string[]; // select options, <= 8 x 20 chars
   nb?: string; // nearby text, <= 80
   p?: 1; // the page's primary action (submit button, or styled as primary)
+  o?: 1; // off-screen: outside the viewport when the snapshot was taken
 }
 
 export interface PageMeta {
@@ -119,13 +121,14 @@ export interface ActionSuggestion {
   sourceContextId: string;
 }
 
-export type InteractVerb = 'click' | 'check' | 'uncheck' | 'set' | 'choose';
+/** `scroll` brings an off-screen element into view and nothing more; it never carries a value. */
+export type InteractVerb = 'click' | 'check' | 'uncheck' | 'set' | 'choose' | 'scroll';
 
 /**
  * One interaction with one element on the current page. `value` is the target
  * for `set` (a number as text) and `choose` (an option label); for `click`,
- * `check` and `uncheck` it repeats the element's name. The content script
- * performs it, once, after a Tab on the chip.
+ * `check` and `uncheck` it repeats the element's name; for `scroll` it is ''.
+ * The content script performs it, once, after a Tab on the chip.
  */
 export interface InteractSuggestion {
   kind: 'interact';

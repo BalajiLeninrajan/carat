@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CONTROL_ROLES, ELEMENT_ROLES, VERBS_BY_ROLE, elementKey, interactionChipText, isElementRole, isInteractVerb, verbFits } from '../src/interact';
+import { CONTROL_ROLES, ELEMENT_ROLES, VERBS_BY_ROLE, elementKey, impliedVerb, interactionChipText, isElementRole, isInteractVerb, isOffScreen, verbFits } from '../src/interact';
 import type { ElementDescriptor } from '../src/types';
 
 const el = (over: Partial<ElementDescriptor>): ElementDescriptor => ({ i: 'e0', r: 'button', nm: 'Save', ...over });
@@ -16,6 +16,7 @@ describe('roles and verbs', () => {
     expect(isElementRole('slider')).toBe(true);
     expect(isElementRole('listbox')).toBe(false);
     expect(isInteractVerb('set')).toBe(true);
+    expect(isInteractVerb('scroll')).toBe(true);
     expect(isInteractVerb('toggle')).toBe(false);
   });
 });
@@ -49,6 +50,26 @@ describe('verbFits', () => {
     expect(verbFits(sel, 'choose', 'free')).toBe(true);
     expect(verbFits(sel, 'choose', 'Tentative')).toBe(false);
     expect(verbFits(el({ r: 'select' }), 'choose', 'anything')).toBe(true);
+  });
+
+  it('lets a bare scroll fit any role, but only an off-screen element', () => {
+    for (const r of ELEMENT_ROLES) expect(verbFits(el({ r, o: 1 }), 'scroll', '')).toBe(true);
+    expect(verbFits(el({ o: 1 }), 'scroll', 'Save')).toBe(false);
+    expect(verbFits(el({}), 'scroll', '')).toBe(false);
+    expect(isOffScreen(el({ o: 1 }))).toBe(true);
+    expect(isOffScreen(el({}))).toBe(false);
+  });
+});
+
+describe('impliedVerb', () => {
+  it('names the one thing a button or toggle does, and nothing for a slider or select', () => {
+    expect(impliedVerb(el({}))).toBe('click');
+    expect(impliedVerb(el({ r: 'disclosure', st: 'closed' }))).toBe('click');
+    expect(impliedVerb(el({ r: 'radio', st: 'off' }))).toBe('check');
+    expect(impliedVerb(el({ r: 'checkbox', st: 'off' }))).toBe('check');
+    expect(impliedVerb(el({ r: 'switch', st: 'on' }))).toBe('uncheck');
+    expect(impliedVerb(el({ r: 'slider' }))).toBeNull();
+    expect(impliedVerb(el({ r: 'select' }))).toBeNull();
   });
 });
 
