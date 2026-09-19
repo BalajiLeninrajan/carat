@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ElementDescriptor } from '@carat/shared';
-import { MAX_ELEMENTS, MAX_ELEMENTS_BYTES, accessibleName, enumerateElements, performInteraction, roleOf, snap, stillFits } from '../src/interact';
+import { ELEMENT_WINDOW_ABOVE, ELEMENT_WINDOW_BELOW, MAX_ELEMENTS, MAX_ELEMENTS_BYTES, accessibleName, enumerateElements, performInteraction, roleOf, snap, stillFits } from '../src/interact';
 
 function lay(el: Element, width = 120, top = 100, height = 32, left = 0): void {
   el.getBoundingClientRect = () => new DOMRect(left, top, width, height);
@@ -115,6 +115,22 @@ describe('enumerateElements', () => {
     const { descriptors } = enumerateElements(document);
     expect(named(descriptors)).toEqual(['Save', 'Vegetarian', 'Big', 'Small', 'Below the fold', 'Above']);
     expect(descriptors.map((d) => d.i)).toEqual(['e0', 'e1', 'e2', 'e3', 'e4', 'e5']);
+    // Only the two outside the viewport carry the off-screen flag.
+    expect(descriptors.map((d) => d.o)).toEqual([undefined, undefined, undefined, undefined, 1, 1]);
+  });
+
+  it('keeps an off-screen primary action first and drops off-screen elements before on-screen ones', () => {
+    const vh = window.innerHeight;
+    document.body.innerHTML =
+      '<form><button id="primary">Save</button></form>' +
+      Array.from({ length: 30 }, (_, i) => `<button id="${i % 2 ? 'on' : 'off'}${i}">Button number ${i} ${'x'.repeat(50)}</button>`).join('');
+    lay(document.getElementById('primary')!, 120, 3 * vh);
+    for (const el of document.querySelectorAll('button:not(#primary)')) lay(el, 120, el.id.startsWith('off') ? 2 * vh : 100);
+    const { descriptors } = enumerateElements(document);
+    expect(descriptors[0]).toMatchObject({ nm: 'Save', p: 1, o: 1 });
+    expect(descriptors.length).toBeLessThan(MAX_ELEMENTS);
+    expect(descriptors.slice(1).every((d) => d.o === undefined)).toBe(true);
+    expect(new TextEncoder().encode(JSON.stringify(descriptors)).byteLength).toBeLessThanOrEqual(MAX_ELEMENTS_BYTES);
   });
 
   it('caps the count and the bytes, trimming the registry to match', () => {
@@ -129,11 +145,14 @@ describe('enumerateElements', () => {
   });
 
   it('skips elements far outside the vertical window and clears stale ids', () => {
-    document.body.innerHTML = '<button id="a">Alpha</button><button id="b">Beta</button>';
+    document.body.innerHTML = '<button id="a">Alpha</button><button id="b">Beta</button><button id="c">Gamma</button><button id="d">Delta</button>';
     const vh = window.innerHeight;
     lay(document.getElementById('a')!, 100, 100);
-    lay(document.getElementById('b')!, 100, 2 * vh + 1);
-    expect(named(enumerateElements(document).descriptors)).toEqual(['Alpha']);
+    lay(document.getElementById('b')!, 100, ELEMENT_WINDOW_BELOW * vh + 1);
+    lay(document.getElementById('c')!, 100, ELEMENT_WINDOW_BELOW * vh);
+    lay(document.getElementById('d')!, 100, -ELEMENT_WINDOW_ABOVE * vh - 1);
+    expect(named(enumerateElements(document).descriptors)).toEqual(['Alpha', 'Gamma']);
+    document.getElementById('c')!.remove();
     document.getElementById('a')!.remove();
     expect(enumerateElements(document).descriptors).toEqual([]);
     expect(document.querySelectorAll('[data-carat-el]')).toHaveLength(0);

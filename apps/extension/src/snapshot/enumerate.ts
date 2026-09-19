@@ -1,6 +1,7 @@
 import type { FieldDescriptor } from '@carat/shared';
 import { normalizeWhitespace, truncate } from '@carat/shared';
 import { isVisible } from '../capture/visibility';
+import { inViewport } from '../scroll';
 import { fingerprintOf, placeholderOf } from './fingerprint';
 import { labelOf, nearbyText } from './labels';
 import { serializeFields } from './serialize';
@@ -35,14 +36,17 @@ interface Candidate {
   el: Element;
   rect: DOMRect;
   focused: boolean;
+  inViewport: boolean;
   value: string;
   order: number;
 }
 
 /**
- * Fillable fields on the page, ranked focused first, then widest, then DOM
- * order; capped at MAX_FIELDS and at the serialized byte budget. Each kept
- * element gets a `data-carat-id` matching its descriptor id.
+ * Fillable fields anywhere on the page, ranked focused first, then those in
+ * the viewport, then widest, then DOM order; capped at MAX_FIELDS and at the
+ * serialized byte budget, so off-screen fields are the first to go. Each kept
+ * element gets a `data-carat-id` matching its descriptor id; an off-screen one
+ * is flagged `o: 1` so the model knows carat would have to scroll to it.
  */
 export function enumerateFields(doc: Document, win: Window | null = doc.defaultView): FieldSnapshot {
   const registry = new Map<string, FieldEntry>();
@@ -51,13 +55,11 @@ export function enumerateFields(doc: Document, win: Window | null = doc.defaultV
 
   for (const stale of doc.querySelectorAll(`[${FIELD_ID_ATTR}]`)) stale.removeAttribute(FIELD_ID_ATTR);
 
-  const vh = win.innerHeight;
   const active = doc.activeElement;
   const candidates: Candidate[] = [];
   Array.from(doc.querySelectorAll(SELECTOR)).forEach((el, order) => {
     const rect = el.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return;
-    if (rect.top < -vh || rect.top > 2 * vh) return;
     if (!isVisible(el, win)) return;
     if (isInert(el) || el.closest('[aria-hidden="true"]')) return;
     // Radix/shadcn-style `<button role="combobox">` and `<select role=...>` hold no text to fill.
@@ -66,11 +68,17 @@ export function enumerateFields(doc: Document, win: Window | null = doc.defaultV
     const value = valueOf(el);
     // A field the user already filled is theirs; only a focused one is still described.
     if (value && !focused) return;
-    candidates.push({ el, rect, focused, value, order });
+    candidates.push({ el, rect, focused, inViewport: inViewport(el, win), value, order });
   });
 
   const ranked = dropRoleWrappers(candidates)
-    .sort((a, b) => Number(b.focused) - Number(a.focused) || b.rect.width - a.rect.width || a.order - b.order)
+    .sort(
+      (a, b) =>
+        Number(b.focused) - Number(a.focused) ||
+        Number(b.inViewport) - Number(a.inViewport) ||
+        b.rect.width - a.rect.width ||
+        a.order - b.order,
+    )
     .slice(0, MAX_FIELDS);
 
   const descriptors = ranked.map((c, idx) => describe(c, `f${idx}`, doc));
@@ -101,6 +109,7 @@ function describe(c: Candidate, id: string, doc: Document): FieldDescriptor {
   if (c.value) d.v = truncate(c.value, 40);
   if (c.focused) d.f = 1;
   d.w = c.rect.width < 160 ? 's' : c.rect.width < 400 ? 'm' : 'l';
+  if (!c.inViewport) d.o = 1;
   return d;
 }
 

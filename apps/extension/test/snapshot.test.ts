@@ -107,13 +107,35 @@ describe('enumerateFields', () => {
     expect(document.querySelectorAll('[data-carat-id]')).toHaveLength(12);
   });
 
-  it('skips fields outside the vertical window', () => {
-    document.body.innerHTML = '<input id="above"><input id="near"><input id="far">';
+  it('describes fields anywhere on the page, flags the off-screen ones and ranks them after those in view', () => {
+    document.body.innerHTML = '<input id="above"><input id="far"><input id="near"><input id="focused">';
     const vh = window.innerHeight;
-    lay(document.getElementById('above')!, 200, -vh - 1);
-    lay(document.getElementById('near')!, 200, 2 * vh);
-    lay(document.getElementById('far')!, 200, 2 * vh + 1);
-    expect(enumerateFields(document).descriptors.map((d) => d.nm)).toEqual(['near']);
+    lay(document.getElementById('above')!, 600, -vh - 1);
+    lay(document.getElementById('far')!, 600, 5 * vh);
+    lay(document.getElementById('near')!, 200, 100);
+    lay(document.getElementById('focused')!, 100, 3 * vh);
+    document.getElementById('focused')!.focus();
+    const { descriptors } = enumerateFields(document);
+    // Focus still wins, even off-screen; then the viewport; then width.
+    expect(descriptors.map((d) => [d.nm, d.o])).toEqual([
+      ['focused', 1],
+      ['near', undefined],
+      ['above', 1],
+      ['far', 1],
+    ]);
+  });
+
+  it('drops off-screen fields before on-screen ones when the budget is tight', () => {
+    const big = (id: string) => `<input id="${id}" placeholder="${'p'.repeat(60)}" aria-label="${'a'.repeat(60)}"><span>${'n'.repeat(80)}</span>`;
+    document.body.innerHTML = Array.from({ length: 12 }, (_, i) => big(i % 2 ? `on${i}` : `off${i}`)).join('');
+    const vh = window.innerHeight;
+    for (const el of document.querySelectorAll('input')) lay(el, el.id.startsWith('off') ? 600 : 200, el.id.startsWith('off') ? 3 * vh : 100);
+    const { descriptors } = enumerateFields(document);
+    expect(descriptors.length).toBeLessThan(12);
+    // Every on-screen field survives; only off-screen ones were cut, wide as they are.
+    expect(descriptors.filter((d) => d.o === undefined).map((d) => d.nm)).toEqual(['on1', 'on3', 'on5', 'on7', 'on9', 'on11']);
+    expect(descriptors.findIndex((d) => d.o === 1)).toBe(6);
+    expect(new TextEncoder().encode(JSON.stringify(descriptors)).byteLength).toBeLessThanOrEqual(2048);
   });
 
   it('clears stale ids from a previous enumeration', () => {

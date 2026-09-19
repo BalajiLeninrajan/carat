@@ -1,6 +1,7 @@
 import type { ElementDescriptor, ElementRole } from '@carat/shared';
 import { CONTROL_ROLES, elementKey, isDestructiveName, normalizeWhitespace, truncate } from '@carat/shared';
 import { isVisible } from '../capture/visibility';
+import { inViewport } from '../scroll';
 import { nearbyText } from '../snapshot/labels';
 import { serializeDescriptors } from '../snapshot/serialize';
 import { accessibleName } from './name';
@@ -8,6 +9,10 @@ import { accessibleName } from './name';
 export const MAX_ELEMENTS = 16;
 export const MAX_ELEMENTS_BYTES = 2048;
 export const ELEMENT_ID_ATTR = 'data-carat-el';
+/** Elements are described from this many viewport heights above the top of the viewport... */
+export const ELEMENT_WINDOW_ABOVE = 2;
+/** ...to this many below it. Fields have no such window. */
+export const ELEMENT_WINDOW_BELOW = 4;
 
 const NAME_MAX = 60;
 const VALUE_MAX = 40;
@@ -52,10 +57,12 @@ interface Candidate {
 }
 
 /**
- * Interactive elements carat could act on, ranked primary first, then those
- * in the viewport, then value-bearing controls before plain buttons, then by
- * size and DOM order; capped at MAX_ELEMENTS and the byte budget. Anything
- * with a destructive name is left out here, before the model ever sees it.
+ * Interactive elements carat could act on, from two viewport heights above
+ * to four below, ranked primary first, then those in the viewport, then
+ * value-bearing controls before plain buttons, then by size and DOM order;
+ * capped at MAX_ELEMENTS and the byte budget, so off-screen ones go first.
+ * An off-screen element is flagged `o: 1`. Anything with a destructive name
+ * is left out here, before the model ever sees it.
  */
 export function enumerateElements(doc: Document, win: Window | null = doc.defaultView): ElementSnapshot {
   const registry = new Map<string, ElementEntry>();
@@ -64,20 +71,18 @@ export function enumerateElements(doc: Document, win: Window | null = doc.defaul
   for (const stale of doc.querySelectorAll(`[${ELEMENT_ID_ATTR}]`)) stale.removeAttribute(ELEMENT_ID_ATTR);
 
   const vh = win.innerHeight;
-  const vw = win.innerWidth;
   const candidates: Candidate[] = [];
   Array.from(doc.querySelectorAll(SELECTOR)).forEach((el, order) => {
     const role = roleOf(el);
     if (!role) return;
     const rect = el.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return;
-    if (rect.top < -vh || rect.top > 2 * vh) return;
+    if (rect.top < -ELEMENT_WINDOW_ABOVE * vh || rect.top > ELEMENT_WINDOW_BELOW * vh) return;
     if (!isVisible(el, win) || isInert(el) || el.closest('[aria-hidden="true"]')) return;
     if (role === 'radio' && toggleState(el) === 'on') return;
     const name = truncate(accessibleName(el, doc), NAME_MAX);
     if (!name || isDestructiveName(name)) return;
-    const inViewport = rect.bottom > 0 && rect.top < vh && rect.right > 0 && rect.left < vw;
-    candidates.push({ el, role, name, rect, primary: isPrimary(el), inViewport, order });
+    candidates.push({ el, role, name, rect, primary: isPrimary(el), inViewport: inViewport(el, win), order });
   });
 
   const ranked = candidates
@@ -120,6 +125,7 @@ function describe(c: Candidate, id: string): ElementDescriptor {
   const nb = nearbyText(el);
   if (nb && nb !== c.name) d.nb = truncate(nb, 80);
   if (c.primary) d.p = 1;
+  if (!c.inViewport) d.o = 1;
   return d;
 }
 

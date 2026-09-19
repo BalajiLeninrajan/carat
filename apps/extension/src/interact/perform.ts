@@ -1,5 +1,6 @@
 import type { InteractVerb } from '@carat/shared';
 import { fillSelect } from '../fill/select';
+import { inViewport, scrollToTarget } from '../scroll';
 import { sliderFacts, toggleState } from './enumerate';
 
 const MAX_KEY_STEPS = 200;
@@ -25,14 +26,29 @@ export function performInteraction(el: Element, verb: InteractVerb, value: strin
       return el.getAttribute('role') === 'slider' && setAriaSlider(el as HTMLElement, value);
     case 'choose':
       return el instanceof HTMLSelectElement && fillSelect(el, value);
+    case 'scroll': {
+      // The scheduler awaits the scroll itself so it can follow with a chip; here it is fire and forget.
+      const win = el.ownerDocument.defaultView;
+      if (!win) return false;
+      void scrollToTarget(el, win);
+      return true;
+    }
   }
 }
 
-/** True when the verb still makes sense against the live element (a box may have been ticked since the snapshot). */
+/**
+ * True when the verb still makes sense against the live element: a box may
+ * have been ticked since the snapshot, and an element the user has since
+ * scrolled to has nothing left to scroll to.
+ */
 export function stillFits(el: Element, verb: InteractVerb): boolean {
   if (!el.isConnected) return false;
   if (verb === 'check') return toggleState(el) === 'off';
   if (verb === 'uncheck') return toggleState(el) === 'on';
+  if (verb === 'scroll') {
+    const win = el.ownerDocument.defaultView;
+    return !!win && !inViewport(el, win);
+  }
   return true;
 }
 
