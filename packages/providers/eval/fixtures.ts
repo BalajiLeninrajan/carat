@@ -1,63 +1,53 @@
 import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Eagerness, SuggestRequest, Suggestion } from '@carat/shared';
-import { DEFAULT_EAGERNESS, EAGERNESS_LEVELS, weakBelow } from '@carat/shared';
+import type { NextAction, NextActionKind, NextActionRequest } from '@carat/shared';
 import { z } from 'zod';
 
 /**
- * A fill is expected by `fieldId`, an action by `intent`, an interaction by
- * `elementId` plus `verb` (an empty `elementId` with `verb: "scroll"` is the
- * page scroll); `whenStartsWith` pins an action's start time. `valueIncludes`
- * may be left out for a scroll, which carries no value.
+ * One fixture is one page, and one action it should answer with. `expect` is
+ * what a model should do; `expectLocal` is what the regex placeholder should
+ * do with no network at all, which is usually `none`. A negative expects
+ * `none`, or names the targets and kinds that would be wrong.
  */
 export interface Expectation {
-  fieldId?: string;
-  intent?: string;
-  elementId?: string;
-  verb?: string;
-  valueIncludes: string;
-  whenStartsWith?: string;
+  /** The kind the action must have; `any` when only the forbidden list matters. */
+  kind: NextActionKind | 'any';
+  target?: number;
+  valueIncludes?: string;
+  irreversible?: boolean;
+  /** Controls the action must not name: the pay button, the delete link. */
+  forbidTargets?: number[];
+  forbidKinds?: NextActionKind[];
 }
 
 export interface Fixture {
   name: string;
-  request: SuggestRequest;
-  expect: Expectation[];
-  /** Expectations that replace `expect` at one level: a chip only that level is meant to produce. */
-  expectAt?: Partial<Record<Eagerness, Expectation[]>>;
-  /**
-   * Levels at which a negative may still produce a chip, as long as every
-   * suggestion sits under the next stricter level's floor. That is the
-   * documented cost of the level: one Esc on a weak chip.
-   */
-  weakOkAt?: Eagerness[];
+  request: NextActionRequest;
+  expect: Expectation;
+  /** What the offline placeholder must answer; `{ kind: 'none' }` when it is left out. */
+  expectLocal?: Expectation;
 }
 
-const ExpectationSchema = z
-  .object({
-    fieldId: z.string().min(1).optional(),
-    intent: z.string().min(1).optional(),
-    elementId: z.string().optional(),
-    verb: z.string().min(1).optional(),
-    valueIncludes: z.string().default(''),
-    whenStartsWith: z.string().min(1).optional(),
-  })
-  .refine(
-    (e) => [e.fieldId, e.intent, e.elementId].filter((v) => v !== undefined).length === 1,
-    'an expectation names exactly one of fieldId, intent or elementId',
-  )
-  .refine((e) => (e.verb === undefined) === (e.elementId === undefined), 'verb goes with elementId')
-  .refine((e) => e.valueIncludes !== '' || e.verb === 'scroll', 'valueIncludes may only be empty for a scroll');
+const KINDS = ['fill', 'click', 'select', 'scroll', 'open', 'switch', 'none'] as const;
 
-const LevelSchema = z.enum(EAGERNESS_LEVELS);
+const ExpectationSchema = z.object({
+  kind: z.enum([...KINDS, 'any']),
+  target: z.number().int().optional(),
+  valueIncludes: z.string().optional(),
+  irreversible: z.boolean().optional(),
+  forbidTargets: z.array(z.number().int()).optional(),
+  forbidKinds: z.array(z.enum(KINDS)).optional(),
+});
 
 const FixtureSchema = z.object({
   name: z.string().min(1),
-  request: z.custom<SuggestRequest>((v) => typeof v === 'object' && v !== null && Array.isArray((v as SuggestRequest).fields)),
-  expect: z.array(ExpectationSchema),
-  expectAt: z.partialRecord(LevelSchema, z.array(ExpectationSchema)).optional(),
-  weakOkAt: z.array(LevelSchema).optional(),
+  request: z.custom<NextActionRequest>(
+    (v) => typeof v === 'object' && v !== null && Array.isArray((v as NextActionRequest).controls),
+    'a fixture request needs a controls array',
+  ),
+  expect: ExpectationSchema,
+  expectLocal: ExpectationSchema.optional(),
 });
 
 export const FIXTURES_DIR = fileURLToPath(new URL('./fixtures/', import.meta.url));
@@ -77,50 +67,37 @@ export async function loadFixtures(dir: string = FIXTURES_DIR): Promise<Fixture[
 export interface Verdict {
   pass: boolean;
   detail: string;
-  /** A negative that passed only because its chips were weak enough for this level to tolerate. */
-  weak?: true;
 }
 
-/** What the fixture expects at this level. */
-export function expectationsAt(fixture: Fixture, eagerness: Eagerness): Expectation[] {
-  return fixture.expectAt?.[eagerness] ?? fixture.expect;
+export const NONE_EXPECTED: Expectation = { kind: 'none' };
+
+export function describeAction(a: NextAction | null): string {
+  if (!a) return 'nothing';
+  const target = a.target === null ? '' : ` [${a.target}]`;
+  const value = a.value ? ` ${JSON.stringify(a.value)}` : '';
+  return `${a.kind}${target}${value} (${a.confidence})`;
 }
 
-function describe(s: Suggestion): string {
-  if (s.kind === 'fill') return `${s.fieldId}=${JSON.stringify(s.value)}`;
-  if (s.kind === 'interact') return `${s.elementId || 'page'}.${s.verb}(${JSON.stringify(s.value)})`;
-  return `${s.intent}=${JSON.stringify(s.value)}${s.when ? `@${s.when}` : ''}`;
+function describeExpectation(e: Expectation): string {
+  const bits: string[] = [e.kind];
+  if (e.target !== undefined) bits.push(`[${e.target}]`);
+  if (e.valueIncludes) bits.push(JSON.stringify(e.valueIncludes));
+  if (e.forbidTargets?.length) bits.push(`not [${e.forbidTargets.join(',')}]`);
+  if (e.forbidKinds?.length) bits.push(`not ${e.forbidKinds.join('/')}`);
+  return bits.join(' ');
 }
 
-function meets(e: Expectation, s: Suggestion): boolean {
-  if (!s.value.includes(e.valueIncludes)) return false;
-  if (s.kind === 'fill') return e.fieldId === s.fieldId;
-  if (s.kind === 'interact') return e.elementId === s.elementId && e.verb === s.verb;
-  if (e.intent !== s.intent) return false;
-  return e.whenStartsWith === undefined || s.when.startsWith(e.whenStartsWith);
-}
-
-/**
- * A negative fixture passes only on [], or, at a level it lists in
- * `weakOkAt`, on chips that would all have been dropped one level up. A
- * positive one passes when every expectation is met; extra suggestions are
- * allowed.
- */
-export function judge(fixture: Fixture, got: Suggestion[], eagerness: Eagerness = DEFAULT_EAGERNESS): Verdict {
-  const summary = got.length === 0 ? '[]' : got.map(describe).join(' ');
-  const expectations = expectationsAt(fixture, eagerness);
-  if (expectations.length === 0) {
-    if (got.length === 0) return { pass: true, detail: '[]' };
-    const floor = weakBelow(eagerness);
-    if (fixture.weakOkAt?.includes(eagerness) && got.every((s) => s.confidence < floor)) {
-      return { pass: true, weak: true, detail: `weak chip tolerated at ${eagerness} (all under ${floor}): ${summary}` };
-    }
-    return { pass: false, detail: `expected [] got ${summary}` };
+/** No answer at all counts as `none`: both mean no chip. */
+export function judge(action: NextAction | null, expectation: Expectation): Verdict {
+  const got = action ?? { kind: 'none' as const, target: null, value: '', label: '', irreversible: false, confidence: 0, reason: '' };
+  const fail = (why: string): Verdict => ({ pass: false, detail: `${why}: wanted ${describeExpectation(expectation)}, got ${describeAction(action)}` });
+  if (expectation.kind !== 'any' && got.kind !== expectation.kind) return fail('wrong kind');
+  if (expectation.target !== undefined && got.target !== expectation.target) return fail('wrong target');
+  if (expectation.valueIncludes && !got.value.includes(expectation.valueIncludes)) return fail('wrong value');
+  if (expectation.irreversible !== undefined && got.irreversible !== expectation.irreversible) return fail('wrong irreversible flag');
+  if (got.kind !== 'none') {
+    if (expectation.forbidKinds?.includes(got.kind)) return fail('forbidden kind');
+    if (got.target !== null && expectation.forbidTargets?.includes(got.target)) return fail('forbidden target');
   }
-  const missing = expectations.filter((e) => !got.some((s) => meets(e, s)));
-  if (missing.length === 0) return { pass: true, detail: summary };
-  const want = missing
-    .map((e) => `${e.fieldId ?? e.intent ?? `${e.elementId || 'page'}.${e.verb}`}~${JSON.stringify(e.valueIncludes)}${e.whenStartsWith ? `@${e.whenStartsWith}` : ''}`)
-    .join(' ');
-  return { pass: false, detail: `wanted ${want} got ${summary}` };
+  return { pass: true, detail: describeAction(action) };
 }

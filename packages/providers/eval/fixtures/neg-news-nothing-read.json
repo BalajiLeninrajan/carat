@@ -1,0 +1,25 @@
+{
+  "name": "neg-news-nothing-read",
+  "request": {
+    "page": {
+      "host": "www.cbc.ca",
+      "title": "Region approves transit fare increase starting in January",
+      "path": "/news/canada/kitchener-waterloo/fare-increase-1.7",
+      "scroll": { "y": 0.2, "pages": 4.2, "more": true }
+    },
+    "outline": "banner:\n  [1] link \"CBC\" -> cbc.ca\n  [2] searchbox \"Search CBC\"\n  [3] link \"Sign in\" -> cbc.ca\nmain:\n  heading(1) \"Region approves transit fare increase starting in January\"\n  text: Regional council voted 11-5 on Tuesday to raise adult cash fares by 25 cents, the first increase in three years.\n  text: Staff said rising fuel and labour costs left a projected shortfall of about $4 million.\ncontentinfo:\n  [4] link \"Contact us\" -> cbc.ca",
+    "controls": [
+      { "n": 1, "role": "link", "name": "CBC", "host": "cbc.ca" },
+      { "n": 2, "role": "searchbox", "name": "Search CBC" },
+      { "n": 3, "role": "link", "name": "Sign in", "host": "cbc.ca" },
+      { "n": 4, "role": "link", "name": "Contact us", "host": "cbc.ca" }
+    ],
+    "history": ["20s ago: visited cbc.ca/news/canada/kitchener-waterloo/fare-increase-1.7"],
+    "notes": [],
+    "tabs": [],
+    "now": "2026-09-16T14:04:00-04:00",
+    "eagerness": "eager"
+  },
+  "expect": { "kind": "any", "forbidKinds": ["fill"], "forbidTargets": [3] },
+  "expectLocal": { "kind": "none" }
+}

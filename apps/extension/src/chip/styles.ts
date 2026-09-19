@@ -59,12 +59,12 @@ export const CHIP_CSS = `
   .pending { animation: none; opacity: 0.8; }
   .value.is-fresh { animation: none; }
 }
-/* A control that moves money: a different colour, an Enter keycap, and Tab passes it by. */
-.chip.is-money { background: #f9e2af; color: #1e1e2e; box-shadow: 0 6px 18px rgba(249, 226, 175, 0.35), 0 0 0 1px rgba(30, 30, 46, 0.2); }
-.chip.is-money:hover { background: #f5d88a; }
-.chip.is-money .value { color: #1e1e2e; }
-.chip.is-money .sub { color: #4c4f69; }
-.chip.is-money kbd { background: #1e1e2e; color: #f9e2af; border-color: #1e1e2e; }
+/* Armed: the first Tab landed on something that cannot be undone, so the chip turns amber until the second. */
+.chip.is-armed { background: #f9e2af; color: #1e1e2e; box-shadow: 0 6px 18px rgba(249, 226, 175, 0.35), 0 0 0 1px rgba(30, 30, 46, 0.2); }
+.chip.is-armed:hover { background: #f5d88a; }
+.chip.is-armed .value { color: #1e1e2e; }
+.chip.is-armed .sub { color: #4c4f69; }
+.chip.is-armed kbd { background: #1e1e2e; color: #f9e2af; border-color: #1e1e2e; }
 /* The tab offer has no field to sit beside, so it reads as a banner: larger type, wider, centred. */
 .chip.is-banner {
   max-width: min(640px, calc(100vw - 32px));

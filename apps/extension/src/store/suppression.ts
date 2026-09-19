@@ -1,4 +1,3 @@
-import { elementKey } from '@carat/shared';
 
 /** Key under which a (context, host, field) triple is remembered as consumed or dismissed. */
 export function suppressionKey(contextId: string, host: string, fingerprint: string): string {
@@ -29,5 +28,5 @@ const INTERACT = 'ix';
  * button", whichever tab's text prompted it.
  */
 export function interactSuppressionKey(host: string, role: string, name: string): string {
-  return `${INTERACT}:${host}:${elementKey(role, name)}`;
+  return `${INTERACT}:${host}:${role}|${name.replace(/\s+/g, ' ').trim().toLowerCase()}`;
 }

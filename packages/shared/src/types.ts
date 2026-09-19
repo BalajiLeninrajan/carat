@@ -1,7 +1,7 @@
 import type { Eagerness } from './eagerness';
 import { DEFAULT_EAGERNESS } from './eagerness';
 
-/** `vision` is text a model read off a screenshot of the tab; it is stored and scored like `page`. */
+/** `vision` is text a model read off a screenshot of the tab; it is distilled into notes like any other page. */
 export type ContextKind = 'page' | 'selection' | 'vision';
 
 export interface ContextItem {
@@ -17,202 +17,11 @@ export interface ContextItem {
   lastSeenAt: number;
 }
 
-export interface FieldDescriptor {
-  i: string; // 'f0'..'f11'
-  t: string; // 'input:text' | 'input:search' | 'textarea' | 'ce' | 'combobox' | ...
-  nm?: string; // name or id, <= 40
-  ph?: string; // placeholder, <= 60
-  al?: string; // aria-label, <= 60
-  lb?: string; // label text, <= 60
-  nb?: string; // nearby text, <= 80
-  ac?: string; // autocomplete attr
-  v?: string; // current value, <= 40
-  f?: 1; // focused
-  w?: 's' | 'm' | 'l'; // width bucket
-  o?: 1; // off-screen: outside the viewport when the snapshot was taken
-  fr?: number; // inside a child frame: the top frame's number for it
-  rq?: 1; // required (the `required` attribute or aria-required)
-}
-
-/** Roles carat can act on. Derived from the tag, the input type or an explicit ARIA role; nothing else is described. */
-export type ElementRole =
-  | 'button'
-  | 'link'
-  | 'checkbox'
-  | 'radio'
-  | 'switch'
-  | 'slider'
-  | 'select'
-  | 'tab'
-  | 'menuitem'
-  | 'disclosure'
-  | 'option';
-
-/**
- * One interactive element, as the model sees it. No coordinates, no DOM: a
- * role, an accessible name, the current state or value, the range for
- * sliders, the options for selects, and nearby text.
- */
-export interface ElementDescriptor {
-  i: string; // 'e0'..'e15'
-  r: ElementRole;
-  nm: string; // accessible name, <= 60, never empty
-  st?: 'on' | 'off' | 'open' | 'closed' | 'selected'; // checkbox/switch/radio/disclosure/tab state
-  v?: string; // current value, <= 40 (slider, select); for a link, the host it goes to
-  min?: number; // sliders
-  max?: number;
-  step?: number;
-  op?: string[]; // select options, <= 8 x 20 chars
-  nb?: string; // nearby text, <= 80
-  p?: 1; // the page's primary action (submit button, or styled as primary)
-  o?: 1; // off-screen: outside the viewport when the snapshot was taken
-  sel?: 1; // an option card that is already the chosen one
-  m?: 1; // moves money (Pay, Book now): described only when payments are allowed, accepted with Enter
-  fr?: number; // inside a child frame: the top frame's number for it
-  h?: string; // links only: the destination site, as a registrable domain ('doordash.com')
-}
-
 export interface PageMeta {
   host: string;
   title: string;
   path: string;
   h1?: string;
-}
-
-/**
- * What kind of page the content script thinks it is on, from URL patterns,
- * landmarks, form density and text length. A next-step prior hangs off each:
- * a results page wants its first result, an article wants a scroll, a form
- * its first empty field, a checkout its Continue button, a search app a fill.
- */
-export const PAGE_KINDS = ['serp', 'article', 'form', 'checkout', 'search-app', 'feed', 'unknown'] as const;
-export type PageKind = (typeof PAGE_KINDS)[number];
-
-export function isPageKind(v: unknown): v is PageKind {
-  return typeof v === 'string' && (PAGE_KINDS as readonly string[]).includes(v);
-}
-
-/**
- * The page as a whole, as the next-step predictor needs it. Numbers are in
- * viewports: `y` how far the user has scrolled, `pages` the document height.
- */
-export interface PageState {
-  kind: PageKind;
-  /** The page's own query: a `q`-style URL parameter or the search field's value, <= 80. */
-  q?: string;
-  /** Viewports scrolled so far, one decimal. */
-  y: number;
-  /** Document height in viewports, one decimal. */
-  pages: number;
-  /** There is content below the fold. */
-  more: boolean;
-  /** Actions accepted on this page load (`role|name` element keys, or `scroll`), so nothing is offered twice. */
-  done?: string[];
-}
-
-/**
- * The source id a suggestion cites when the page itself, not another tab's
- * text, is the reason: the first result on a results page, the Continue
- * button on a checkout, a scroll down an article. Never valid for a fill.
- */
-export const PAGE_SOURCE = 'page';
-
-export type RequestContext = Array<Pick<ContextItem, 'id' | 'origin' | 'title' | 'kind' | 'text' | 'capturedAt'>>;
-
-export interface SuggestRequest {
-  page: PageMeta;
-  fields: FieldDescriptor[];
-  /** Interactive elements on the page. Omitted when empty. */
-  elements?: ElementDescriptor[];
-  /** Context ids behind fills carat performed on this tab in the last minute. A click on a Save-like button cites one of them. Omitted when empty. */
-  filled?: string[];
-  /** The page's kind, query and scroll position. Omitted by older snapshots. */
-  state?: PageState;
-  /** Text from other tabs: the only source for field fills. */
-  context: RequestContext;
-  /** Text captured from the requesting tab itself: a source for actions, never for fills. Omitted when empty. */
-  own?: RequestContext;
-  /** A stored task marks this page as a step in an ongoing flow, so its primary action may be clicked. Omitted when false. */
-  flow?: true;
-  now: string; // ISO
-  locale?: string;
-}
-
-/** Destinations carat knows how to build a URL for. The model names one; it never writes the URL. */
-export const INTENTS = ['maps', 'calendar', 'gmail'] as const;
-export type IntentName = (typeof INTENTS)[number];
-
-export function isIntentName(v: unknown): v is IntentName {
-  return typeof v === 'string' && (INTENTS as readonly string[]).includes(v);
-}
-
-/** A value for one field on the current page. */
-export interface FillSuggestion {
-  kind: 'fill';
-  fieldId: string;
-  value: string;
-  confidence: number;
-  reason: string;
-  sourceContextId: string;
-}
-
-/**
- * Something the user may want to do next on another site, extracted from what
- * they are reading. `value` is the entity (place, event title, email address);
- * `when` is an ISO 8601 start with offset or ''; `location` is an address or
- * place name for calendar, else ''.
- */
-export interface ActionSuggestion {
-  kind: 'action';
-  intent: IntentName;
-  value: string;
-  when: string;
-  location: string;
-  confidence: number;
-  reason: string;
-  sourceContextId: string;
-}
-
-/** `scroll` brings an off-screen element into view, or with no element moves the page one viewport down; it never carries a value. */
-export type InteractVerb = 'click' | 'check' | 'uncheck' | 'set' | 'choose' | 'scroll';
-
-/**
- * One interaction with one element on the current page. `value` is the target
- * for `set` (a number as text) and `choose` (an option label); for `click`,
- * `check` and `uncheck` it repeats the element's name; for `scroll` it is ''.
- * A `scroll` with an empty `elementId` is the page itself: one viewport down.
- * The content script performs it, once, after a Tab on the chip.
- */
-export interface InteractSuggestion {
-  kind: 'interact';
-  elementId: string;
-  verb: InteractVerb;
-  value: string;
-  confidence: number;
-  reason: string;
-  sourceContextId: string;
-}
-
-/** What a provider returns. */
-export type Suggestion = FillSuggestion | ActionSuggestion | InteractSuggestion;
-
-/**
- * An action resolved against the registry and the user's open tabs. `open`
- * creates a tab at `url`; `focus` navigates the existing tab `tabId` there and
- * brings it forward. Nothing happens until the user presses Tab on the chip.
- */
-export interface NavSuggestion {
-  kind: 'open' | 'focus';
-  intent: IntentName;
-  label: string; // "Open in Google Maps"
-  value: string;
-  when: string;
-  location: string;
-  url: string;
-  tabId?: number;
-  confidence: number;
-  reason: string;
-  sourceContextId: string;
 }
 
 export interface Settings {
@@ -225,25 +34,19 @@ export interface Settings {
   cfApiToken: string; // Workers AI token; stays in chrome.storage.local like apiKey
   disabledHosts: string[]; // exact hosts (with port) where carat neither reads nor suggests
   statusLine: boolean; // small bottom-right line on every page: running or not, and which model
-  /** Opt-in: screenshot thin source tabs and run the slower smart path. Default off. */
+  /** Opt-in: screenshot thin source tabs and read them into notes. Default off. */
   screenshots: boolean;
   /**
-   * Optional override for the smart path: a text-only second opinion after the
-   * fast answer, and the reader of screenshots at capture time. Blank means the
-   * fast model itself, run with low reasoning instead of none. Whatever it is
-   * must accept images.
+   * Optional override for reading screenshots. Blank means the same model the
+   * engine uses, run with low reasoning instead of none. Whatever it is must
+   * accept images.
    */
   smartModel: string;
   /**
-   * How readily a chip is offered. `eager` (the default) shows any plausible
-   * value; `conservative` only sure ones. See EAGERNESS for what each moves.
+   * How readily a chip is offered. `eager` (the default) always answers;
+   * `conservative` only when the model is sure. See EAGERNESS.
    */
   eagerness: Eagerness;
-  /**
-   * Controls that pay, buy or book may be offered. Off by default. When on,
-   * their chip is accepted with Enter, never Tab. See `mayPay`.
-   */
-  allowPayments: boolean;
 }
 
 /**
@@ -254,7 +57,7 @@ export interface Settings {
  */
 export type ImageCue = 'thin-text' | 'image-heavy';
 
-/** A downscaled screenshot handed to the smart model, plus where, when and why it was taken. */
+/** A downscaled screenshot handed to the vision model, plus where, when and why it was taken. */
 export interface ImageInput {
   dataUrl: string; // data:image/jpeg;base64,...
   title: string;
@@ -277,21 +80,19 @@ export const DEFAULT_SETTINGS: Settings = {
   screenshots: false,
   smartModel: '',
   eagerness: DEFAULT_EAGERNESS,
-  allowPayments: false,
 };
 
 export const LIMITS = {
   titleChars: 80,
   pageTextChars: 4000,
   selectionTextChars: 1000,
-  /** The confidence floor and the per-answer cap depend on the eagerness setting; see EAGERNESS. */
-  maxNavigations: 2,
+  /** The whole engine budget: the placeholder goes out at once, the model has this long behind it. */
   providerTimeoutMs: 6000,
   /** Body text under this many chars marks a source tab as thin enough to screenshot. */
   thinTextChars: 400,
-  /** Whole smart path: waiting for a transcription plus the smart suggest call. */
-  smartTimeoutMs: 15000,
   transcribeTimeoutMs: 20000,
-  /** A fast answer at or above this confidence is not worth a smart call. */
-  smartBelowConfidence: 0.9,
+  /** The notes call on a page the user just left. */
+  distillTimeoutMs: 15000,
+  /** The outline handed to the model, in characters. */
+  outlineChars: 9000,
 } as const;

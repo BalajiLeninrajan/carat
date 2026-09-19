@@ -151,20 +151,10 @@ describe('ContextStore TTL', () => {
     expect(await store.suppressedKeys()).toEqual([]);
   });
 
-  it('expires the suggestion cache after 60s', async () => {
-    const { store, tick } = setup();
-    const s = [{ kind: 'fill' as const, fieldId: 'f0', value: 'v', confidence: 0.9, reason: 'r', sourceContextId: 'c' }];
-    await store.setCached('k', s);
-    expect(await store.getCached('k')).toEqual(s);
-    tick(61_000);
-    expect(await store.getCached('k')).toBeUndefined();
-  });
-
   it('clear wipes everything from memory and storage', async () => {
     const { area, store } = setup();
     await store.upsertPage(page(1, 'some text here'));
     await store.markConsumed('k');
-    await store.setCached('c', []);
     await store.clear();
     expect(await store.items()).toEqual([]);
     expect(await store.suppressedKeys()).toEqual([]);
@@ -269,16 +259,13 @@ describe('settings store', () => {
       screenshots: false,
       smartModel: '',
       eagerness: 'eager',
-      allowPayments: false,
     });
   });
 
-  it('keeps payments off unless a real true was stored', async () => {
-    const area = new FakeArea();
-    const settings = createSettingsStore(area);
-    expect((await settings.set({ allowPayments: true })).allowPayments).toBe(true);
-    expect((await settings.set({ allowPayments: 'true' as unknown as boolean })).allowPayments).toBe(false);
-    expect((await settings.set({ allowPayments: undefined })).allowPayments).toBe(false);
+  it('has no payments setting to store', async () => {
+    const settings = createSettingsStore(new FakeArea());
+    const saved = await settings.set({ allowPayments: true } as never);
+    expect('allowPayments' in saved).toBe(false);
   });
 
   it('keeps eagerness to the three levels and defaults it to eager', async () => {

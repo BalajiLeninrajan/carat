@@ -1,66 +1,70 @@
-import type { ImageInput, Settings, SuggestRequest, Suggestion } from '@carat/shared';
+import type { ImageInput, NextAction, NextActionRequest, Settings } from '@carat/shared';
 import { JevProvider } from './jev';
 import { LocalProvider } from './local';
 import { OpenAICompatProvider } from './openai-compat';
-import type { ReasoningEffort } from './openai-compat';
+import type { ReasoningEffort, RelaxStore } from './openai-compat';
 import { RaceProvider } from './race';
 
-export interface SuggestOptions {
+export interface NextOptions {
   signal: AbortSignal;
   /**
-   * Called for each otherwise valid suggestion the provider dropped for
-   * sitting under the eagerness level's confidence floor, so the popup can
-   * say "2 candidates under the eager floor" rather than "answered with 0".
+   * The target as soon as the streamed JSON carries it, before the label and
+   * the rest have arrived, so the content script can ring the control while
+   * the model is still writing. Called at most once per call.
    */
-  onUnderFloor?: (s: Suggestion) => void;
+  onPartial?: (partial: { target: number | null }) => void;
 }
 
-/** The fast path: text in, suggestions out. Swapping providers only ever means implementing this. */
+/** One page in, one action out. Swapping providers only ever means implementing this. */
 export interface Provider {
   readonly id: Settings['provider'];
-  suggest(req: SuggestRequest, opts: SuggestOptions): Promise<Suggestion[]>;
+  /** The action, or null when this provider has nothing (a failure resolves as a rejection). */
+  next(req: NextActionRequest, opts: NextOptions): Promise<NextAction | null>;
 }
 
-/** The smart path: the same text-only suggest on a bigger model, plus reading a screenshot into text. */
+/** The model that also reads screenshots and distills a page the user left into notes. */
 export interface VisionProvider extends Provider {
   transcribe(image: ImageInput, opts: { signal: AbortSignal }): Promise<string>;
+  distill(text: string, host: string, signal: AbortSignal): Promise<string[]>;
 }
 
 /**
- * local: regex only. Anything else is a race between every source the
- * settings allow, regex always among them: openai/baseten add the chat model
- * when a key is set; cloudflare adds Jev when an account id and token are set
- * and the chat model at baseURL when a key is set too. Without Cloudflare
- * credentials it behaves like openai; with no key at all it is regex alone.
- * The chat model runs with no reasoning: the chip has a 6s budget and the
- * prompt carries the few-shots it needs. Start order is also rank on a tie:
- * chat beats Jev beats regex.
+ * local: the regex placeholder alone, no network. Anything else races the
+ * placeholder against the model so a chip is up in the first tick and the
+ * model replaces it behind a ticket: openai/baseten add the chat model when a
+ * key is set; cloudflare adds Jev when an account id and token are set, and
+ * the chat model at baseURL when a key is set too. Start order is also rank
+ * on a tie: chat beats Jev beats regex.
  */
-export function createProvider(settings: Settings, fetchImpl: typeof fetch = fetch): Provider {
-  if (settings.provider === 'local') return new LocalProvider(settings.eagerness);
-  const sources: Provider[] = [new LocalProvider(settings.eagerness)];
+export function createProvider(settings: Settings, fetchImpl: typeof fetch = fetch, relax?: RelaxStore): Provider {
+  if (settings.provider === 'local') return new LocalProvider();
+  const sources: Provider[] = [new LocalProvider()];
   const jev = settings.provider === 'cloudflare' && settings.cfAccountId && settings.cfApiToken;
-  if (jev) sources.push(new JevProvider({ accountId: settings.cfAccountId, apiToken: settings.cfApiToken, eagerness: settings.eagerness }, fetchImpl));
-  const llm = chatProvider(settings, settings.model, 'none', fetchImpl);
+  if (jev) sources.push(new JevProvider({ accountId: settings.cfAccountId, apiToken: settings.cfApiToken }, fetchImpl));
+  const llm = chatProvider(settings, settings.model, 'none', fetchImpl, relax);
   if (llm) sources.push(llm);
   if (sources.length === 1) return sources[0]!;
   return new RaceProvider(sources, { id: jev ? 'cloudflare' : llm!.id });
 }
 
 /**
- * The same chat model as the fast path by default, with low reasoning
- * instead of none; `smartModel` swaps in a bigger one for those who want it.
- * Same endpoint either way. Undefined when there is no chat model to be
- * smart with: the regex fallback cannot read images, and Jev can neither read
- * an image nor write a value, so a cloudflare setup without a key has no
- * smart path.
+ * The model that reads screenshots and writes notes: the same one by default,
+ * with low reasoning instead of none; `smartModel` swaps in a bigger one.
+ * Undefined when there is no chat model at all, since neither the regex
+ * placeholder nor Jev can read an image or write a sentence.
  */
-export function createSmartProvider(settings: Settings, fetchImpl: typeof fetch = fetch): VisionProvider | undefined {
+export function createVisionProvider(settings: Settings, fetchImpl: typeof fetch = fetch, relax?: RelaxStore): VisionProvider | undefined {
   if (settings.provider === 'local') return undefined;
-  return chatProvider(settings, settings.smartModel || settings.model, 'low', fetchImpl) ?? undefined;
+  return chatProvider(settings, settings.smartModel || settings.model, 'low', fetchImpl, relax) ?? undefined;
 }
 
-function chatProvider(settings: Settings, model: string, effort: ReasoningEffort, fetchImpl: typeof fetch): OpenAICompatProvider | null {
+function chatProvider(
+  settings: Settings,
+  model: string,
+  effort: ReasoningEffort,
+  fetchImpl: typeof fetch,
+  relax: RelaxStore | undefined,
+): OpenAICompatProvider | null {
   if (settings.provider === 'local' || !settings.apiKey) return null;
   const chat: 'openai' | 'baseten' =
     settings.provider === 'cloudflare' ? (isOpenAI(settings.baseURL) ? 'openai' : 'baseten') : settings.provider;
@@ -71,9 +75,9 @@ function chatProvider(settings: Settings, model: string, effort: ReasoningEffort
       apiKey: settings.apiKey,
       model,
       mode: chat === 'openai' ? 'json_schema' : 'json_object',
-      eagerness: settings.eagerness,
       // Only OpenAI's own endpoint is known to take reasoning_effort; a vLLM or Baseten server may 400 on it.
       ...(isOpenAI(settings.baseURL) ? { reasoningEffort: effort } : {}),
+      ...(relax ? { relaxStore: relax } : {}),
     },
     fetchImpl,
   );

@@ -4,91 +4,83 @@ import { CHIP_CSS } from './styles';
 
 export type DismissReason = 'escape' | 'timeout' | 'typed' | 'detached';
 
-/** The key that accepts a chip. Tab for everything but a control that moves money, which takes Enter and lets Tab through. */
-export type AcceptKey = 'Tab' | 'Enter';
+/** Tab accepts everything now; an irreversible action simply wants it twice. */
+export type AcceptKey = 'Tab';
 
-/** A key or a keystroke that happened in a frame the chip cannot listen to itself, relayed by that frame's agent. */
+/** A key, or a keystroke, heard in a frame the chip cannot listen to itself, relayed by that frame's agent. */
 export type RelayedKey = AcceptKey | 'Escape' | 'typed';
 
 interface ChipCallbacks {
-  /** Called after the chip has hidden itself; the caller performs the fill or the navigation. */
+  /** Called after the chip has hidden itself; the caller performs the action. */
   onAccept: () => void;
   onDismiss: (reason: DismissReason) => void;
+  /** The first Tab on an irreversible action armed the chip; the second will act. */
+  onArm?: () => void;
 }
 
-/** What both chip shapes say besides the value. */
 interface ChipText extends ChipCallbacks {
-  value: string;
+  /** What the chip says, in the imperative: `Click "Proceed to checkout"`. */
+  label: string;
   /** Second line under the offer: where the value came from, e.g. "from discord.com · 2m ago". */
   detail?: string;
   /** Why it was offered; shown as the native tooltip on hover. */
   reason?: string;
-  /**
-   * A refine ticket is still open, so the model may yet replace this value.
-   * The chip carries a pulsing dot until `settle()`.
-   */
+  /** The model may still replace this action; the chip carries a pulsing dot until `settle()`. */
   pending?: boolean;
-  /** Default Tab. Enter marks a money control: the keycap changes, the colour changes, and Tab is not taken. */
-  key?: AcceptKey;
+  /** Sending, paying, deleting: the first Tab arms the chip, the second acts. */
+  irreversible?: boolean;
 }
 
 export interface ChipShowOptions extends ChipText {
   target: Element;
-  /** The word before the quoted value: "Fill" (default), "Click", "Check", "Set"... */
-  verb?: string;
-  /** Text after the quoted value and before the question mark: " to 40". */
-  tail?: string;
   /**
    * An element Tab is also taken from, besides the target: the field carat
    * just filled, which still holds focus while the next chip is up.
    */
   interceptFrom?: Element | null;
   /**
-   * Where the chip sits when the target's own box is not the answer: a field
-   * inside a cross-origin frame, whose box the frame reported. Null means
-   * off-screen right now.
+   * Where the chip sits when the target's own box is not the answer: a
+   * control inside a cross-origin frame, whose box the frame reported. Null
+   * means off-screen right now.
    */
   anchor?: () => DOMRect | null;
 }
 
-/** A chip with no field: a larger banner centred at the bottom of the viewport that takes Tab from anywhere on the page. */
-export interface CornerShowOptions extends ChipText {
-  label: string; // "Open in Google Maps"
-  /** Leave out the colon after the label: `Scroll to "Save"?` rather than `Open in Google Maps: "Seven Shores Cafe"?`. */
-  bare?: boolean;
-  /**
-   * The element the banner is about, when it has one (the off-screen target
-   * of a scroll). With it, Tab is taken only when nothing else could want it,
-   * by the same rule as a field chip; without it, from anywhere.
-   */
+/** A chip with no control of its own: a banner centred at the bottom that takes Tab from anywhere on the page. */
+export interface BannerShowOptions extends ChipText {
+  /** The element the banner is about, when it has one. With it, Tab is taken by the same rule as a chip. */
   target?: Element;
   interceptFrom?: Element | null;
 }
 
 export interface Chip {
   show(opts: ChipShowOptions): void;
-  showCorner(opts: CornerShowOptions): void;
-  /** The value on screen is final: drop the indicator and the tooltip's waiting line, keep the chip. */
+  showBanner(opts: BannerShowOptions): void;
+  /** Ring a control while the rest of the action is still being written. */
+  ring(target: Element): void;
+  /** The action on screen is final: drop the indicator and the tooltip's waiting line, keep the chip. */
   settle(): void;
   hide(): void;
   destroy(): void;
-  /** A key pressed inside a frame this chip cannot hear: accept on the chip's own key, dismiss on Escape or typing, ignore the rest. */
+  /** A key pressed inside a frame this chip cannot hear: Tab accepts (or arms), Escape and typing dismiss. */
   relay(key: RelayedKey): void;
   readonly visible: boolean;
-  /** The words on the chip, e.g. `Click "Save"?`; the shadow root is closed, so tests read it here. */
+  /** The words on the chip; the shadow root is closed, so tests read it here. */
   readonly text: string;
   /** Whether the indicator is up; the shadow root is closed, so tests read it here. */
   readonly pending: boolean;
-  /** The key the chip currently takes. */
-  readonly key: AcceptKey;
+  /** Whether the first Tab of an irreversible action has landed. */
+  readonly armed: boolean;
 }
 
 export const AUTO_DISMISS_MS = 20_000;
 export const CORNER_INSET_PX = 24;
+/** How long an armed chip waits for the second Tab before it stands down. */
+export const ARM_MS = 4000;
 /** Appended to the chip's reason while a better answer may still land. */
 export const PENDING_HINT = 'checking with the model…';
-const VALUE_MAX = 40;
 const HOST_ATTR = 'data-carat-chip';
+const RING_ATTR = 'data-carat-ring';
 
 interface SessionBase extends ChipCallbacks {
   timer: ReturnType<typeof setTimeout>;
@@ -96,20 +88,21 @@ interface SessionBase extends ChipCallbacks {
   /** When set, the key defers to a text field that has focus unless it is this or `interceptFrom`. */
   target: Element | null;
   interceptFrom: Element | null;
-  key: AcceptKey;
+  irreversible: boolean;
+  label: string;
   /** The window of a same-origin child frame the target lives in; its keys never reach the top window. */
   targetWin: Window | null;
 }
-interface FieldSession extends SessionBase {
-  mode: 'field';
+interface ControlSession extends SessionBase {
+  mode: 'control';
   target: Element;
   observer: ResizeObserver | null;
   anchor: (() => DOMRect | null) | null;
 }
-interface CornerSession extends SessionBase {
-  mode: 'corner';
+interface BannerSession extends SessionBase {
+  mode: 'banner';
 }
-type Session = FieldSession | CornerSession;
+type Session = ControlSession | BannerSession;
 
 export function createChip(doc: Document = document): Chip {
   const host = doc.createElement('div');
@@ -137,8 +130,17 @@ export function createChip(doc: Document = document): Chip {
   pill.append(text, spinner, key);
   root.append(style, pill);
 
+  // The ring lives in its own host: it goes up on the target as soon as the
+  // model names it, before there is anything to say about it.
+  const ringHost = doc.createElement('div');
+  ringHost.setAttribute(RING_ATTR, '');
+  ringHost.style.cssText = 'all:initial;position:fixed;pointer-events:none;z-index:2147483646;display:none;border-radius:7px;border:2px solid #89b4fa;box-shadow:0 0 0 4px rgba(137,180,250,.18);';
+  let ringTarget: Element | null = null;
+
   let session: Session | null = null;
   let pending = false;
+  let armed = false;
+  let armTimer: ReturnType<typeof setTimeout> | undefined;
   // The reason on its own, so the waiting line can go on and come off it.
   let reason = '';
   const win = doc.defaultView ?? window;
@@ -154,9 +156,12 @@ export function createChip(doc: Document = document): Chip {
       dismiss('escape');
       return;
     }
-    // A money chip takes Enter and nothing else; Tab goes wherever the page sends it.
-    if (e.key !== session.key || e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) return;
-    // A tab-offer banner has no field of its own to defer to; Tab is its whole interface.
+    if (e.key !== 'Tab' || e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) {
+      // Any other key means the user moved on: an armed chip stands down rather than acting on the next Tab.
+      if (armed) disarm();
+      return;
+    }
+    // A banner has no control of its own to defer to; Tab is its whole interface.
     if (session.target && !shouldInterceptTab(deepActiveElement(doc), session.target, session.interceptFrom)) return;
     e.preventDefault();
     e.stopImmediatePropagation();
@@ -172,7 +177,8 @@ export function createChip(doc: Document = document): Chip {
   const onMousedown = (e: MouseEvent): void => e.preventDefault();
 
   const reposition = (): void => {
-    if (!session || session.mode !== 'field') return;
+    positionRing();
+    if (!session || session.mode !== 'control') return;
     if (!session.target.isConnected) {
       dismiss('detached');
       return;
@@ -213,18 +219,22 @@ export function createChip(doc: Document = document): Chip {
     else pill.removeAttribute('title');
   }
 
-  function mount(verb: string, tail: string, opts: ChipText, fresh: boolean): SessionBase {
+  function render(): void {
+    const s = session;
+    if (!s) return;
+    label.textContent = armed ? `Press Tab again to ${lower(s.label)}` : s.label;
+    pill.classList.toggle('is-armed', armed);
+  }
+
+  function mount(opts: ChipText): SessionBase {
+    const keepRing = ringTarget;
     hide();
-    // A banner with nothing to quote says only its verb: `Scroll down?`.
-    if (opts.value === '') label.replaceChildren(`${verb}${tail}?`);
-    else label.replaceChildren(`${verb} `, valueNode(opts.value, fresh), `${tail}?`);
+    ringTarget = keepRing;
     sub.textContent = opts.detail ?? '';
     sub.hidden = !opts.detail;
     reason = opts.reason ?? '';
     setPending(opts.pending === true);
-    const acceptKey: AcceptKey = opts.key ?? 'Tab';
-    key.textContent = acceptKey;
-    pill.classList.toggle('is-money', acceptKey === 'Enter');
+    key.textContent = 'Tab';
     if (!host.isConnected) doc.documentElement.appendChild(host);
     // Capture phase so the page's own Tab handlers never see an accepted Tab.
     win.addEventListener('keydown', onKeydown, true);
@@ -233,26 +243,28 @@ export function createChip(doc: Document = document): Chip {
     return {
       onAccept: opts.onAccept,
       onDismiss: opts.onDismiss,
+      ...(opts.onArm ? { onArm: opts.onArm } : {}),
       onScreen: false,
       target: null,
       interceptFrom: null,
-      key: acceptKey,
+      irreversible: opts.irreversible === true,
+      label: opts.label,
       targetWin: null,
       timer: setTimeout(() => dismiss('timeout'), AUTO_DISMISS_MS),
     };
   }
 
   function show(opts: ChipShowOptions): void {
-    // Re-showing on the same field is a value swap: the word changes, the chip does not move.
-    const swap = session?.mode === 'field' && session.target === opts.target && session.onScreen;
+    // Re-showing on the same control is a swap: the words change, the chip does not move.
+    const swap = session?.mode === 'control' && session.target === opts.target && session.onScreen;
     const held = swap ? { top: host.style.top, left: host.style.left } : null;
-    const base = mount(opts.verb ?? 'Fill', opts.tail ?? '', opts, swap);
+    const base = mount(opts);
     const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(() => reposition()) : null;
     observer?.observe(opts.target);
     const targetWin = opts.target.ownerDocument.defaultView;
     session = {
       ...base,
-      mode: 'field',
+      mode: 'control',
       target: opts.target,
       interceptFrom: opts.interceptFrom ?? null,
       observer,
@@ -271,18 +283,19 @@ export function createChip(doc: Document = document): Chip {
     opts.target.addEventListener('input', onTyped);
     // Typing on in the field carat just filled means the user is busy there, not ready for the next chip.
     opts.interceptFrom?.addEventListener('input', onTyped);
+    ring(opts.target);
+    render();
     reposition();
-    // A longer value would shift the pill out from under the user's eye; put it back.
+    // A longer label would shift the pill out from under the user's eye; put it back.
     if (held && host.style.display !== 'none') {
       host.style.top = held.top;
       host.style.left = held.left;
     }
   }
 
-  function showCorner(opts: CornerShowOptions): void {
-    const swap = session?.mode === 'corner';
-    const base = mount(opts.bare ? opts.label : `${opts.label}:`, '', opts, swap);
-    session = { ...base, mode: 'corner', onScreen: true, target: opts.target ?? null, interceptFrom: opts.interceptFrom ?? null };
+  function showBanner(opts: BannerShowOptions): void {
+    const base = mount(opts);
+    session = { ...base, mode: 'banner', onScreen: true, target: opts.target ?? null, interceptFrom: opts.interceptFrom ?? null };
     pill.classList.add('is-banner');
     host.style.top = 'auto';
     host.style.right = 'auto';
@@ -290,19 +303,51 @@ export function createChip(doc: Document = document): Chip {
     host.style.bottom = `${CORNER_INSET_PX}px`;
     host.style.transform = 'translateX(-50%)';
     host.style.display = 'block';
+    render();
     // Typing anywhere means the user is busy; the offer gets out of the way.
     doc.addEventListener('input', onTyped, true);
   }
 
+  /** Put the ring on a control before there is anything to say about it. */
+  function ring(target: Element): void {
+    ringTarget = target;
+    if (!ringHost.isConnected) doc.documentElement.appendChild(ringHost);
+    ringHost.style.display = 'block';
+    ringHost.style.borderStyle = session ? 'solid' : 'dashed';
+    positionRing();
+  }
+
+  function positionRing(): void {
+    if (!ringTarget) return;
+    if (!ringTarget.isConnected) {
+      clearRing();
+      return;
+    }
+    const r = ringTarget.getBoundingClientRect();
+    ringHost.style.left = `${Math.round(r.left - 3)}px`;
+    ringHost.style.top = `${Math.round(r.top - 3)}px`;
+    ringHost.style.width = `${Math.round(r.width + 6)}px`;
+    ringHost.style.height = `${Math.round(r.height + 6)}px`;
+    ringHost.style.borderColor = armed ? '#f9e2af' : '#89b4fa';
+  }
+
+  function clearRing(): void {
+    ringTarget = null;
+    ringHost.style.display = 'none';
+  }
+
   function hide(): void {
+    clearRing();
     if (!session) return;
     const s = session;
     session = null;
     clearTimeout(s.timer);
+    clearTimeout(armTimer);
+    armed = false;
     win.removeEventListener('keydown', onKeydown, true);
     pill.removeEventListener('click', onClick);
     pill.removeEventListener('mousedown', onMousedown);
-    if (s.mode === 'field') {
+    if (s.mode === 'control') {
       s.observer?.disconnect();
       win.removeEventListener('scroll', reposition, true);
       win.removeEventListener('resize', reposition);
@@ -322,43 +367,63 @@ export function createChip(doc: Document = document): Chip {
     if (pending) setPending(false);
   }
 
+  function arm(): void {
+    const s = session;
+    if (!s) return;
+    armed = true;
+    render();
+    positionRing();
+    clearTimeout(armTimer);
+    armTimer = setTimeout(() => {
+      if (session === s) disarm();
+    }, ARM_MS);
+    s.onArm?.();
+  }
+
+  function disarm(): void {
+    if (!armed) return;
+    armed = false;
+    clearTimeout(armTimer);
+    render();
+    positionRing();
+  }
+
   function accept(): void {
     const s = session;
     if (!s) return;
+    // Anything that cannot be undone takes a second Tab, and says so in between.
+    if (s.irreversible && !armed) {
+      arm();
+      return;
+    }
     hide();
     s.onAccept();
   }
 
-  function dismiss(reason: DismissReason): void {
+  function dismiss(why: DismissReason): void {
     const s = session;
     if (!s) return;
     hide();
-    s.onDismiss(reason);
+    s.onDismiss(why);
   }
 
   function relay(k: RelayedKey): void {
     if (!session || !session.onScreen) return;
     if (k === 'Escape') dismiss('escape');
     else if (k === 'typed') dismiss('typed');
-    else if (k === session.key) accept();
+    else accept();
   }
 
   function destroy(): void {
     hide();
     host.remove();
-  }
-
-  function valueNode(value: string, fresh: boolean): HTMLElement {
-    const span = doc.createElement('span');
-    span.className = fresh ? 'value is-fresh' : 'value';
-    const shown = value.length > VALUE_MAX ? `${value.slice(0, VALUE_MAX - 1)}…` : value;
-    span.textContent = `"${shown}"`;
-    return span;
+    ringHost.remove();
   }
 
   return {
     show,
-    showCorner,
+    showBanner,
+    ring,
     settle,
     hide,
     destroy,
@@ -372,8 +437,13 @@ export function createChip(doc: Document = document): Chip {
     get pending() {
       return pending;
     },
-    get key() {
-      return session?.key ?? 'Tab';
+    get armed() {
+      return armed;
     },
   };
+}
+
+/** `Click "Save"` reads as `Press Tab again to click "Save"`. */
+function lower(label: string): string {
+  return label.charAt(0).toLowerCase() + label.slice(1);
 }

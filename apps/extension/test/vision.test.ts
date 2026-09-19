@@ -63,7 +63,7 @@ function pipeline(over: Partial<VisionDeps> = {}) {
     shots,
     settings: async () => on,
     tabs,
-    createSmartProvider: () => ({ transcribe }),
+    createVisionProvider: () => ({ transcribe }),
     downscale: async (d) => `${d}#small`,
     ...over,
   };
@@ -142,7 +142,7 @@ describe('vision pipeline', () => {
       [1, 'no-shot'],
       [1, 'dropped'],
     ]);
-    const short = pipeline({ onDiag: (_t, d) => seen.push([0, d.verdict]), createSmartProvider: () => ({ transcribe: async () => 'x' }) });
+    const short = pipeline({ onDiag: (_t, d) => seen.push([0, d.verdict]), createVisionProvider: () => ({ transcribe: async () => 'x' }) });
     await short.vision.handle(cue(), 1);
     await short.vision.handle(cue({ action: 'leaving' }), 1);
     await short.vision.settled();
@@ -215,10 +215,10 @@ describe('vision pipeline', () => {
     expect(none.transcribe).not.toHaveBeenCalled();
 
     for (const over of [
-      { createSmartProvider: () => ({ transcribe: async () => 'too short' }) },
-      { createSmartProvider: () => undefined },
+      { createVisionProvider: () => ({ transcribe: async () => 'too short' }) },
+      { createVisionProvider: () => undefined },
       {
-        createSmartProvider: () => ({
+        createVisionProvider: () => ({
           transcribe: async () => {
             throw new Error('HTTP 500');
           },
@@ -247,7 +247,7 @@ describe('vision pipeline', () => {
   it('never blocks on the model: handle() returns while a slow transcription is still pending', async () => {
     let finish!: (text: string) => void;
     const { vision, store } = pipeline({
-      createSmartProvider: () => ({ transcribe: () => new Promise<string>((resolve) => (finish = resolve)) }),
+      createVisionProvider: () => ({ transcribe: () => new Promise<string>((resolve) => (finish = resolve)) }),
     });
     await vision.handle(cue(), 1);
     const started = performance.now();
@@ -315,54 +315,39 @@ describe('downscale', () => {
 });
 
 describe('RefineQueue', () => {
-  const answer = { suggestions: [{ kind: 'fill' as const, fieldId: 'f0', value: 'x', confidence: 0.9, reason: '', sourceContextId: 'c' }], interactions: [] };
-  const none = { suggestions: [], interactions: [] };
-
-  it('answers a ticket once, and only for the tab it was issued to', async () => {
+  it('hands each update to the tab it was issued to, and nothing to anyone else', async () => {
     const queue = new RefineQueue(() => undefined);
-    const ticket = queue.add(4, Promise.resolve(answer));
-    expect(queue.add(4, Promise.resolve(answer))).not.toBe(ticket);
-    expect(await queue.claim(ticket, 5)).toEqual(none);
-    expect(await queue.claim('nope', 4)).toEqual(none);
-    expect(await queue.claim(ticket, 4)).toEqual(answer);
-    expect(await queue.claim(ticket, 4)).toEqual(none);
+    const ticket = queue.open(4);
+    ticket.push({ target: 3 });
+    ticket.close();
+    expect(await queue.claim(ticket.id, 5)).toEqual({});
+    expect(await queue.claim('nope', 4)).toEqual({});
+    expect(await queue.claim(ticket.id, 4)).toEqual({ target: 3 });
+    expect(await queue.claim(ticket.id, 4)).toEqual({});
   });
 
-  it('turns a failed smart call into nothing and forgets an unclaimed ticket after the grace period', async () => {
+  it('marks more while the ticket is open, and forgets an unclaimed one after the grace period', async () => {
     const timers: Array<() => void> = [];
     const queue = new RefineQueue((fn) => timers.push(fn));
-    const ticket = queue.add(1, Promise.reject(new Error('boom')));
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(await queue.claim(ticket, 1)).toEqual(none);
-    const kept = queue.add(1, Promise.resolve(answer));
-    await Promise.resolve();
-    await Promise.resolve();
+    const ticket = queue.open(1);
+    ticket.push({ target: 2 });
+    ticket.push({ action: null });
+    expect(await queue.claim(ticket.id, 1)).toEqual({ target: 2, more: true });
+    ticket.close();
+    expect(await queue.claim(ticket.id, 1)).toEqual({ action: null });
+    const kept = queue.open(1);
+    kept.close();
     expect(queue.size).toBe(1);
     timers.forEach((fn) => fn());
     expect(queue.size).toBe(0);
-    expect(await queue.claim(kept, 1)).toEqual(none);
   });
 
-  it('answers an open ticket as often as it is pushed to, says more while it is open, and nothing once closed and drained', async () => {
-    const timers: Array<() => void> = [];
-    const queue = new RefineQueue((fn) => timers.push(fn));
+  it('waits for the next update rather than answering nothing while the ticket is open', async () => {
+    const queue = new RefineQueue(() => undefined);
     const ticket = queue.open(2);
-    const waiting = queue.claim(ticket.id, 2);
-    ticket.push(answer);
-    expect(await waiting).toEqual({ ...answer, more: true });
-    ticket.push(answer);
+    const pending = queue.claim(ticket.id, 2);
+    ticket.push({ target: 7 });
     ticket.close();
-    expect(await queue.claim(ticket.id, 2)).toEqual(answer);
-    expect(await queue.claim(ticket.id, 2)).toEqual(none);
-    ticket.push(answer); // ignored once closed
-    expect(queue.size).toBe(0);
-
-    // A poll waiting when the ticket closes with nothing gets nothing.
-    const empty = queue.open(2);
-    const poll = queue.claim(empty.id, 2);
-    empty.close();
-    expect(await poll).toEqual(none);
-    expect(timers).toHaveLength(2);
+    expect(await pending).toEqual({ target: 7 });
   });
 });

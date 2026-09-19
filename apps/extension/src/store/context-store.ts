@@ -1,4 +1,4 @@
-import type { ContextItem, Suggestion } from '@carat/shared';
+import type { ContextItem } from '@carat/shared';
 import { LIMITS, hashText, normalizeWhitespace, truncate } from '@carat/shared';
 import { STORE_KEYS, STORE_LIMITS, type StoreKey } from './limits';
 import type { StorageArea } from './storage-area';
@@ -8,11 +8,6 @@ export interface CaptureInput {
   url: string;
   title: string;
   text: string;
-}
-
-interface CacheEntry {
-  suggestions: Suggestion[];
-  expiresAt: number;
 }
 
 /** key -> expiresAt */
@@ -27,7 +22,6 @@ interface State {
   ctx: ContextItem[];
   consumed: ExpiringSet;
   dismissed: ExpiringSet;
-  cache: Record<string, CacheEntry>;
   /** When the store was pinned, or 0. While pinned its clock stands still. */
   pinned: number;
   /** tabId -> fills carat performed there, newest last. Tells a provider a Save click is due. */
@@ -66,7 +60,6 @@ export class ContextStore {
           ctx: Array.isArray(raw.ctx) ? (raw.ctx as ContextItem[]) : [],
           consumed: asRecord<number>(raw.consumed),
           dismissed: asRecord<number>(raw.dismissed),
-          cache: asRecord<CacheEntry>(raw.cache),
           pinned: typeof raw.pinned === 'number' ? raw.pinned : 0,
           filled: asRecord<FilledEntry[]>(raw.filled),
         };
@@ -227,24 +220,6 @@ export class ContextStore {
     return [...new Set(live.map((f) => f.contextId))];
   }
 
-  async getCached(key: string): Promise<Suggestion[] | undefined> {
-    await this.load();
-    const entry = this.state.cache[key];
-    if (!entry) return undefined;
-    if (entry.expiresAt <= this.at()) {
-      delete this.state.cache[key];
-      this.write(['cache']);
-      return undefined;
-    }
-    return entry.suggestions;
-  }
-
-  async setCached(key: string, suggestions: Suggestion[]): Promise<void> {
-    await this.load();
-    this.state.cache[key] = { suggestions, expiresAt: this.at() + STORE_LIMITS.cacheTtlMs };
-    this.commit(['cache']);
-  }
-
   async clear(): Promise<void> {
     await this.load();
     this.state = emptyState();
@@ -271,14 +246,6 @@ export class ContextStore {
     if (this.state.ctx.length !== before) changed.push('ctx');
     if (pruneExpiring(this.state.consumed, now)) changed.push('consumed');
     if (pruneExpiring(this.state.dismissed, now)) changed.push('dismissed');
-    let cacheChanged = false;
-    for (const [k, v] of Object.entries(this.state.cache)) {
-      if (v.expiresAt <= now) {
-        delete this.state.cache[k];
-        cacheChanged = true;
-      }
-    }
-    if (cacheChanged) changed.push('cache');
     const cutoff = now - STORE_LIMITS.filledTtlMs;
     let filledChanged = false;
     for (const [tab, list] of Object.entries(this.state.filled)) {
@@ -330,7 +297,7 @@ export class ContextStore {
 }
 
 function emptyState(): State {
-  return { ctx: [], consumed: {}, dismissed: {}, cache: {}, pinned: 0, filled: {} };
+  return { ctx: [], consumed: {}, dismissed: {}, pinned: 0, filled: {} };
 }
 
 function asRecord<T>(v: unknown): Record<string, T> {

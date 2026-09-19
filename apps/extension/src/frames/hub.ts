@@ -1,4 +1,5 @@
 import type { AcceptKey, RelayedKey } from '../chip';
+import type { FrameOutline } from '../outline';
 import { anchorInFrame } from '../chip/position';
 import type { ScriptContext } from '../content/context';
 import type { FrameReport, PerformReply, PerformRequest, ToChild, ToTop } from './protocol';
@@ -29,6 +30,8 @@ export interface FrameHubOptions {
 export interface FrameHub {
   /** Every frame heard from lately, whose element is still on the page. */
   frames(): KnownFrame[];
+  /** What the outline splices in for each of those frames. */
+  outlines(): FrameOutline[];
   /** Ask every known frame to report again; resolves when all have, or after the wait. */
   refresh(waitMs?: number): Promise<void>;
   perform(frame: KnownFrame, req: PerformRequest, timeoutMs?: number): Promise<PerformReply>;
@@ -154,6 +157,10 @@ export function createFrameHub(ctx: ScriptContext, doc: Document, opts: FrameHub
 
   return {
     frames,
+    outlines: () =>
+      frames()
+        .filter((f) => (f.report.controls?.length ?? 0) > 0)
+        .map((f) => ({ frame: f.iframe, token: f.token, controls: f.report.controls ?? [] })),
     refresh,
     perform,
     arm,
@@ -197,5 +204,5 @@ function contains(win: Window, source: Window, depth: number): boolean {
 function validReport(r: unknown): r is FrameReport {
   if (!r || typeof r !== 'object') return false;
   const o = r as Partial<FrameReport>;
-  return Array.isArray(o.fields) && Array.isArray(o.elements) && !!o.rects && !!o.fingerprints && !!o.entries;
+  return Array.isArray(o.controls) && !!o.rects;
 }

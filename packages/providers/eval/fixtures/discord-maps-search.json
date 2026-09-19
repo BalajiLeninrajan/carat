@@ -1,22 +1,27 @@
 {
   "name": "discord-maps-search",
   "request": {
-    "page": { "host": "www.google.com", "title": "Google Maps", "path": "/maps" },
-    "fields": [
-      { "i": "f0", "t": "input:text", "nm": "searchboxinput", "ph": "Search Google Maps", "al": "Search Google Maps", "f": 1, "w": "l" }
+    "page": {
+      "host": "www.google.com",
+      "title": "Google Maps",
+      "path": "/maps",
+      "scroll": { "y": 0, "pages": 1, "more": false }
+    },
+    "outline": "search:\n  >> FOCUSED [1] searchbox \"Search Google Maps\"\nmain:\n  [2] button \"Directions\"\n  [3] button \"Saved\"\n  [4] button \"Recents\"\ncomplementary:\n  [5] link \"Google apps\"",
+    "controls": [
+      { "n": 1, "role": "searchbox", "name": "Search Google Maps" },
+      { "n": 2, "role": "button", "name": "Directions" },
+      { "n": 3, "role": "button", "name": "Saved" },
+      { "n": 4, "role": "button", "name": "Recents" },
+      { "n": 5, "role": "link", "name": "Google apps", "host": "google.com" }
     ],
-    "context": [
-      {
-        "id": "c1",
-        "origin": "https://discord.com",
-        "title": "Discord | #general | Waterloo Friends",
-        "kind": "page",
-        "text": "Discord | #general | Waterloo Friends discord.com #general Today alex 1:52 PM ok so who's around this weekend sam 1:55 PM me, free after work fri priya 1:58 PM same alex 2:01 PM dinner at Seven Shores Cafe, Friday at 6? sam 2:02 PM sounds good, see you there priya 2:03 PM in. can someone send the address later alex 2:03 PM will do Message #general",
-        "capturedAt": 1758046800000
-      }
-    ],
+    "focused": 1,
+    "history": ["3m ago: read discord.com/channels/1/2", "4s ago: opened a new tab on www.google.com/maps"],
+    "notes": ["Alex proposed dinner at Seven Shores Cafe on Friday at 6, and Sam and Priya agreed."],
+    "tabs": [{ "id": 8, "host": "discord.com", "title": "Discord | #general | Waterloo Friends" }],
     "now": "2026-09-16T14:04:00-04:00",
-    "locale": "en-CA"
+    "eagerness": "eager"
   },
-  "expect": [{ "fieldId": "f0", "valueIncludes": "Seven Shores Cafe" }]
+  "expect": { "kind": "fill", "target": 1, "valueIncludes": "Seven Shores Cafe", "irreversible": false },
+  "expectLocal": { "kind": "fill", "target": 1, "valueIncludes": "Seven Shores Cafe" }
 }

@@ -1,17 +1,8 @@
 import { defineExtensionMessaging } from '@webext-core/messaging';
 import type { GetDataType, GetReturnType } from '@webext-core/messaging';
-import type {
-  ContextItem,
-  ElementDescriptor,
-  FieldDescriptor,
-  FillSuggestion,
-  InteractSuggestion,
-  NavSuggestion,
-  PageMeta,
-  PageState,
-  Settings,
-} from '@carat/shared';
+import type { ContextItem, NextAction, NextActionRequest, Settings } from '@carat/shared';
 import type { TabDiag } from './background/diag';
+import type { HistoryEntry } from './history';
 import type { FeedbackInput } from './background/feedback';
 import type { StatusInfo } from './background/status';
 import type { VisionCue } from './background/vision';
@@ -20,47 +11,62 @@ export type KnownItem = Pick<ContextItem, 'id' | 'origin' | 'title' | 'kind' | '
   preview: string;
 };
 
-/** Where a suggestion came from, as much as a content script may know: the host and when it was read. */
-export interface SuggestionSource {
-  host: string;
-  capturedAt: number;
-}
+/**
+ * What the content script knows: the page, its outline, the numbered controls
+ * and which one has focus. The background adds the history, the notes, the
+ * open tabs, the time and the eagerness level before the request reaches a
+ * provider.
+ */
+export type PageSnapshot = Pick<NextActionRequest, 'page' | 'outline' | 'controls' | 'focused'> & {
+  /** The page has a visible password field: never read, never acted on. */
+  password?: boolean;
+  /** The user asked with the shortcut: past the cache and past what they dismissed. */
+  force?: boolean;
+};
 
-export type SuggestionView = FillSuggestion & { source?: SuggestionSource };
-export type NavigationView = NavSuggestion & { source?: SuggestionSource };
-export type InteractionView = InteractSuggestion & { source?: SuggestionSource };
-
-export interface SuggestResponse {
-  suggestions: SuggestionView[];
-  navigation: NavigationView[];
-  /** Resolved against `elements` in the request; the content script performs one after a Tab. */
-  interactions: InteractionView[];
-  /** Set when a better answer may still come (the chat model, the smart model); the content script polls `suggestRefine` with it. */
+export interface NextActionResponse {
+  /** The action to show now, or null when there is nothing yet. */
+  action: NextAction | null;
+  /** Set when a better answer may still come; the content script polls `nextActionRefine` with it. */
   ticket?: string;
 }
 
 /**
- * A later answer: fills and interactions folded over what the chip already
- * shows. Tab offers are never refined. `more` says the ticket is still open
- * and the content script should poll again for the next one.
+ * A later word on the same request. `target` alone moves the ring before the
+ * model has finished writing; `action` replaces what the chip shows. `more`
+ * says the ticket is still open and the content script should poll again.
  */
-export type RefineResponse = Pick<SuggestResponse, 'suggestions' | 'interactions'> & { more?: boolean };
+export interface ActionUpdate {
+  target?: number;
+  action?: NextAction | null;
+  more?: boolean;
+}
+
+/** Tab or Esc on the chip, and how the action ended if it was performed. */
+export interface PerformedAction {
+  kind: NextAction['kind'];
+  label: string;
+  /** The control's accessible name, for the timeline line. */
+  name?: string;
+  host: string;
+}
 
 // Background handles every message but `forceSuggest`, which it sends to one
-// tab's content script when the keyboard shortcut fires. Content scripts and
-// extension pages otherwise only send.
+// tab's content script when the keyboard shortcut fires.
 export interface Protocol {
-  capture(data: { url: string; title: string; text: string; kind: 'page' | 'selection' }): void;
-  /** `force` skips the answer cache and the dismissed/consumed filter: the user asked out loud. */
-  suggestRequest(data: { page: PageMeta; fields: FieldDescriptor[]; elements?: ElementDescriptor[]; state?: PageState; force?: boolean }): SuggestResponse;
-  /** Long-poll for the next answer on a fast reply's `ticket`; polled again while the answer says `more`. */
-  suggestRefine(data: { ticket: string }): RefineResponse;
+  capture(data: { url: string; title: string; text: string; kind: 'page' | 'selection'; leaving?: boolean }): void;
+  /** What the user just did on the page: clicks and typing, for the per-tab timeline. */
+  history(data: { entries: HistoryEntry[] }): void;
+  /** One page in, one action out. */
+  nextAction(data: PageSnapshot): NextActionResponse;
+  /** Long-poll for the next word on a reply's `ticket`; polled again while the answer says `more`. */
+  nextActionRefine(data: { ticket: string }): ActionUpdate;
   /** Screenshot cues from a tab; see VisionCue. */
   vision(data: VisionCue): void;
   forceSuggest(): void;
   feedback(data: FeedbackInput): void;
-  /** Sent only from a navigation chip's Tab press; the background rebuilds the URL before acting. */
-  navigate(data: NavSuggestion): { ok: boolean };
+  /** Sent only from a Tab press on an `open` or `switch` chip; the background rebuilds the URL from the registry. */
+  navigate(data: { kind: 'open' | 'switch'; value: string }): { ok: boolean };
   getKnown(): { items: KnownItem[]; pinned: boolean };
   clearKnown(): void;
   setPinned(data: { pinned: boolean }): { pinned: boolean };

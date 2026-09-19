@@ -1,6 +1,12 @@
-import type { IntentName } from './types';
+/** Destinations carat knows how to build a URL for. The model names one; it never writes the URL. */
+export const INTENTS = ['maps', 'calendar', 'gmail'] as const;
+export type IntentName = (typeof INTENTS)[number];
 
-/** The entity a provider extracted; the registry turns it into a URL. */
+export function isIntentName(v: unknown): v is IntentName {
+  return typeof v === 'string' && (INTENTS as readonly string[]).includes(v);
+}
+
+/** The entity the model named; the registry turns it into a URL. */
 export interface IntentEntity {
   value: string;
   when: string;
@@ -102,4 +108,31 @@ export function isIntentDestination(intent: IntentName, url: string | URL): bool
 export function intentLabel(intent: IntentName, kind: 'open' | 'focus'): string {
   const spec = INTENT_REGISTRY[intent];
   return kind === 'open' ? spec.openLabel : spec.focusLabel;
+}
+
+export interface ResolvedIntent {
+  intent: IntentName;
+  entity: IntentEntity;
+  url: string;
+}
+
+/**
+ * What an `open` action's `value` means. The model names a destination and
+ * the thing to look up, never a URL: `maps:Seven Shores Cafe`, or
+ * `calendar:Dinner at Seven Shores Cafe|2026-09-18T18:00|Seven Shores Cafe`
+ * when it has a time and a place too. Anything else, including a URL the
+ * model wrote out, resolves to null and the action is refused.
+ */
+export function resolveIntentValue(value: string): ResolvedIntent | null {
+  const at = value.indexOf(':');
+  if (at <= 0) return null;
+  const intent = value.slice(0, at).trim().toLowerCase();
+  if (!isIntentName(intent)) return null;
+  const [name = '', when = '', location = ''] = value
+    .slice(at + 1)
+    .split('|')
+    .map((part) => part.trim());
+  const entity: IntentEntity = { value: name, when, location };
+  const url = buildIntentUrl(intent, entity);
+  return url ? { intent, entity, url } : null;
 }

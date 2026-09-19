@@ -1,6 +1,5 @@
-export { enumerateElements, cardAround, isSelectedCard, roleOf, sliderFacts, toggleState, ELEMENT_ID_ATTR, ELEMENT_WINDOW_ABOVE, ELEMENT_WINDOW_BELOW, MAX_ELEMENTS, MAX_ELEMENTS_BYTES, SELECT_BUTTON } from './enumerate';
-export type { ElementEntry, ElementSnapshot, EnumerateOptions, SliderFacts } from './enumerate';
-export { enumerateLinks, LINK_WINDOW_BELOW, MAX_LINKS } from './links';
-export type { LinkEntry, Site } from './links';
+export { SELECT_BUTTON, cardAround, isExpanded, isSelectedCard, roleOf, sliderFacts, toggleState } from './controls';
+export type { ActionRole, SliderFacts } from './controls';
 export { performInteraction, snap, stillFits } from './perform';
+export type { ActionVerb } from './perform';
 export { accessibleName } from './name';

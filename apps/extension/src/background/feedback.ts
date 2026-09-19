@@ -1,75 +1,71 @@
+import type { NextActionKind } from '@carat/shared';
 import type { ContextStore } from '../store';
-import { interactSuppressionKey, navSuppressionKey, suppressionKey } from '../store';
+import { interactSuppressionKey } from '../store';
 import type { PerformDiag } from './diag';
 
 /** How a perform ended: whole, or with the pick that should have followed the typing left undone. */
 export type PerformOutcome = 'done' | 'partial';
 
-export interface FillFeedback {
-  kind?: 'fill';
-  fieldId: string;
-  fingerprint: string;
-  contextId: string;
-  accepted: boolean;
-  host: string;
-  /** Present only when the fill stopped short: the text is in, the list or calendar pick did not happen. */
-  outcome?: PerformOutcome;
-}
-
-export interface NavFeedback {
-  kind: 'nav';
-  intent: string;
-  value: string;
-  accepted: boolean;
-}
-
-export interface InteractFeedback {
-  kind: 'interact';
-  host: string;
-  role: string;
+/**
+ * What became of the one chip on a page. `accepted` with `outcome: 'partial'`
+ * means the text went in but the list or calendar pick that should have
+ * followed did not.
+ */
+export interface FeedbackInput {
+  kind: NextActionKind;
+  /** The control's accessible name, or the destination for open and switch. */
   name: string;
+  /** What the chip said, for the timeline. */
+  label: string;
+  host: string;
   accepted: boolean;
-  /** The control moves money and was accepted with Enter. */
-  money?: true;
+  outcome?: PerformOutcome;
+  /** The chip armed and the user pressed Tab a second time. */
+  irreversible?: boolean;
 }
-
-export type FeedbackInput = FillFeedback | NavFeedback | InteractFeedback;
 
 export interface FeedbackSinks {
-  /** Every accepted money control and every partial fill is logged per tab; the popup and the later goal layer read it. */
+  /** A money control accepted, or a fill left half done: the popup and the later goal layer read these. */
   onPerform?: (tabId: number, entry: PerformDiag) => void;
+  /** The per-tab timeline, so the next request knows what just happened here. */
+  onHistory?: (tabId: number | undefined, line: string) => void;
 }
 
 /**
- * `tabId` is the sender's tab. An accepted fill is also remembered there for
- * a minute, which is what lets a provider offer the Save button next. An
- * accepted interaction is not remembered here at all: the content script
- * keeps it out for the rest of that page load, and the next page load may
- * well want the same Save button again. Esc on one suppresses it for 10 minutes.
- * A partial fill counts as a fill (the text went in) but is not consumed, so
- * the same value may be offered again once the field is empty again.
+ * Esc suppresses that control for ten minutes; Tab is remembered in the
+ * timeline instead, because what the user just did is the strongest signal
+ * for what they will do next. Nothing is chained: the next chip comes from
+ * the next snapshot.
  */
 export async function handleFeedback(data: FeedbackInput, store: ContextStore, tabId?: number, sinks: FeedbackSinks = {}): Promise<void> {
-  if (data.kind === 'interact') {
-    if (!data.accepted) await store.markDismissed(interactSuppressionKey(data.host, data.role, data.name));
-    else if (data.money && tabId !== undefined) sinks.onPerform?.(tabId, { at: Date.now(), host: data.host, kind: 'money', name: data.name, outcome: 'done' });
-    return;
-  }
-  if (data.kind !== 'nav' && data.accepted && data.outcome === 'partial') {
-    if (tabId !== undefined) {
-      sinks.onPerform?.(tabId, { at: Date.now(), host: data.host, kind: 'fill', name: data.fieldId, outcome: 'partial' });
-      await store.markFilled(tabId, data.contextId);
-    }
-    return;
-  }
-  const key =
-    data.kind === 'nav'
-      ? navSuppressionKey(data.intent, data.value)
-      : suppressionKey(data.contextId, data.host, data.fingerprint);
+  // The timeline wraps this in "accepted suggestion:" or "dismissed suggestion:".
+  const clause = `${verb(data.kind)}${data.name ? ` "${data.name}"` : ''}`;
   if (!data.accepted) {
-    await store.markDismissed(key);
+    await store.markDismissed(interactSuppressionKey(data.host, data.kind, data.name));
+    sinks.onHistory?.(tabId, clause);
     return;
   }
-  await store.markConsumed(key);
-  if (data.kind !== 'nav' && tabId !== undefined) await store.markFilled(tabId, data.contextId);
+  sinks.onHistory?.(tabId, clause);
+  if (tabId === undefined) return;
+  if (data.irreversible) sinks.onPerform?.(tabId, { at: Date.now(), host: data.host, kind: 'money', name: data.name || data.label, outcome: 'done' });
+  else if (data.outcome === 'partial') sinks.onPerform?.(tabId, { at: Date.now(), host: data.host, kind: 'fill', name: data.name, outcome: 'partial' });
+}
+
+function verb(kind: NextActionKind): string {
+  switch (kind) {
+    case 'fill':
+      return 'fill';
+    case 'click':
+      return 'click';
+    case 'select':
+      return 'select in';
+    case 'scroll':
+      return 'scroll down';
+    case 'open':
+      return 'open';
+    case 'switch':
+      return 'switch to';
+    case 'none':
+      return 'nothing';
+  }
 }
