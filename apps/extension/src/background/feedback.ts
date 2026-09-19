@@ -38,10 +38,11 @@ export interface FeedbackSinks {
  * the next snapshot.
  */
 export async function handleFeedback(data: FeedbackInput, store: ContextStore, tabId?: number, sinks: FeedbackSinks = {}): Promise<void> {
+  // The timeline wraps this in "accepted suggestion:" or "dismissed suggestion:".
   const clause = `${verb(data.kind)}${data.name ? ` "${data.name}"` : ''}`;
   if (!data.accepted) {
     await store.markDismissed(interactSuppressionKey(data.host, data.kind, data.name));
-    sinks.onHistory?.(tabId, `dismissed suggestion: ${clause}`);
+    sinks.onHistory?.(tabId, clause);
     return;
   }
   sinks.onHistory?.(tabId, clause);
@@ -53,18 +54,18 @@ export async function handleFeedback(data: FeedbackInput, store: ContextStore, t
 function verb(kind: NextActionKind): string {
   switch (kind) {
     case 'fill':
-      return 'filled';
+      return 'fill';
     case 'click':
-      return 'clicked';
+      return 'click';
     case 'select':
-      return 'selected in';
+      return 'select in';
     case 'scroll':
-      return 'scrolled down';
+      return 'scroll down';
     case 'open':
-      return 'opened';
+      return 'open';
     case 'switch':
-      return 'switched to';
+      return 'switch to';
     case 'none':
-      return 'did nothing';
+      return 'nothing';
   }
 }
