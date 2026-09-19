@@ -65,6 +65,16 @@ describe('statusText', () => {
       'carat · off for this site',
     );
   });
+
+  it('counts a snooze down instead of naming the model', () => {
+    const running = { show: true, running: true, provider: 'openai' as const, model: 'gpt-5.6-luna' };
+    expect(statusText(running, false, 42_000)).toBe('carat · quiet 0:42');
+    expect(statusText(running, false, 60_000)).toBe('carat · quiet 1:00');
+    // A request cannot be in flight during a snooze, and the countdown says so first anyway.
+    expect(statusText(running, true, 600)).toBe('carat · quiet 0:01');
+    // Off is off, whatever the snooze says.
+    expect(statusText({ ...running, running: false, reason: 'disabled' }, false, 42_000)).toBe('carat · off');
+  });
 });
 
 describe('status line element', () => {
@@ -134,6 +144,7 @@ describe('status poller', () => {
     const line = {
       update: (i: unknown) => updates.push(i),
       setBusy: vi.fn(),
+      setQuiet: vi.fn(),
       destroy: vi.fn(),
       visible: false,
     };
@@ -160,10 +171,34 @@ describe('status poller', () => {
     expect(updates.length).toBe(3);
   });
 
+  it('ticks the snooze down every second and stops when the minute is up', async () => {
+    sent.mockResolvedValue({ show: true, running: true, provider: 'openai', model: 'm' });
+    const setQuiet = vi.fn();
+    const line = { update: vi.fn(), setBusy: vi.fn(), setQuiet, destroy: vi.fn(), visible: false };
+    const handle = startStatus(fakeCtx(), line, document);
+
+    handle.setQuiet(Date.now() + 3000);
+    expect(setQuiet).toHaveBeenLastCalledWith(3000);
+    await vi.advanceTimersByTimeAsync(STATUS_TIMING.quietTickMs);
+    expect(setQuiet).toHaveBeenLastCalledWith(2000);
+    await vi.advanceTimersByTimeAsync(2 * STATUS_TIMING.quietTickMs);
+    expect(setQuiet).toHaveBeenLastCalledWith(null);
+    const ticks = setQuiet.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(5 * STATUS_TIMING.quietTickMs);
+    expect(setQuiet.mock.calls.length).toBe(ticks);
+
+    // Ended early by the shortcut: the pill goes back to the model on the spot.
+    handle.setQuiet(Date.now() + 60_000);
+    handle.setQuiet(null);
+    expect(setQuiet).toHaveBeenLastCalledWith(null);
+    await vi.advanceTimersByTimeAsync(2 * STATUS_TIMING.quietTickMs);
+    expect(setQuiet).toHaveBeenLastCalledWith(null);
+  });
+
   it('drops an answer that arrives after the script was invalidated', async () => {
     let resolve!: (v: unknown) => void;
     sent.mockReturnValue(new Promise((r) => (resolve = r)));
-    const line = { update: vi.fn(), setBusy: vi.fn(), destroy: vi.fn(), visible: false };
+    const line = { update: vi.fn(), setBusy: vi.fn(), setQuiet: vi.fn(), destroy: vi.fn(), visible: false };
     const ctx = fakeCtx();
     startStatus(ctx, line, document);
     ctx.invalidate();

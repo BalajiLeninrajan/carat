@@ -28,6 +28,8 @@ export default defineContentScript({
         status.setBusy(false);
         status.refresh();
       },
+      // Shift+Tab: the pill counts the quiet minute down instead of naming the model.
+      onQuiet: (until) => status.setQuiet(until),
     });
     // The page's own text is what a navigation chip is built from, so a new capture re-asks.
     startCapture(ctx, document, { page, onCaptured: () => suggestions.refresh() });
