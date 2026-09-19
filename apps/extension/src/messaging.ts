@@ -1,6 +1,7 @@
 import { defineExtensionMessaging } from '@webext-core/messaging';
 import type { GetDataType, GetReturnType } from '@webext-core/messaging';
 import type { ContextItem, FieldDescriptor, PageMeta, Settings, Suggestion } from '@carat/shared';
+import type { TabDiag } from './background/diag';
 
 export type KnownItem = Pick<ContextItem, 'id' | 'origin' | 'title' | 'kind' | 'capturedAt'> & {
   preview: string;
@@ -28,6 +29,7 @@ export interface Protocol {
   getKnown(): { items: KnownItem[]; pinned: boolean };
   clearKnown(): void;
   setPinned(data: { pinned: boolean }): { pinned: boolean };
+  getDiag(data: { tabId: number }): { diag: TabDiag | null };
   getSettings(): Settings;
   setSettings(s: Partial<Settings>): Settings;
 }

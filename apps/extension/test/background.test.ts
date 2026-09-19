@@ -5,7 +5,10 @@ import type { Provider } from '@carat/providers';
 import { createProvider } from '@carat/providers';
 import { ContextStore } from '../src/store';
 import type { StorageArea } from '../src/store';
+import type { SuggestDiag } from '../src/background';
 import {
+  DiagLog,
+  explainGate,
   fingerprintMatchesDescriptor,
   gate,
   handleFeedback,
@@ -83,6 +86,44 @@ describe('gate', () => {
     expect(gate(maps, [item()], off, requester, NOW)).toBe(false);
     const calendar = { ...maps, page: { ...maps.page, host: 'calendar.google.com' } };
     expect(gate(calendar, [item()], off, requester, NOW)).toBe(true);
+  });
+});
+
+describe('explainGate', () => {
+  it('names the check that stopped the request', () => {
+    expect(explainGate(maps, [item()], enabled, requester, NOW)).toBe('ok');
+    expect(explainGate(maps, [item()], { ...enabled, enabled: false }, requester, NOW)).toBe('disabled');
+    expect(explainGate(maps, [item()], { ...enabled, disabledHosts: ['www.google.com'] }, requester, NOW)).toBe('site-off');
+    const bank = { ...maps, page: { ...maps.page, host: 'secure.chase.com' } };
+    expect(explainGate(bank, [item()], enabled, requester, NOW)).toBe('denylisted');
+    expect(explainGate({ ...maps, fields: [] }, [item()], enabled, requester, NOW)).toBe('no-fields');
+    expect(explainGate(maps, [], enabled, requester, NOW)).toBe('no-context');
+    expect(explainGate(maps, [item({ tabId: 2 })], enabled, requester, NOW)).toBe('own-context');
+    expect(explainGate(maps, [item({ lastSeenAt: NOW - 31 * MIN })], enabled, requester, NOW)).toBe('stale-context');
+    // A stale foreign item plus a fresh own one is still "stale": the own one could never be used.
+    expect(explainGate(maps, [item({ lastSeenAt: NOW - 31 * MIN }), item({ tabId: 2 })], enabled, requester, NOW)).toBe('stale-context');
+  });
+});
+
+describe('DiagLog', () => {
+  it('keeps the last capture and check per tab, persists, and forgets the oldest tabs', async () => {
+    const area = new FakeArea();
+    const log = new DiagLog(area);
+    await log.recordCapture(1, { at: 1, host: 'discord.com', kind: 'page', verdict: 'stored' });
+    await log.recordSuggest(1, { at: 2, host: 'discord.com', fields: 1, gate: 'own-context' });
+    await log.recordSuggest(1, { at: 3, host: 'discord.com', fields: 2, gate: 'ok', cached: false, offered: 1 });
+    await log.flush();
+    const reloaded = new DiagLog(area);
+    expect(await reloaded.get(1)).toEqual({
+      capture: { at: 1, host: 'discord.com', kind: 'page', verdict: 'stored' },
+      suggest: { at: 3, host: 'discord.com', fields: 2, gate: 'ok', cached: false, offered: 1 },
+    });
+    expect(await reloaded.get(2)).toBeUndefined();
+
+    for (let t = 10; t < 40; t++) await log.recordCapture(t, { at: 100 + t, host: 'x', kind: 'page', verdict: 'empty' });
+    expect(await log.get(1)).toBeUndefined();
+    expect(await log.get(10)).toBeUndefined();
+    expect(await log.get(39)).toBeDefined();
   });
 });
 
@@ -295,6 +336,40 @@ describe('orchestrate', () => {
     const b = await orchestrate(maps, requester, deps);
     expect(a).toEqual(b);
     expect(remote.calls).toBe(1);
+  });
+
+  it('reports the gate verdict, each provider attempt and the cache hit', async () => {
+    const { store, ctxId, now } = await seeded();
+    const reports: SuggestDiag[] = [];
+    const flaky = fakeProvider('openai', async () => {
+      throw new Error('HTTP 503');
+    });
+    const local = fakeProvider('local', async () => [suggestion({ sourceContextId: ctxId, confidence: 0.75 })]);
+    const deps = {
+      store,
+      settings: async () => enabled,
+      createProvider: () => flaky,
+      localProvider: local,
+      now,
+      onDiag: (d: SuggestDiag) => void reports.push(d),
+    };
+    await orchestrate(maps, { tabId: 1, origin: 'https://discord.com' }, deps);
+    expect(reports[0]).toMatchObject({ at: NOW, host: 'www.google.com', fields: 1, gate: 'own-context' });
+
+    await orchestrate(maps, requester, deps);
+    expect(reports[1]).toMatchObject({ gate: 'ok', cached: false, offered: 1 });
+    expect(reports[1]?.attempts?.map((a) => [a.id, a.count, a.error])).toEqual([
+      ['openai', 0, 'HTTP 503'],
+      ['local', 1, undefined],
+    ]);
+
+    const steady = fakeProvider('openai', async () => [suggestion({ sourceContextId: ctxId })]);
+    const steadyDeps = { ...deps, createProvider: () => steady };
+    await orchestrate(maps, requester, steadyDeps);
+    await orchestrate(maps, requester, steadyDeps);
+    expect(reports[2]).toMatchObject({ gate: 'ok', cached: false, offered: 1 });
+    expect(reports[3]).toMatchObject({ gate: 'ok', cached: true, offered: 1 });
+    expect(reports[3]?.attempts).toBeUndefined();
   });
 
   it('keeps offering pinned context after it would have gone stale', async () => {

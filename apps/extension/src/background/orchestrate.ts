@@ -5,8 +5,9 @@ import { LocalProvider, createProvider } from '@carat/providers';
 import type { SuggestionSource, SuggestionView } from '../messaging';
 import type { ContextStore } from '../store';
 import { suppressionPrefix } from '../store';
+import type { ProviderAttempt, SuggestDiag } from './diag';
 import { fingerprintMatchesDescriptor } from './fingerprint';
-import { gate } from './gate';
+import { explainGate } from './gate';
 import type { Requester } from './requester';
 import { scoreAndPickContext } from './score';
 
@@ -22,6 +23,8 @@ export interface OrchestrateDeps {
   localProvider?: Provider;
   now?: () => number;
   timeoutMs?: number;
+  /** Told how each request went, for the popup's debug line. */
+  onDiag?: (diag: SuggestDiag) => void;
 }
 
 const NONE: { suggestions: SuggestionView[] } = { suggestions: [] };
@@ -34,18 +37,24 @@ export async function orchestrate(
   const now = deps.now ?? (() => Date.now());
   const timeoutMs = deps.timeoutMs ?? LIMITS.providerTimeoutMs;
   const { store } = deps;
+  const diag: SuggestDiag = { at: now(), host: input.page.host, fields: input.fields.length, gate: 'ok' };
 
   const settings = await deps.settings();
   const items = await store.items();
   // Freshness follows the store's clock, which stands still while pinned.
   const at = await store.clock();
-  if (!gate(input, items, settings, requester, at)) return NONE;
+  diag.gate = explainGate(input, items, settings, requester, at);
+  if (diag.gate !== 'ok') {
+    deps.onDiag?.(diag);
+    return NONE;
+  }
 
   const context = scoreAndPickContext(items, requester, at);
   if (context.length === 0) return NONE;
 
   const key = cacheKey(input, context);
   let suggestions = await store.getCached(key);
+  diag.cached = suggestions !== undefined;
   if (!suggestions) {
     const req: SuggestRequest = {
       page: input.page,
@@ -55,6 +64,7 @@ export async function orchestrate(
       ...(typeof navigator !== 'undefined' && navigator.language ? { locale: navigator.language } : {}),
     };
     const outcome = await callProvider(req, settings, deps, timeoutMs);
+    diag.attempts = outcome.attempts;
     suggestions = valid(outcome.suggestions, input.fields);
     // A transport error or timeout is not "nothing to suggest": caching it
     // would hide chips for a minute after one blip. Only a real answer is kept.
@@ -64,11 +74,12 @@ export async function orchestrate(
   const suppressed = await store.suppressedKeys();
   const visible = suggestions.filter((s) => !isSuppressed(s, input, suppressed));
   const sources = new Map(context.map((c) => [c.id, sourceOf(c)] as const));
-  return {
-    suggestions: topPerField(visible)
-      .slice(0, LIMITS.maxSuggestions)
-      .map((s) => ({ ...s, ...(sources.has(s.sourceContextId) ? { source: sources.get(s.sourceContextId) } : {}) })),
-  };
+  const offered = topPerField(visible)
+    .slice(0, LIMITS.maxSuggestions)
+    .map((s) => ({ ...s, ...(sources.has(s.sourceContextId) ? { source: sources.get(s.sourceContextId) } : {}) }));
+  diag.offered = offered.length;
+  deps.onDiag?.(diag);
+  return { suggestions: offered };
 }
 
 // The chip may say where a value came from; the text it came from stays here.
@@ -80,14 +91,6 @@ function sourceOf(c: SuggestRequest['context'][number]): SuggestionSource {
     // origin is already a bare host
   }
   return { host, capturedAt: c.capturedAt };
-}
-
-/** One provider call as it went. */
-export interface ProviderAttempt {
-  id: Provider['id'];
-  ms: number;
-  count: number;
-  error?: string;
 }
 
 export interface ProviderOutcome {

@@ -1,4 +1,6 @@
+import type { TabDiag } from '@/src/background/diag';
 import { relativeAge } from '@/src/format/age';
+import { describeCapture, describeSuggest } from '@/src/format/diag';
 import { sendMessage, type KnownItem } from '@/src/messaging';
 import { isSiteOff, siteHost, withSite } from '@/src/store/sites';
 
@@ -12,16 +14,40 @@ const siteRow = document.getElementById('site-row') as HTMLElement;
 const siteEnabled = document.getElementById('site-enabled') as HTMLInputElement;
 const siteHostLabel = document.getElementById('site-host') as HTMLElement;
 
+const diagCapture = document.getElementById('diag-capture') as HTMLElement;
+const diagSuggest = document.getElementById('diag-suggest') as HTMLElement;
+
 // The host of the tab the popup was opened over; undefined on chrome:// and friends.
 let activeHost: string | undefined;
 
-async function findActiveHost(): Promise<string | undefined> {
+interface ActiveTab {
+  id: number | undefined;
+  host: string | undefined;
+}
+
+async function findActiveTab(): Promise<ActiveTab> {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    return siteHost(tab?.url);
+    return { id: tab?.id, host: siteHost(tab?.url) };
   } catch {
-    return undefined;
+    return { id: undefined, host: undefined };
   }
+}
+
+// The debug line is a nicety; failing to get it must not take the popup offline.
+async function fetchDiag(tabId: number | undefined): Promise<TabDiag | null> {
+  if (tabId === undefined) return null;
+  try {
+    return (await withTimeout(sendMessage('getDiag', { tabId }))).diag ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function renderDiag(diag: TabDiag | null): void {
+  const now = Date.now();
+  diagCapture.textContent = diag?.capture ? describeCapture(diag.capture, now) : 'no capture from this tab yet';
+  diagSuggest.textContent = diag?.suggest ? describeSuggest(diag.suggest, now) : 'no check on this tab yet';
 }
 
 function renderSite(settings: { disabledHosts?: string[] }): void {
@@ -85,14 +111,15 @@ async function load(): Promise<void> {
   // Locked while loading so a click cannot be overwritten by the stale reply.
   enabled.disabled = true;
   try {
-    const [settings, known, host] = await withTimeout(
-      Promise.all([sendMessage('getSettings', undefined), sendMessage('getKnown', undefined), findActiveHost()]),
+    const [settings, known, tab] = await withTimeout(
+      Promise.all([sendMessage('getSettings', undefined), sendMessage('getKnown', undefined), findActiveTab()]),
     );
-    activeHost = host;
+    activeHost = tab.host;
     enabled.checked = settings.enabled;
     renderSite(settings);
     renderList(known.items);
     renderPinned(known.pinned === true);
+    renderDiag(await fetchDiag(tab.id));
   } catch {
     app.dataset.state = 'offline';
   } finally {

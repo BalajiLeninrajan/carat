@@ -90,6 +90,14 @@
         border-bottom: 1px solid var(--surface0);
       }
       #pinned-note[hidden] { display: none; }
+      #diag {
+        padding: 6px 12px;
+        border-top: 1px solid var(--surface0);
+        font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        color: var(--subtext0);
+      }
+      #diag p { margin: 0; overflow-wrap: anywhere; }
+      main[data-state="offline"] #diag { display: none; }
       button:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
       #offline, .empty { display: none; }
       main[data-state="offline"] #offline { display: block; }
@@ -121,6 +129,11 @@
 
       <p class="empty">Carat has not read anything yet</p>
       <ul id="list"></ul>
+
+      <section id="diag" aria-label="Last activity on this tab">
+        <p id="diag-capture">no capture from this tab yet</p>
+        <p id="diag-suggest">no check on this tab yet</p>
+      </section>
 
       <footer>
         <a href="#" id="options">Settings</a>

@@ -28,7 +28,7 @@ describe('popup', () => {
     vi.resetModules();
     vi.stubGlobal('chrome', {
       runtime: { openOptionsPage: vi.fn(async () => undefined) },
-      tabs: { query: vi.fn(async () => [{ url: 'https://calendar.google.com/calendar/u/0/r' }]) },
+      tabs: { query: vi.fn(async () => [{ id: 7, url: 'https://calendar.google.com/calendar/u/0/r' }]) },
     });
   });
   afterEach(() => {
@@ -150,6 +150,41 @@ describe('popup', () => {
     await flush();
     expect(sendMessage).toHaveBeenLastCalledWith('setSettings', { disabledHosts: ['discord.com'] });
     expect(box.checked).toBe(true);
+  });
+
+  it('shows the last capture and check for the active tab', async () => {
+    const now = Date.now();
+    sendMessage.mockImplementation(async (type: string, data?: { tabId?: number }) => {
+      if (type === 'getSettings') return { enabled: true, disabledHosts: [] };
+      if (type === 'getKnown') return { items: [], pinned: false };
+      if (type === 'getDiag' && data?.tabId === 7) {
+        return {
+          diag: {
+            capture: { at: now - 12_000, host: 'calendar.google.com', kind: 'page', verdict: 'stored' },
+            suggest: { at: now - 15_000, host: 'calendar.google.com', fields: 3, gate: 'own-context' },
+          },
+        };
+      }
+      return undefined;
+    });
+    await import('./main');
+    await flush();
+    expect(document.getElementById('diag-capture')?.textContent).toBe('page from calendar.google.com 12s ago: stored');
+    expect(document.getElementById('diag-suggest')?.textContent).toBe(
+      'checked 15s ago: no request, the only context is from this tab or site',
+    );
+  });
+
+  it('keeps the popup up when the debug line cannot be fetched', async () => {
+    sendMessage.mockImplementation(async (type: string) => {
+      if (type === 'getSettings') return { enabled: true, disabledHosts: [] };
+      if (type === 'getKnown') return { items: [], pinned: false };
+      throw new Error('no diag');
+    });
+    await import('./main');
+    await flush();
+    expect((document.getElementById('app') as HTMLElement).dataset.state).toBe('empty');
+    expect(document.getElementById('diag-suggest')?.textContent).toBe('no check on this tab yet');
   });
 
   it('hides the site switch over a page carat cannot run on', async () => {

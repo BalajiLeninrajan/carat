@@ -1,5 +1,7 @@
-export { gate } from './gate';
+export { gate, explainGate } from './gate';
 export type { GateInput } from './gate';
+export { DiagLog } from './diag';
+export type { CaptureDiag, CaptureVerdict, GateVerdict, ProviderAttempt, SuggestDiag, TabDiag } from './diag';
 export { eligibleContext, FRESH_MS } from './eligible';
 export { scoreAndPickContext, scoreItem, CONTEXT_LIMITS } from './score';
 export { orchestrate } from './orchestrate';
