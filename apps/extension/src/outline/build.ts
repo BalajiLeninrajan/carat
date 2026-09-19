@@ -7,7 +7,7 @@ import type { FrameRef } from '../frames/protocol';
 import { frameNumber } from '../frames/protocol';
 import { accessibleName } from '../interact';
 import { labelOf } from '../snapshot/labels';
-import { inViewport } from '../scroll';
+import { documentHeight, inViewport, viewportRect } from '../scroll';
 import { controlRoleOf, isEditable, isRiskyName, stateOf } from './roles';
 
 export const OUTLINE_LIMITS = {
@@ -22,6 +22,8 @@ export const OUTLINE_LIMITS = {
   maxControls: 60,
   /** Same-origin frames are walked this many levels down, as the rest of carat reads them. */
   frameDepth: 2,
+  /** How far past the fold still counts as on screen, in viewports. */
+  foldMargin: 0.25,
 } as const;
 
 /** Never described: they carry no text a reader sees. */
@@ -150,6 +152,14 @@ interface WalkContext {
   /** The frame number when this document is a same-origin child. */
   fr?: number;
   depth: number;
+  /** Inside the focused control's region, which is described past the fold. */
+  exempt: boolean;
+}
+
+/** The two lines that tell the model what it is not being shown. */
+interface ViewportNotes {
+  above?: string;
+  below?: string;
 }
 
 /**
@@ -161,6 +171,16 @@ interface WalkContext {
  * walked directly; a cross-origin one arrives through the frame hub as
  * `opts.frames` and its controls are spliced in where its frame element sits.
  * Both carry `fr`.
+ *
+ * Only what is on screen is described: a box lying entirely above the fold,
+ * entirely below it plus a quarter of a viewport, or off to the side is left
+ * out whole, and the controls inside it are neither numbered nor listed in
+ * `controls`. An element with no box has no geometry to be judged by and
+ * stays. The focused control's own region is described whole even where it
+ * crosses the fold. What is missing is said rather than hidden: the outline
+ * opens with `(1.5 screens above)` when the page is scrolled and closes with
+ * `(3.2 more screens below; 14 controls not shown)`, so the model knows to
+ * answer `scroll`.
  *
  * The whole thing is held to `opts.budget` characters: the focused control's
  * own landmark is kept whole and everything else is trimmed by distance from
@@ -177,9 +197,31 @@ export function buildOutline(doc: Document, win: Window | null = doc.defaultView
   const raw: RawControl[] = [];
   const frames = opts.frames ?? [];
   const focusedEl = opts.focused !== undefined ? opts.focused : deepActiveElement(doc);
+  const focusRegion = regionAround(focusedEl);
   let focusedLine = -1;
   let anchorOrder = -1;
   let order = 0;
+  /** Controls left out for being off screen, counted for the closing line. */
+  let hidden = 0;
+
+  const fold = win.innerHeight * (1 + OUTLINE_LIMITS.foldMargin);
+  const offScreen = (el: Element): boolean => {
+    let rect: DOMRect;
+    try {
+      rect = viewportRect(el, win);
+    } catch {
+      return false;
+    }
+    // No box means no geometry to judge by; the other filters decide.
+    if (rect.width <= 0 || rect.height <= 0) return false;
+    if (rect.bottom <= 0 || rect.top >= fold) return true;
+    return rect.right <= 0 || rect.left >= win.innerWidth;
+  };
+
+  // An ancestor of the focused control is walked into wherever it sits, but
+  // only the control's own region carries the exemption down to its children.
+  const holdsFocus = (el: Element): boolean =>
+    focusedEl !== null && el.ownerDocument === focusedEl.ownerDocument && el.contains(focusedEl);
 
   // Text between two structural lines is gathered up and emitted as one `text:` line.
   let buffer: string[] = [];
@@ -269,12 +311,20 @@ export function buildOutline(doc: Document, win: Window | null = doc.defaultView
     }
   };
 
-  const visit = (el: Element, ctx: WalkContext): void => {
+  const visit = (el: Element, outer: WalkContext): void => {
     const tag = el.tagName.toLowerCase();
     if (SKIP_TAGS.has(tag)) return;
     if (el.getAttribute('aria-hidden') === 'true' || el.hasAttribute('inert')) return;
     if (el.matches(JUNK)) return;
-    if (!isVisible(el, ctx.win)) return;
+    if (!isVisible(el, outer.win)) return;
+
+    const exempt = outer.exempt || el === focusRegion || el === focusedEl;
+    if (!exempt && !holdsFocus(el) && offScreen(el)) {
+      flush();
+      hidden += countControls(el, outer.win);
+      return;
+    }
+    const ctx = exempt === outer.exempt ? outer : { ...outer, exempt };
 
     if (isIframe(el) || tag === 'frame') {
       flush();
@@ -368,19 +418,68 @@ export function buildOutline(doc: Document, win: Window | null = doc.defaultView
       doc: child,
       fr,
       depth: ctx.depth + 1,
+      exempt: ctx.exempt,
     });
     flush();
   };
 
-  walkChildren(doc.body, { indent: 0, region: -1, inNamed: false, win, doc, depth: 0 });
+  walkChildren(doc.body, { indent: 0, region: -1, inNamed: false, win, doc, depth: 0, exempt: false });
   flush();
 
   const anchor = focusedLine >= 0 ? lines[focusedLine]!.order : Math.max(0, anchorOrder);
   capControls(lines, anchor, OUTLINE_LIMITS.maxControls);
-  const dropped = trim(lines, anchor, budget, focusedLine);
+  const notes = viewportNotes(win, doc, hidden);
+  const room = Math.max(0, budget - noteSize(notes));
+  const dropped = trim(lines, anchor, room, focusedLine);
   dropEmptyRegions(lines);
 
-  return render(lines, raw, registry, dropped, budget);
+  return render(lines, raw, registry, dropped, room, notes);
+}
+
+/**
+ * What the model is not being shown: how far the page is scrolled, how much of
+ * it is still below, both in viewports, and how many controls were left off
+ * screen. Without these lines the model reads a page cut off at the fold as
+ * the whole page, and never answers `scroll`.
+ */
+function viewportNotes(win: Window, doc: Document, hidden: number): ViewportNotes {
+  const vh = Math.max(1, win.innerHeight);
+  const above = win.scrollY / vh;
+  const below = (documentHeight(win, doc) - win.scrollY - win.innerHeight) / vh;
+  const notes: ViewportNotes = {};
+  if (above >= 0.05) notes.above = `(${above.toFixed(1)} screens above)`;
+  const rest = below >= 0.05 ? `${below.toFixed(1)} more screens below` : '';
+  const unseen = hidden > 0 ? `${hidden} control${hidden === 1 ? '' : 's'} not shown` : '';
+  if (rest || unseen) notes.below = `(${[rest, unseen].filter((part) => part).join('; ')})`;
+  return notes;
+}
+
+function noteSize(notes: ViewportNotes): number {
+  return (notes.above ? notes.above.length + 1 : 0) + (notes.below ? notes.below.length + 1 : 0);
+}
+
+/** The region kept whole across the fold: the focused control's nearest landmark, or its nearest container. */
+function regionAround(el: Element | null): Element | null {
+  if (!el) return null;
+  let nearest: Element | null = null;
+  for (let node = el.parentElement, hops = 0; node && hops < 24; node = node.parentElement, hops++) {
+    const region = regionOf(node, node.tagName.toLowerCase());
+    if (!region) continue;
+    if (region.landmark) return node;
+    nearest ??= node;
+  }
+  return nearest;
+}
+
+/** Elements that could hold a control role, for counting what an off-screen subtree took with it. */
+const CONTROL_CANDIDATES = 'a[href],button,input,select,textarea,summary,[role],[contenteditable],[tabindex],[onclick]';
+
+function countControls(el: Element, win: Window): number {
+  let n = controlRoleOf(el) ? 1 : 0;
+  for (const node of Array.from(el.querySelectorAll(CONTROL_CANDIDATES))) {
+    if (controlRoleOf(node) && isVisible(node, win)) n++;
+  }
+  return n;
 }
 
 /** A stable id for one outline, for the answer cache and the memo. */
@@ -388,7 +487,7 @@ export function snapshotHash(outline: string): string {
   return hashText(outline).toString(36);
 }
 
-function render(lines: OutlineLine[], raw: RawControl[], registry: Map<number, OutlineTarget>, dropped: number, budget: number): PageOutline {
+function render(lines: OutlineLine[], raw: RawControl[], registry: Map<number, OutlineTarget>, dropped: number, budget: number, notes: ViewportNotes): PageOutline {
   const controls: OutlineControl[] = [];
   const out: string[] = [];
   let focused: number | undefined;
@@ -416,19 +515,20 @@ function render(lines: OutlineLine[], raw: RawControl[], registry: Map<number, O
     out.push(`${'  '.repeat(line.indent)}${line.focused ? '>> FOCUSED ' : ''}${text}`);
   }
   if (dropped > 0) out.push(`(${dropped} lines farther from the focus omitted)`);
-  let outline = out.join('\n');
-  if (outline.length > budget) {
+  let body = out.join('\n');
+  let kept = controls;
+  if (body.length > budget) {
     // A page of nothing but landmarks can still overflow; cut whole lines off the end.
-    const cut = outline.lastIndexOf('\n', budget);
-    outline = cut > 0 ? outline.slice(0, cut) : outline.slice(0, budget);
+    const cut = body.lastIndexOf('\n', budget);
+    body = cut > 0 ? body.slice(0, cut) : body.slice(0, budget);
     const live = new Set<number>();
-    for (const m of outline.matchAll(/\[(\d+)\]/g)) live.add(Number(m[1]));
+    for (const m of body.matchAll(/\[(\d+)\]/g)) live.add(Number(m[1]));
     for (const c of controls) if (!live.has(c.n)) registry.delete(c.n);
-    const kept = controls.filter((c) => live.has(c.n));
+    kept = controls.filter((c) => live.has(c.n));
     if (focused !== undefined && !live.has(focused)) focused = undefined;
-    return { outline, controls: kept, registry, ...(focused !== undefined ? { focused } : {}) };
   }
-  return { outline, controls, registry, ...(focused !== undefined ? { focused } : {}) };
+  const outline = [notes.above, body, notes.below].filter((part): part is string => Boolean(part)).join('\n');
+  return { outline, controls: kept, registry, ...(focused !== undefined ? { focused } : {}) };
 }
 
 /** Drop the control lines farthest from the focus until at most `max` remain numbered. */

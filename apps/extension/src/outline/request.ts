@@ -12,6 +12,7 @@ export interface RequestMeta {
   location?: Pick<Location, 'host' | 'pathname'>;
   /** Cross-origin child frames, as the hub last heard them. */
   frames?: readonly FrameOutline[];
+  /** Characters the outline may take. 9000 by default; a first fast ask passes 4000. */
   budget?: number;
   focused?: Element | null;
 }
