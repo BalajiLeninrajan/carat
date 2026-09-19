@@ -69,7 +69,7 @@ const escape = () => {
     new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
   );
 };
-type Answer = { suggestions: Suggestion[]; interactions?: Suggestion[]; ticket?: string };
+type Answer = { suggestions: Suggestion[]; interactions?: Suggestion[]; ticket?: string; more?: boolean };
 /** Fast answer for the Title field plus a refine ticket whose answer the test releases. */
 function fastThenSmart(fast: (ids: Record<string, string>) => Answer) {
   let release!: (v: Answer) => void;
@@ -147,6 +147,37 @@ describe('content wiring', () => {
     document.body.append(Object.assign(document.createElement('p'), { textContent: 'And another' }));
     await vi.advanceTimersByTimeAsync(CAPTURE_TIMING.mutationMs);
     expect(calls('vision')).toHaveLength(2);
+  });
+
+  it('polls the same ticket again while an answer says more, and stops at one that does not', async () => {
+    field('Title', 100);
+    let ids: Record<string, string> = {};
+    const polls: Array<(v: Answer) => void> = [];
+    sent.mockImplementation((type, data) => {
+      if (type === 'suggestRequest') {
+        const { fields } = data as { fields: Array<{ i: string; al?: string }> };
+        ids = Object.fromEntries(fields.map((f) => [f.al ?? f.i, f.i]));
+        return Promise.resolve({ suggestions: [s(ids.Title!, 'Dinner', 0.75)], ticket: 't1' });
+      }
+      if (type === 'suggestRefine') return new Promise<Answer>((resolve) => polls.push(resolve));
+      return Promise.resolve(undefined);
+    });
+    const chip = createChip(document);
+    const show = vi.spyOn(chip, 'show');
+    startSuggestions(ctx, chip, document);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
+    await flush();
+    expect(polls).toHaveLength(1);
+
+    polls[0]!({ suggestions: [s(ids.Title!, 'Dinner at Seven Shores', 0.8)], more: true });
+    await flush();
+    expect(polls).toHaveLength(2);
+    polls[1]!({ suggestions: [s(ids.Title!, 'Dinner at Seven Shores Cafe', 0.95)] });
+    await flush();
+    expect(polls).toHaveLength(2);
+    expect(calls('suggestRefine')).toEqual([{ ticket: 't1' }, { ticket: 't1' }]);
+    expect(show.mock.calls.map(([o]) => o.value)).toEqual(['Dinner', 'Dinner at Seven Shores', 'Dinner at Seven Shores Cafe']);
+    expect(chip.visible).toBe(true);
   });
 
   it('shows the fast answer at once and swaps in a surer smart value without hiding the chip', async () => {

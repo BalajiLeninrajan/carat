@@ -34,12 +34,16 @@ export interface SuggestResponse {
   navigation: NavigationView[];
   /** Resolved against `elements` in the request; the content script performs one after a Tab. */
   interactions: InteractionView[];
-  /** Set when a smart second pass is on its way; the content script polls `suggestRefine` with it. */
+  /** Set when a better answer may still come (the chat model, the smart model); the content script polls `suggestRefine` with it. */
   ticket?: string;
 }
 
-/** The smart second pass: fills and interactions folded over the fast answer. Tab offers are never refined. */
-export type RefineResponse = Pick<SuggestResponse, 'suggestions' | 'interactions'>;
+/**
+ * A later answer: fills and interactions folded over what the chip already
+ * shows. Tab offers are never refined. `more` says the ticket is still open
+ * and the content script should poll again for the next one.
+ */
+export type RefineResponse = Pick<SuggestResponse, 'suggestions' | 'interactions'> & { more?: boolean };
 
 // Background handles every message but `forceSuggest`, which it sends to one
 // tab's content script when the keyboard shortcut fires. Content scripts and
@@ -48,7 +52,7 @@ export interface Protocol {
   capture(data: { url: string; title: string; text: string; kind: 'page' | 'selection' }): void;
   /** `force` skips the answer cache and the dismissed/consumed filter: the user asked out loud. */
   suggestRequest(data: { page: PageMeta; fields: FieldDescriptor[]; elements?: ElementDescriptor[]; force?: boolean }): SuggestResponse;
-  /** Long-poll for the smart answer named by a fast reply's `ticket`. */
+  /** Long-poll for the next answer on a fast reply's `ticket`; polled again while the answer says `more`. */
   suggestRefine(data: { ticket: string }): RefineResponse;
   /** Screenshot cues from a tab; see VisionCue. */
   vision(data: VisionCue): void;

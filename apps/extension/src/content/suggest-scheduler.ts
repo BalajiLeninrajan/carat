@@ -6,7 +6,7 @@ import { fillElement, resolveTarget } from '../fill';
 import { relativeAge } from '../format/age';
 import type { ElementEntry } from '../interact';
 import { enumerateElements, performInteraction, stillFits } from '../interact';
-import type { InteractionView, NavigationView, SuggestionSource, SuggestionView } from '../messaging';
+import type { InteractionView, NavigationView, RefineResponse, SuggestionSource, SuggestionView } from '../messaging';
 import { inViewport, scrollToTarget } from '../scroll';
 import type { FieldEntry } from '../snapshot';
 import { enumerateFields, valueOf } from '../snapshot';
@@ -158,7 +158,7 @@ export function startSuggestions(
   const snapshotSoon = debounce(ctx, () => void snapshot(), SNAPSHOT_TIMING.debounceMs);
 
   /**
-   * Fold a late smart answer in without a visible step backwards. A chip that
+   * Fold a later answer in without a visible step backwards. A chip that
    * is up only ever changes value, to something the model was surer of, and
    * never jumps to another field or element; a corner chip is left alone. A
    * chip appears from a smart answer only when the fast one showed nothing at
@@ -173,8 +173,16 @@ export function startSuggestions(
     descriptors: FieldDescriptor[],
     registries: Registries,
   ): Promise<void> {
-    const res = await send('suggestRefine', { ticket });
-    if (!ctx.isValid || mine !== seq || last !== snap) return;
+    // A ticket answers as often as something better lands; `more` says to poll it again.
+    for (;;) {
+      const res = await send('suggestRefine', { ticket });
+      if (!ctx.isValid || mine !== seq || last !== snap) return;
+      fold(res, snap, descriptors, registries);
+      if (!res?.more) return;
+    }
+  }
+
+  function fold(res: RefineResponse | undefined, snap: LastSnapshot, descriptors: FieldDescriptor[], registries: Registries): void {
     const fills = (res?.suggestions ?? []).filter((s) => !snap.settled.has(`f|${s.fieldId}`));
     const interactions = (res?.interactions ?? []).filter((s) => !snap.settled.has(`e|${s.elementId}`));
     if (fills.length === 0 && interactions.length === 0) return;

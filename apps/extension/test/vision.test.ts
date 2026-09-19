@@ -343,4 +343,26 @@ describe('RefineQueue', () => {
     expect(queue.size).toBe(0);
     expect(await queue.claim(kept, 1)).toEqual(none);
   });
+
+  it('answers an open ticket as often as it is pushed to, says more while it is open, and nothing once closed and drained', async () => {
+    const timers: Array<() => void> = [];
+    const queue = new RefineQueue((fn) => timers.push(fn));
+    const ticket = queue.open(2);
+    const waiting = queue.claim(ticket.id, 2);
+    ticket.push(answer);
+    expect(await waiting).toEqual({ ...answer, more: true });
+    ticket.push(answer);
+    ticket.close();
+    expect(await queue.claim(ticket.id, 2)).toEqual(answer);
+    expect(await queue.claim(ticket.id, 2)).toEqual(none);
+    ticket.push(answer); // ignored once closed
+    expect(queue.size).toBe(0);
+
+    // A poll waiting when the ticket closes with nothing gets nothing.
+    const empty = queue.open(2);
+    const poll = queue.claim(empty.id, 2);
+    empty.close();
+    expect(await poll).toEqual(none);
+    expect(timers).toHaveLength(2);
+  });
 });
