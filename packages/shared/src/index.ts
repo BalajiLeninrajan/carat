@@ -50,3 +50,17 @@ export type { ChipText } from './interact';
 export { truncate, normalizeWhitespace } from './truncate';
 export { fnv1a, hashText } from './hash';
 export { mergeSuggestions } from './merge';
+export {
+  ENTITY_KINDS,
+  ENTITY_JSON_SCHEMA,
+  ENTITY_RESPONSE_FORMAT,
+  EntityListSchema,
+  EntitySchema,
+  MAX_ENTITIES,
+  MAX_FIELD_HINTS,
+  PREDICT_FEW_SHOTS,
+  PREDICT_PROMPT,
+  buildPredictMessages,
+  isEntityKind,
+} from './predict-prompt';
+export type { Entity, EntityKind, EntityList, PredictInput } from './predict-prompt';

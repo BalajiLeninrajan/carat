@@ -8,3 +8,5 @@ export type { JevOptions } from './jev';
 export { FastThenSmartProvider } from './fast-then-smart';
 export { extractCandidates, candidatesFrom } from './local/candidates';
 export type { Candidate, CandidateKind } from './local/candidates';
+export { EntityPredictor, PREDICT_TIMEOUT_MS, createEntityPredictor, entitiesFromCandidates, matchEntities } from './predict';
+export type { EntityPredictorOptions, EntitySource, Predictor } from './predict';
