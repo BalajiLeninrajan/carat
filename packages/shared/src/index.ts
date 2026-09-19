@@ -50,6 +50,20 @@ export {
   verbFits,
 } from './interact';
 export type { ChipText, ClickGate } from './interact';
+export {
+  PAGE_QUERY_CONFIDENCE,
+  PAGE_SOURCE,
+  QUERY_MAX,
+  domainLabel,
+  firstMatchingLink,
+  isSiteLink,
+  linkMatchesQuery,
+  linkRelatesToQuery,
+  pageIntent,
+  queryTokens,
+  registrableDomain,
+} from './page-query';
+export type { PageIntent } from './page-query';
 export { truncate, normalizeWhitespace } from './truncate';
 export { fnv1a, hashText } from './hash';
 export { mergeSuggestions } from './merge';

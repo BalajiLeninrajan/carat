@@ -68,6 +68,7 @@ export interface ElementDescriptor {
   sel?: 1; // an option card that is already the chosen one
   m?: 1; // moves money (Pay, Book now): described only when payments are allowed, accepted with Enter
   fr?: number; // inside a child frame: the top frame's number for it
+  h?: string; // links only: the destination site, as a registrable domain ('doordash.com')
 }
 
 export interface PageMeta {
@@ -75,6 +76,8 @@ export interface PageMeta {
   title: string;
   path: string;
   h1?: string;
+  /** What the user searched for on this page: the URL's `q`, `query` or `search` param, else a search field's text. <= 80. */
+  query?: string;
 }
 
 export type RequestContext = Array<Pick<ContextItem, 'id' | 'origin' | 'title' | 'kind' | 'text' | 'capturedAt'>>;

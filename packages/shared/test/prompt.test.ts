@@ -45,10 +45,11 @@ describe('buildMessages', () => {
   it('changes only the last rule with the level, and keeps each level byte-identical across requests', () => {
     const prompts = EAGERNESS_LEVELS.map((l) => systemPrompt(l));
     expect(new Set(prompts).size).toBe(3);
-    const head = (p: string) => p.slice(0, p.lastIndexOf('\n12. '));
+    const head = (p: string) => p.slice(0, p.lastIndexOf('\n13. '));
     expect(new Set(prompts.map(head)).size).toBe(1);
     expect(head(prompts[0]!)).toContain('10. A context item with `kind` "vision"');
     expect(head(prompts[0]!)).toContain('11. Propose `scroll` only');
+    expect(head(prompts[0]!)).toContain('12. The one exception to rule 9: a real link');
     for (const l of EAGERNESS_LEVELS) {
       expect(buildMessages(req, l)[0]!.content).toBe(systemPrompt(l));
       expect(buildMessages({ ...req, context: [] }, l)[0]!.content).toBe(systemPrompt(l));
@@ -58,8 +59,8 @@ describe('buildMessages', () => {
   });
 
   it('tells the conservative model to stay quiet and the eager one to propose, with the invariant rules in both', () => {
-    expect(systemPrompt('conservative')).toMatch(/12\. When unsure, return an empty list\. No suggestion beats a wrong one\./);
-    expect(systemPrompt('eager')).toMatch(/12\. Lean toward proposing/);
+    expect(systemPrompt('conservative')).toMatch(/13\. When unsure, return an empty list\. No suggestion beats a wrong one\./);
+    expect(systemPrompt('eager')).toMatch(/13\. Lean toward proposing/);
     expect(systemPrompt('eager')).toMatch(/Return an empty list only when nothing in the context relates/);
     expect(systemPrompt('balanced')).toMatch(/propose the likelier one/);
     for (const l of EAGERNESS_LEVELS) {

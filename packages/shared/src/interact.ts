@@ -138,10 +138,14 @@ export interface ChipText {
   tail: string; // " to 40", or ""
 }
 
-/** The words on the chip: `Click "Save"`, `Select "7:00 AM Air Canada"`, `Check "Vegetarian"`, `Set "Volume" to 40`, `Choose "Canada"`, `Scroll to "Save"`. */
-export function interactionChipText(verb: InteractVerb, name: string, value: string, role?: ElementRole): ChipText {
+/**
+ * The words on the chip: `Click "Save"`, `Select "7:00 AM Air Canada"`, `Check "Vegetarian"`,
+ * `Set "Volume" to 40`, `Choose "Canada"`, `Scroll to "Save"`; with a link's site, `Open "Order Now" on doordash.com`.
+ */
+export function interactionChipText(verb: InteractVerb, name: string, value: string, role?: ElementRole, site?: string): ChipText {
   switch (verb) {
     case 'click':
+      if (site) return { verb: 'Open', value: name, tail: ` on ${site}` };
       return { verb: role === 'option' ? 'Select' : 'Click', value: name, tail: '' };
     case 'scroll':
       return { verb: 'Scroll to', value: name, tail: '' };

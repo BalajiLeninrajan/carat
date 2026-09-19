@@ -144,6 +144,15 @@ describe('interactionChipText', () => {
     expect(interactionChipText('set', 'Volume', '40')).toEqual({ verb: 'Set', value: 'Volume', tail: ' to 40' });
     expect(interactionChipText('choose', 'Show as', 'Free')).toEqual({ verb: 'Choose', value: 'Free', tail: '' });
   });
+
+  it('says Open and names the site for a real link', () => {
+    expect(interactionChipText('click', 'Order Now | Quick and Easy Food Delivery', 'Order Now | Quick and Easy Food Delivery', 'link', 'doordash.com')).toEqual({
+      verb: 'Open',
+      value: 'Order Now | Quick and Easy Food Delivery',
+      tail: ' on doordash.com',
+    });
+    expect(interactionChipText('click', 'Next', 'Next', 'button', '')).toEqual({ verb: 'Click', value: 'Next', tail: '' });
+  });
 });
 
 describe('elementKey', () => {
