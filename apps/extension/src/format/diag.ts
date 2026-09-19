@@ -47,6 +47,7 @@ const ORIGIN: Record<AnswerOrigin, string> = {
   cache: 'answer from the 60s cache',
   placeholder: 'the offline placeholder answered first',
   model: 'the model answered',
+  fallback: 'nobody answered, so the page’s plainest step stood in',
 };
 
 /**
@@ -56,7 +57,7 @@ const ORIGIN: Record<AnswerOrigin, string> = {
  */
 export function describeSuggest(d: SuggestDiag, now: number = Date.now()): string {
   const when = `checked ${relativeAge(d.at, now)}`;
-  if (d.gate !== 'ok') return `${when}: no request, ${GATE[d.gate]}`;
+  if (d.gate !== 'ok') return `${when}: no request, ${d.silent ?? GATE[d.gate]}`;
   const first = d.source ? `${ORIGIN[d.source]} in ${d.ms ?? 0} ms` : 'nothing answered';
   const attempts = (d.attempts ?? []).map(describeAttempt).join('; ');
   const action = d.kind
@@ -65,8 +66,10 @@ export function describeSuggest(d: SuggestDiag, now: number = Date.now()): strin
   const why = d.reason ? `, ${d.reason}` : '';
   const arm = d.irreversible ? ', asks for a second Tab' : '';
   const refused = d.refused ? `, refused: ${d.refused}` : '';
+  const reasked = d.reasked ? `, asked again after "${d.reasked}"` : '';
   const replaced = d.replaced ? ', the model replaced it' : d.refine ? ', more may follow' : '';
-  return [when, ': ', [first, attempts].filter(Boolean).join('; '), action, why, arm, refused, replaced, timings(d)].join('');
+  const silent = d.silent ? `, no chip: ${d.silent}` : '';
+  return [when, ': ', [first, attempts].filter(Boolean).join('; '), action, why, arm, refused, reasked, replaced, silent, timings(d)].join('');
 }
 
 /**

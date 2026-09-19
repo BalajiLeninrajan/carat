@@ -154,6 +154,20 @@ describe('chip', () => {
     expect(onAccept).toHaveBeenCalledTimes(1);
   });
 
+  it('falls back to the banner when the target has nowhere on screen to sit', () => {
+    // A field in a cross-origin frame the top window cannot see: the anchor
+    // reports it off screen, so a chip mounted on it would eat Tab and show
+    // nothing. The banner is somewhere, and somewhere beats nowhere.
+    chip.show({ target, label: 'Click "Pay"', onAccept, onDismiss, anchor: () => null });
+    const host = hosts()[0] as HTMLElement;
+    expect(chip.visible).toBe(true);
+    expect(host.style.display).toBe('block');
+    expect(host.style.bottom).toBe(`${CORNER_INSET_PX}px`);
+    const e = key(document.body, 'Tab');
+    expect(e.defaultPrevented).toBe(true);
+    expect(onAccept).toHaveBeenCalledTimes(1);
+  });
+
   describe('the user getting on with the page', () => {
     /** Past the window that belongs to the scroll carat did to place this chip. */
     const past = (): void => {

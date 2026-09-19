@@ -4,7 +4,8 @@ import { DEFAULT_SETTINGS } from '@carat/shared';
 import type { NextOptions, Provider } from '@carat/providers';
 import { RefineQueue } from '../src/background/refine';
 import type { SuggestDiag } from '../src/background/diag';
-import { clearActionCache, nextAction, pick, validate } from '../src/background/orchestrate';
+import { clearActionCache, nextAction, nudgeLine, pick, validate } from '../src/background/orchestrate';
+import { LAST_RESORT_CONFIDENCE, lastResort } from '../src/background/last-resort';
 import type { PageSnapshot } from '../src/messaging';
 
 const CONTROLS: OutlineControl[] = [
@@ -224,8 +225,10 @@ describe('validation is safety only', () => {
     let seen: NextActionRequest | undefined;
     const spy: Provider = {
       id: 'openai',
+      // Answering nothing at eager buys a second call with a line of its own
+      // in the timeline; what this test is about is the first one.
       next: async (req) => {
-        seen = req;
+        seen ??= req;
         return null;
       },
     };
@@ -280,6 +283,154 @@ describe('how fast the chip goes up', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('never silent at eager', () => {
+  const scrollable = (over: Partial<PageSnapshot> = {}): PageSnapshot =>
+    snapshot({ page: { ...snapshot().page, scroll: { y: 0.4, pages: 3, more: true } }, ...over });
+
+  it('puts a none back to the model once, with the reason in the timeline', async () => {
+    const seen: NextActionRequest[] = [];
+    const twoTries: Provider = {
+      id: 'openai',
+      next: async (req) => {
+        seen.push(req);
+        return seen.length === 1 ? action({ kind: 'none', target: null, confidence: 0 }) : action();
+      },
+    };
+    const diags: SuggestDiag[] = [];
+    const res = await nextAction(snapshot(), { tabId: 1, origin: 'x' }, {
+      settings: async () => settings(),
+      localProvider: nothing,
+      createProvider: () => twoTries,
+      onDiag: (d) => diags.push(d),
+    });
+    expect(res.action?.label).toBe('Click "Directions"');
+    expect(seen).toHaveLength(2);
+    expect(seen[1]?.history.at(-1)).toBe(nudgeLine('none'));
+    expect(diags.at(-1)?.reasked).toBe('none');
+    expect(diags.at(-1)?.silent).toBeUndefined();
+  });
+
+  it('carries the validator’s own words into the re-ask', async () => {
+    const seen: NextActionRequest[] = [];
+    const offPage: Provider = {
+      id: 'openai',
+      next: async (req) => {
+        seen.push(req);
+        return seen.length === 1 ? action({ target: 99 }) : action();
+      },
+    };
+    await nextAction(snapshot(), { tabId: 1, origin: 'x' }, {
+      settings: async () => settings(),
+      localProvider: nothing,
+      createProvider: () => offPage,
+    });
+    expect(seen[1]?.history.at(-1)).toBe(nudgeLine('no such control on the page'));
+  });
+
+  it('scrolls rather than say nothing when both tries come back empty', async () => {
+    const diags: SuggestDiag[] = [];
+    const res = await nextAction(scrollable(), { tabId: 1, origin: 'x' }, {
+      settings: async () => settings(),
+      localProvider: nothing,
+      createProvider: () => nothing,
+      onDiag: (d) => diags.push(d),
+    });
+    expect(res.action?.kind).toBe('scroll');
+    expect(res.action?.label).toBe('Scroll more');
+    expect(diags.at(-1)?.source).toBe('fallback');
+    expect(diags.at(-1)?.silent).toBeUndefined();
+  });
+
+  it('presses the page’s own control when there is nothing below, and never a risky one', async () => {
+    const res = await nextAction(snapshot({ focused: undefined }), { tabId: 1, origin: 'x' }, {
+      settings: async () => settings(),
+      localProvider: nothing,
+      createProvider: () => nothing,
+    });
+    // [1] is a searchbox and [3] takes money; [2] is what is left.
+    expect(res.action).toMatchObject({ kind: 'click', target: 2 });
+  });
+
+  it('says why in plain words when even the page has nothing to stand in with', async () => {
+    const diags: SuggestDiag[] = [];
+    const bare = snapshot({ outline: 'main:\n  text: thanks, that is all', controls: [], focused: undefined });
+    const res = await nextAction(bare, { tabId: 1, origin: 'x' }, {
+      settings: async () => settings(),
+      localProvider: nothing,
+      createProvider: () => nothing,
+      onDiag: (d) => diags.push(d),
+    });
+    expect(res.action).toBeNull();
+    expect(diags.at(-1)?.silent).toBe('nothing was offered and the page had no plainer step to stand in');
+  });
+
+  it('leaves the quieter levels alone: one call, nothing offered, and a reason', async () => {
+    const calls = vi.fn(async () => null);
+    const diags: SuggestDiag[] = [];
+    const res = await nextAction(scrollable(), { tabId: 1, origin: 'x' }, {
+      settings: async () => settings({ eagerness: 'balanced' }),
+      localProvider: nothing,
+      createProvider: () => ({ id: 'openai' as const, next: calls }),
+      onDiag: (d) => diags.push(d),
+    });
+    expect(res.action).toBeNull();
+    expect(calls).toHaveBeenCalledTimes(1);
+    expect(diags.at(-1)?.reasked).toBeUndefined();
+    expect(diags.at(-1)?.silent).toBe('nothing reached this level’s floor');
+  });
+
+  it('pushes the stand-in through the ticket when the model answers nothing', async () => {
+    const refine = new RefineQueue({ setTimer: () => undefined });
+    const res = await nextAction(scrollable(), { tabId: 1, origin: 'x' }, {
+      settings: async () => settings(),
+      localProvider: nothing,
+      createProvider: () => nothing,
+      refine,
+    });
+    expect(res.action).toBeNull();
+    expect(res.ticket).toBeDefined();
+    expect(await refine.claim(res.ticket!, 1)).toMatchObject({ action: { kind: 'scroll' } });
+  });
+
+  it('names the gate in the silent field too, so the popup never has to guess', async () => {
+    const diags: SuggestDiag[] = [];
+    await nextAction(snapshot({ password: true }), { tabId: 1, origin: 'x' }, {
+      settings: async () => settings(),
+      localProvider: nothing,
+      createProvider: () => nothing,
+      onDiag: (d) => diags.push(d),
+    });
+    expect(diags.at(-1)?.silent).toBe('the page has a password field');
+  });
+});
+
+describe('the last resort', () => {
+  it('reads on when there is more page, whatever else is on it', () => {
+    const more = request({ page: { ...request().page, scroll: { y: 1.2, pages: 4, more: true } } });
+    expect(lastResort(more)).toMatchObject({ kind: 'scroll', target: null, confidence: LAST_RESORT_CONFIDENCE });
+  });
+
+  it('fills the focused field from the notes before it presses anything', () => {
+    const notes = request({ notes: ['Dinner at Seven Shores Cafe on Friday at 6.'] });
+    expect(lastResort(notes)).toMatchObject({ kind: 'fill', target: 1 });
+  });
+
+  it('prefers the focused control, and skips a disabled or risky one', () => {
+    const controls: OutlineControl[] = [
+      { n: 1, role: 'button', name: 'Back', state: 'disabled' },
+      { n: 2, role: 'button', name: 'Pay $312.40', risky: true },
+      { n: 3, role: 'link', name: 'Read the rest' },
+      { n: 4, role: 'button', name: 'Continue' },
+    ];
+    expect(lastResort(request({ controls, focused: undefined }))).toMatchObject({ kind: 'click', target: 3 });
+    expect(lastResort(request({ controls, focused: 4 }))).toMatchObject({ kind: 'click', target: 4 });
+  });
+
+  it('has nothing to offer on a page with nothing on it', () => {
+    expect(lastResort(request({ controls: [], focused: undefined }))).toBeNull();
   });
 });
 

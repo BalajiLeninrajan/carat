@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NextAction, PageScroll } from '@carat/shared';
 import { scrollLabel } from '@carat/shared';
-import { CHIP_SETTLE_MS, QUIET_HINT, createChip } from '../src/chip';
+import { AUTO_DISMISS_MS, CHIP_SETTLE_MS, QUIET_HINT, createChip } from '../src/chip';
 import type { ScriptContext } from '../src/content';
 import { SNAPSHOT_TIMING, startActions } from '../src/content/action-scheduler';
 import type { FrameHub } from '../src/frames';
@@ -469,7 +469,10 @@ describe('the fast lane after carat acts', () => {
   it('holds the settle re-ask when the outline did not move', async () => {
     document.body.innerHTML = '<main><input aria-label="Title"><button>Save</button></main>';
     layAll();
-    answerEach([action({ kind: 'fill', target: 1, value: 'Dinner', label: 'Fill Title with "Dinner"' }), null]);
+    answerEach([
+      action({ kind: 'fill', target: 1, value: 'Dinner', label: 'Fill Title with "Dinner"' }),
+      action({ target: 2, label: 'Click "Save"' }),
+    ]);
     const chip = createChip(document);
     startActions(fakeCtx(), chip, document, { hub: noFrames });
     await firstAsk();
@@ -1005,9 +1008,79 @@ describe('a ticket the service worker lost', () => {
     expect(asks()).toHaveLength(2);
     expect(chip.text).toBe('Click "Save"');
 
-    // A worker that keeps dying costs one extra request, not a loop.
-    await tick(SNAPSHOT_TIMING.identicalMs);
+    // A worker that keeps dying costs one extra request, not a loop. Stop
+    // short of the chip's own auto-dismiss, which is a question of its own.
+    await tick(AUTO_DISMISS_MS - SNAPSHOT_TIMING.minGapMs);
     expect(asks()).toHaveLength(2);
+    chip.destroy();
+  });
+});
+
+describe('an exchange that put nothing on screen', () => {
+  it('asks again past the memo, and gives up after a few tries', async () => {
+    document.body.innerHTML = '<main><input aria-label="Title"><button>Save</button></main>';
+    layAll();
+    answer(null);
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    expect(asks()).toHaveLength(1);
+
+    // The outline has not moved, so the memo would hold this back; nothing is
+    // on screen, so the memo's stored answer was no answer.
+    await tick(SNAPSHOT_TIMING.silentRetryMs + SNAPSHOT_TIMING.minGapMs);
+    expect(asks()).toHaveLength(2);
+
+    // Bounded: the page that truly has nothing is allowed to say so.
+    await tick((SNAPSHOT_TIMING.silentRetryMs + SNAPSHOT_TIMING.minGapMs) * 6);
+    expect(asks()).toHaveLength(1 + SNAPSHOT_TIMING.silentRetries);
+    chip.destroy();
+  });
+
+  it('stops the moment a chip goes up', async () => {
+    document.body.innerHTML = '<main><button>Save</button></main>';
+    layAll();
+    answer(action({ target: 1, label: 'Click "Save"' }));
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    expect(chip.visible).toBe(true);
+    await tick((SNAPSHOT_TIMING.silentRetryMs + SNAPSHOT_TIMING.minGapMs) * 3);
+    expect(asks()).toHaveLength(1);
+    chip.destroy();
+  });
+
+  it('says nothing more once the user has asked for quiet', async () => {
+    document.body.innerHTML = '<main><button>Save</button></main>';
+    layAll();
+    answerEach([action({ target: 1, label: 'Click "Save"' }), null]);
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }));
+    const before = asks().length;
+    await tick((SNAPSHOT_TIMING.silentRetryMs + SNAPSHOT_TIMING.minGapMs) * 4);
+    expect(asks()).toHaveLength(before);
+    chip.destroy();
+  });
+
+  it('asks again when the chip runs out of time on its own', async () => {
+    document.body.innerHTML = '<main><button>Save</button></main>';
+    layAll();
+    answer(action({ target: 1, label: 'Click "Save"' }));
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    expect(chip.visible).toBe(true);
+    expect(asks()).toHaveLength(1);
+
+    // Twenty seconds of the user doing nothing takes the chip away. The page
+    // still has a button on it, so the question goes back out.
+    await tick(AUTO_DISMISS_MS);
+    expect(chip.visible).toBe(false);
+    await tick(SNAPSHOT_TIMING.silentRetryMs + SNAPSHOT_TIMING.minGapMs);
+    expect(asks()).toHaveLength(2);
+    expect(chip.visible).toBe(true);
     chip.destroy();
   });
 });
@@ -1030,12 +1103,32 @@ describe('a context clear', () => {
     expect(chip.visible).toBe(false);
     const before = asks().length;
 
-    // Nothing on the spot; the next ordinary trigger asks, and the memo no longer stands in.
+    // Nothing on the spot, and nothing the memo would stand in the way of:
+    // a page load that knows nothing is owed a chip again, so one question
+    // goes out once the page has settled.
     expect(asks()).toHaveLength(before);
     document.querySelector('button')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settled();
     expect(asks().length).toBe(before + 1);
     // What was accepted was forgotten with everything else, so the same action is on offer again.
+    expect(chip.text).toBe('Click "Save"');
+    chip.destroy();
+  });
+
+  it('asks once on its own, so a wipe does not leave the page with no chip', async () => {
+    document.body.innerHTML = '<main><button>Save</button></main>';
+    layAll();
+    answer(action({ target: 1, label: 'Click "Save"' }));
+    const chip = createChip(document);
+    const handle = startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    const before = asks().length;
+
+    handle.clear();
+    expect(chip.visible).toBe(false);
+    // Nobody touches the page after the wipe; the chip comes back anyway.
+    await settled();
+    expect(asks().length).toBe(before + 1);
     expect(chip.text).toBe('Click "Save"');
     chip.destroy();
   });
