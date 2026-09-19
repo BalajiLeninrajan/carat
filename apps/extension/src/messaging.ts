@@ -2,6 +2,7 @@ import { defineExtensionMessaging } from '@webext-core/messaging';
 import type { GetDataType, GetReturnType } from '@webext-core/messaging';
 import type { ContextItem, NextAction, NextActionRequest, Settings } from '@carat/shared';
 import type { TabDiag } from './background/diag';
+import type { HistoryEntry } from './history';
 import type { FeedbackInput } from './background/feedback';
 import type { StatusInfo } from './background/status';
 import type { VisionCue } from './background/vision';
@@ -53,7 +54,9 @@ export interface PerformedAction {
 // Background handles every message but `forceSuggest`, which it sends to one
 // tab's content script when the keyboard shortcut fires.
 export interface Protocol {
-  capture(data: { url: string; title: string; text: string; kind: 'page' | 'selection' }): void;
+  capture(data: { url: string; title: string; text: string; kind: 'page' | 'selection'; leaving?: boolean }): void;
+  /** What the user just did on the page: clicks and typing, for the per-tab timeline. */
+  history(data: { entries: HistoryEntry[] }): void;
   /** One page in, one action out. */
   nextAction(data: PageSnapshot): NextActionResponse;
   /** Long-poll for the next word on a reply's `ticket`; polled again while the answer says `more`. */

@@ -1,4 +1,5 @@
-import { isInput, isTextArea, windowOf } from '../dom/tags';
+import { normalizeWhitespace } from '@carat/shared';
+import { isInput, isSelect, isTextArea, windowOf } from '../dom/tags';
 
 export type TextControl = HTMLInputElement | HTMLTextAreaElement;
 
@@ -32,4 +33,10 @@ export function fillTextControl(el: TextControl, value: string): void {
   } catch {
     // email/number inputs throw on setSelectionRange; the value is already set.
   }
+}
+
+/** What a control currently holds: a native control's value, else its visible text. */
+export function valueOf(el: Element): string {
+  if (isTextControl(el) || isSelect(el)) return (el as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement).value.trim();
+  return normalizeWhitespace(el.textContent ?? '');
 }

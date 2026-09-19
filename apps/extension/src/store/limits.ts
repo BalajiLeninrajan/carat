@@ -15,8 +15,7 @@ export const STORE_LIMITS = {
   maxEntitiesPerItem: 12,
 } as const;
 
-export const STORE_KEYS = ['ctx', 'consumed', 'dismissed', 'cache', 'pinned', 'filled'] as const;
+export const STORE_KEYS = ['ctx', 'consumed', 'dismissed', 'pinned', 'filled'] as const;
 export type StoreKey = (typeof STORE_KEYS)[number];
 
 /** Session key for predicted entities, kept apart from the context store's own keys so its `clear` and `load` never see it. */
-export const ENTITY_KEY = 'entities';

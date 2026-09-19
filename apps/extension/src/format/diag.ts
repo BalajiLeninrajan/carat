@@ -1,7 +1,4 @@
-import type { PageKind } from '@carat/shared';
-import { DEFAULT_EAGERNESS, EAGERNESS } from '@carat/shared';
 import type { AnswerOrigin, CaptureDiag, CaptureVerdict, GateVerdict, PerformDiag, ProviderAttempt, SuggestDiag, VisionDiag, VisionVerdict } from '../background/diag';
-import type { PrewarmDiag, PrewarmVerdict } from '../background/prewarm';
 import { relativeAge } from './age';
 
 const CAPTURE: Record<CaptureVerdict, string> = {
@@ -19,6 +16,7 @@ const GATE: Record<Exclude<GateVerdict, 'ok'>, string> = {
   'site-off': 'carat is off for this site',
   denylisted: 'host is on the denylist',
   'no-snapshot': 'nothing on the page to act on',
+  password: 'the page has a password field',
 };
 
 const VISION: Record<VisionVerdict, string> = {
@@ -45,68 +43,35 @@ export function describeCapture(d: CaptureDiag, now: number = Date.now()): strin
   return `${d.kind} from ${d.host} ${relativeAge(d.at, now)}: ${CAPTURE[d.verdict]}`;
 }
 
-const ORIGIN: Record<Exclude<AnswerOrigin, 'cache' | 'prewarm'>, string> = {
-  entities: 'entities predicted at capture',
-  prior: 'the page kind',
-  local: 'regex pass',
-  jev: 'jev',
-  chat: 'chat model',
+const ORIGIN: Record<AnswerOrigin, string> = {
+  cache: 'answer from the 60s cache',
+  placeholder: 'the offline placeholder answered first',
+  model: 'the model answered',
 };
 
-/** One line: "checked 5s ago on a serp (first result matches query 'doordash'): regex pass answered first in 4 ms; openai answered in 812 ms with 1, offered 1, 2 candidates under the eager floor (0.35)". */
+/**
+ * One line: "checked 5s ago: the offline placeholder answered first in 4 ms,
+ * fill \"Fill Search with ...\" (0.5); openai answered in 812 ms with click,
+ * the model replaced it".
+ */
 export function describeSuggest(d: SuggestDiag, now: number = Date.now()): string {
-  const page = d.pageKind ? ` on ${article(d.pageKind)}${d.prior ? ` (${d.prior})` : ''}` : '';
-  const when = `checked ${relativeAge(d.at, now)}${page}`;
+  const when = `checked ${relativeAge(d.at, now)}`;
   if (d.gate !== 'ok') return `${when}: no request, ${GATE[d.gate]}`;
-  const first = d.cached
-    ? 'answer from cache'
-    : d.prewarmed
-      ? 'answer was pre-warmed on navigation'
-      : d.source && d.source !== 'cache' && d.source !== 'prewarm'
-        ? `${ORIGIN[d.source]} answered first in ${d.ms ?? 0} ms`
-        : '';
-  const attempts = d.cached ? '' : (d.attempts ?? []).map(describeAttempt).join('; ');
-  const outcome =
-    [first, attempts].filter(Boolean).join('; ') || (d.linkMatched ? 'answered from the page query, no provider asked' : 'no provider ran');
-  const tabs = d.navigation ? `, ${d.navigation} tab ${d.navigation === 1 ? 'offer' : 'offers'}` : '';
-  const controls = d.interactions ? `, ${d.interactions} ${d.interactions === 1 ? 'control' : 'controls'}` : '';
-  const level = d.eagerness ?? DEFAULT_EAGERNESS;
-  const floor = d.underFloor
-    ? `, ${d.underFloor} ${d.underFloor === 1 ? 'candidate' : 'candidates'} under the ${level} floor (${EAGERNESS[level].minConfidence})`
-    : '';
-  const later = d.refined ? `; ${d.refined} later ${d.refined === 1 ? 'answer' : 'answers'} handed over` : '';
-  const smart = d.smart ? '; smart model asked for a second opinion' : d.refine && !d.refined ? '; more may follow' : '';
-  const links = d.query !== undefined ? `, ${d.linkMatched ?? 0} ${d.linkMatched === 1 ? 'link' : 'links'} matched the page query '${d.query}'` : '';
-  return `${when}: ${outcome}, offered ${d.offered ?? 0}${tabs}${controls}${floor}${links}${later}${smart}`;
-}
-
-const PREWARM: Record<Exclude<PrewarmVerdict, 'warmed' | 'failed'>, string> = {
-  ...GATE,
-  warm: 'an answer was already cached or on its way',
-  'unknown-page': 'not a page carat knows the fields of',
-  'no-context': 'nothing read in another tab to answer from',
-};
-
-/** One line: "navigation to www.google.com 3s ago: pre-warmed 1 fill (openai, 640 ms)". */
-export function describePrewarm(d: PrewarmDiag, now: number = Date.now()): string {
-  const when = `navigation to ${d.host} ${relativeAge(d.at, now)}`;
-  const call = d.attempts?.[0];
-  if (d.verdict === 'warmed') {
-    const n = d.count ?? 0;
-    return `${when}: pre-warmed ${n} ${n === 1 ? 'fill' : 'fills'}${call ? ` (${call.id}, ${call.ms} ms)` : ''}`;
-  }
-  if (d.verdict === 'failed') return `${when}: provider failed${call?.error ? ` (${call.error})` : ''}, nothing cached`;
-  return `${when}: nothing pre-warmed, ${PREWARM[d.verdict]}`;
-}
-
-/** "a serp", "an article": the page kind reads as a noun in the check line. */
-function article(kind: PageKind): string {
-  return `${/^[aeiou]/.test(kind) ? 'an' : 'a'} ${kind}`;
+  const first = d.source ? `${ORIGIN[d.source]} in ${d.ms ?? 0} ms` : 'nothing answered';
+  const attempts = (d.attempts ?? []).map(describeAttempt).join('; ');
+  const action = d.kind
+    ? `, ${d.kind}${d.label ? ` "${d.label}"` : ''}${d.confidence !== undefined ? ` (${d.confidence})` : ''}`
+    : ', no chip';
+  const why = d.reason ? `, ${d.reason}` : '';
+  const arm = d.irreversible ? ', asks for a second Tab' : '';
+  const refused = d.refused ? `, refused: ${d.refused}` : '';
+  const replaced = d.replaced ? ', the model replaced it' : d.refine ? ', more may follow' : '';
+  return [when, ': ', [first, attempts].filter(Boolean).join('; '), action, why, arm, refused, replaced].join('');
 }
 
 function describeAttempt(a: ProviderAttempt): string {
   if (a.error) return `${a.id} failed after ${a.ms} ms (${a.error})`;
-  return `${a.id} answered in ${a.ms} ms with ${a.count}`;
+  return `${a.id} answered in ${a.ms} ms with ${a.kind}`;
 }
 
 /** One line: `pressed "Pay $312" on aircanada.com 12s ago (Enter)` or `filled f2 on aircanada.com 12s ago, pick left undone`. */

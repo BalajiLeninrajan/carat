@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DATE_TIMING, PICK_TIMING, findCell, formatDate, isDateField, isPickCombobox, matchOption, parseDate, performFill, pickFromCalendar, pickFromListbox } from '../src/fill';
-import { cardAround, enumerateElements, performInteraction, stillFits } from '../src/interact';
+import { cardAround, performInteraction, stillFits } from '../src/interact';
 
 function lay(el: Element, width = 120, top = 100, height = 32, left = 0): void {
   el.getBoundingClientRect = () => new DOMRect(left, top, width, height);
@@ -298,42 +298,6 @@ describe('date fields', () => {
 });
 
 describe('option cards', () => {
-  it('describes role=option, aria-selected cards and cards with a Select button as options, with the card text as the name', () => {
-    document.body.innerHTML = `
-      <h2>Choose your flight</h2>
-      <ul>
-        <li class="flight"><span>7:00 AM – 8:15 AM</span> <span>Air Canada</span> <span>Nonstop</span> <span>$312</span> <button>Select flight</button></li>
-        <li class="flight selected"><span>9:30 AM – 10:45 AM</span> <span>Porter</span> <span>Nonstop</span> <span>$298</span> <button>Select flight</button></li>
-      </ul>
-      <div role="listbox"><div role="option" aria-selected="false">Basic fare</div><div role="option" aria-selected="true">Flex fare</div></div>
-      <div aria-pressed="false" tabindex="0">Window seat 12A</div>
-      <button>Continue</button>
-    `;
-    layAll();
-    const { descriptors, registry } = enumerateElements(document);
-    const options = descriptors.filter((d) => d.r === 'option');
-    expect(options.map((d) => [d.nm, d.sel])).toEqual([
-      ['7:00 AM – 8:15 AM Air Canada Nonstop $312', undefined],
-      ['9:30 AM – 10:45 AM Porter Nonstop $298', 1],
-      ['Basic fare', undefined],
-      ['Flex fare', 1],
-      ['Window seat 12A', undefined],
-    ]);
-    // The Select buttons themselves are folded into their cards, not listed twice.
-    expect(descriptors.filter((d) => d.r === 'button').map((d) => d.nm)).toEqual(['Continue']);
-    const first = registry.get(options[0]!.i)!;
-    expect(first.el.tagName).toBe('LI');
-    expect(first.role).toBe('option');
-    expect(cardAround(document.querySelector('button')!)).toBe(first.el);
-  });
-
-  it('leaves a lone Select button a button when no card holds it', () => {
-    document.body.innerHTML = '<div><button>Select</button></div>';
-    layAll();
-    const { descriptors } = enumerateElements(document);
-    expect(descriptors.map((d) => [d.r, d.nm])).toEqual([['button', 'Select']]);
-  });
-
   it('performs a click on a card through its own Select button, radio, or the card itself, and refuses a chosen card', () => {
     document.body.innerHTML = `
       <li id="a"><span>Air Canada $312 round trip</span><button>Select flight</button></li>
@@ -353,53 +317,6 @@ describe('option cards', () => {
     expect(hits).toEqual(['a-button', 'b-radio', 'c-mousedown', 'c-click']);
     expect(stillFits(document.getElementById('d')!, 'click', 'option')).toBe(false);
     expect(stillFits(c, 'click', 'option')).toBe(true);
-  });
-});
-
-describe('money and primary buttons at enumeration', () => {
-  it('leaves money names out unless payments are allowed, then flags them m: 1; destructive names never appear either way', () => {
-    document.body.innerHTML = `
-      <form><input type="text" name="card"><button type="submit">Pay $312.40</button></form>
-      <button>Complete booking</button>
-      <button>Cancel booking</button>
-      <button>Continue</button>
-    `;
-    layAll();
-    const off = enumerateElements(document);
-    expect(off.descriptors.map((d) => d.nm)).toEqual(['Continue']);
-    const on = enumerateElements(document, window, { allowPayments: true });
-    expect(on.descriptors.map((d) => [d.nm, d.m])).toEqual([
-      ['Pay $312.40', 1],
-      ['Complete booking', 1],
-      ['Continue', undefined],
-    ]);
-    expect(on.registry.get(on.descriptors[0]!.i)!.money).toBe(true);
-    expect(on.descriptors.map((d) => d.nm)).not.toContain('Cancel booking');
-  });
-
-  it('marks the biggest continue-style button in view primary when nothing else claims it, never a money one', () => {
-    document.body.innerHTML = `
-      <button id="more">More options</button>
-      <button id="search">Search</button>
-      <button id="pay">Pay now</button>
-    `;
-    lay(document.getElementById('more')!, 200, 100, 40);
-    lay(document.getElementById('search')!, 160, 100, 48);
-    lay(document.getElementById('pay')!, 400, 100, 80);
-    const { descriptors } = enumerateElements(document, window, { allowPayments: true });
-    // Primary first, then the rest by area.
-    expect(descriptors.map((d) => [d.nm, d.p])).toEqual([
-      ['Search', 1],
-      ['Pay now', undefined],
-      ['More options', undefined],
-    ]);
-    // A real submit button keeps the flag to itself.
-    document.body.innerHTML = '<form><button type="submit">Save</button></form><button>Continue</button>';
-    layAll();
-    expect(enumerateElements(document).descriptors.map((d) => [d.nm, d.p])).toEqual([
-      ['Save', 1],
-      ['Continue', undefined],
-    ]);
   });
 });
 

@@ -1,6 +1,6 @@
 import { normalizeWhitespace } from '@carat/shared';
 import { isVisible } from '../capture/visibility';
-import { valueOf } from '../snapshot/enumerate';
+import { valueOf } from './text';
 import { pressKey, pressPointer, tick, waitFor } from './wait';
 
 /** How long a combobox gets to show its list after the text went in. */

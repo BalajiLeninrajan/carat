@@ -1,4 +1,4 @@
-import type { ElementDescriptor, ElementRole, FieldDescriptor, InteractVerb } from '@carat/shared';
+import type { OutlineControl } from '@carat/shared';
 import type { AcceptKey, RelayedKey } from '../chip';
 import type { FillOutcome } from '../fill';
 
@@ -13,6 +13,12 @@ import type { FillOutcome } from '../fill';
 export const FRAME_MARK = 'carat-frame';
 export const FRAME_VERSION = 1;
 
+/** A control that lives in a child frame: the registry element is the frame element, and the child performs. */
+export interface FrameRef {
+  token: string;
+  remoteId: string;
+}
+
 /** A box in the child frame's own viewport coordinates. */
 export interface Box {
   x: number;
@@ -21,21 +27,16 @@ export interface Box {
   h: number;
 }
 
-/** Everything the top frame needs to stand in for the child's registry. */
+/** Everything the top frame needs to stand in for the child's own outline. */
 export interface FrameReport {
-  fields: FieldDescriptor[];
-  elements: ElementDescriptor[];
-  /** Per descriptor id, where it sits inside the frame. */
+  /** The frame's own outline controls, numbered in its own space; the top splices them in with `fr` set. */
+  controls: OutlineControl[];
+  /** Per control number (as a string), where it sits inside the frame, so the top can anchor a chip over it. */
   rects: Record<string, Box>;
-  /** Per field id, what fill feedback carries. */
-  fingerprints: Record<string, string>;
-  /** Per element id, what interact feedback and the done-set carry. */
-  entries: Record<string, { role: ElementRole; name: string; money?: true }>;
 }
 
-export type PerformRequest =
-  | { kind: 'fill'; id: string; value: string; host: string; locale?: string }
-  | { kind: 'interact'; id: string; verb: InteractVerb; value: string };
+/** One action on one outline control, named by the number the frame itself gave it. */
+export type PerformRequest = { kind: 'outline'; n: number; action: 'fill' | 'click' | 'select'; value: string; host?: string; locale?: string };
 
 export interface PerformReply {
   ok: boolean;

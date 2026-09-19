@@ -2,11 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createChip } from '../src/chip';
 import { anchorInFrame, placeAt } from '../src/chip/position';
 import type { ScriptContext } from '../src/content';
-import { FRAME_TIMING, HUB_TIMING, createFrameHub, findIframeFor, mergeElements, mergeFields, startFrameAgent, stamp } from '../src/frames';
+import { FRAME_TIMING, HUB_TIMING, createFrameHub, findIframeFor, startFrameAgent, stamp } from '../src/frames';
 import type { FrameReport, ToChild, ToTop } from '../src/frames';
-import { enumerateElements } from '../src/interact';
 import { inViewport, viewportRect } from '../src/scroll';
-import { childDocuments, enumerateFields } from '../src/snapshot';
+import { childDocuments } from '../src/snapshot/frames';
 
 vi.mock('../src/messaging', () => ({ safeSendMessage: vi.fn(async () => undefined) }));
 
@@ -68,32 +67,6 @@ describe('same-origin frames, read directly', () => {
     expect(inViewport(input, window)).toBe(false);
   });
 
-  it('enumerates fields and elements inside the child with fr set and the real element in the registry', () => {
-    const { iframe, doc } = sameOriginFrame();
-    lay(iframe, 0, 100, 400, 300);
-    document.body.insertAdjacentHTML('afterbegin', '<input aria-label="Email">');
-    lay(document.querySelector('input')!, 0, 10, 300, 30);
-    doc.body.innerHTML = '<input aria-label="Card number"><button>Pay now</button><button>Continue</button>';
-    for (const el of doc.querySelectorAll('input,button')) lay(el, 10, 20, 200, 30);
-
-    const fields = enumerateFields(document);
-    expect(fields.descriptors.map((d) => [d.al, d.fr])).toEqual([
-      ['Email', undefined],
-      ['Card number', 1],
-    ]);
-    expect(fields.registry.get('f1')!.el).toBe(doc.querySelector('input'));
-    expect(fields.registry.get('f1')!.el.getAttribute('data-carat-id')).toBe('f1');
-
-    const elements = enumerateElements(document);
-    expect(elements.descriptors.map((d) => [d.nm, d.fr, d.m])).toEqual([['Continue', 1, undefined]]);
-    // Continue is the page's primary action even in a frame; a money button is never promoted to one.
-    const withPay = enumerateElements(document, window, { allowPayments: true });
-    expect(withPay.descriptors.map((d) => [d.nm, d.fr, d.m, d.p])).toEqual([
-      ['Continue', 1, undefined, 1],
-      ['Pay now', 1, 1, undefined],
-    ]);
-  });
-
   it('takes the chip key from the child window, where a key in the frame is heard', () => {
     const { iframe, doc, win } = sameOriginFrame();
     lay(iframe, 0, 100, 400, 300);
@@ -102,7 +75,7 @@ describe('same-origin frames, read directly', () => {
     lay(input, 10, 20, 200, 30);
     const chip = createChip(document);
     const onAccept = vi.fn();
-    chip.show({ target: input, value: '4242', onAccept, onDismiss: () => undefined });
+    chip.show({ target: input, label: 'Fill Card number with "4242"', onAccept, onDismiss: () => undefined });
     input.focus();
     const e = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
     win.dispatchEvent(e);
@@ -113,7 +86,7 @@ describe('same-origin frames, read directly', () => {
   });
 });
 
-describe('anchoring a field reported by a cross-origin frame', () => {
+describe('anchoring a control reported by a cross-origin frame', () => {
   it('adds the frame box to the inner box and clips to the frame', () => {
     const frame = new DOMRect(100, 200, 400, 300);
     const inside = anchorInFrame(frame, { x: 20, y: 30, w: 200, h: 40 });
@@ -129,11 +102,11 @@ describe('anchoring a field reported by a cross-origin frame', () => {
 
 describe('frame hub', () => {
   const report = (over: Partial<FrameReport> = {}): FrameReport => ({
-    fields: [{ i: 'f0', t: 'input:text', al: 'Card number', w: 'm' }],
-    elements: [{ i: 'e0', r: 'button', nm: 'Pay now', p: 1, m: 1 }],
-    rects: { f0: { x: 10, y: 20, w: 200, h: 30 }, e0: { x: 10, y: 60, w: 100, h: 30 } },
-    fingerprints: { f0: 'input|text|cardnumber|||Card number' },
-    entries: { e0: { role: 'button', name: 'Pay now', money: true } },
+    controls: [
+      { n: 1, role: 'textbox', name: 'Card number', state: 'required' },
+      { n: 2, role: 'button', name: 'Pay now', risky: true },
+    ],
+    rects: { '1': { x: 10, y: 20, w: 200, h: 30 }, '2': { x: 10, y: 60, w: 100, h: 30 } },
     ...over,
   });
   const fromFrame = (source: Window, msg: ToTop): void => {
@@ -149,9 +122,9 @@ describe('frame hub', () => {
     expect(onReport).toHaveBeenCalledTimes(1);
     expect(hub.frames().map((f) => [f.token, f.iframe])).toEqual([['abc', iframe]]);
     expect(hub.numberOf(hub.frames()[0]!)).toBe(1);
-    const anchor = hub.anchor(hub.frames()[0]!, 'f0')!;
+    const anchor = hub.anchor(hub.frames()[0]!, '1')!;
     expect([anchor.left, anchor.top, anchor.width, anchor.height]).toEqual([110, 220, 200, 30]);
-    expect(hub.anchor(hub.frames()[0]!, 'f9')).toBeNull();
+    expect(hub.anchor(hub.frames()[0]!, '9')).toBeNull();
 
     const stranger = { postMessage: vi.fn() } as unknown as Window;
     fromFrame(stranger, stamp({ type: 'report', token: 'zzz', reply: false, report: report() }));
@@ -164,24 +137,11 @@ describe('frame hub', () => {
     expect(findIframeFor(document, stranger)).toBeNull();
   });
 
-  it('merges frame descriptors after its own, renumbered, flagged fr, and re-marked o against the top viewport', () => {
+  it('hands the outline the frame’s own controls, to splice in where its element sits', () => {
     const { iframe, win } = sameOriginFrame();
-    lay(iframe, 0, 100, 400, 300);
     const hub = createFrameHub(fakeCtx(), document, { onReport: () => undefined, onKey: () => undefined });
-    fromFrame(win, stamp({ type: 'report', token: 'abc', reply: false, report: report({ rects: { f0: { x: 10, y: 20, w: 200, h: 30 }, e0: { x: 10, y: 900, w: 100, h: 30 } } }) }));
-    const frame = hub.frames()[0]!;
-    const merged = [{ frame, num: hub.numberOf(frame), onScreen: (id: string) => hub.anchor(frame, id) !== null }];
-    const own = { descriptors: [{ i: 'f0', t: 'input:text', al: 'Email' }], registry: new Map([['f0', { el: document.body, fingerprint: 'x' }]]) };
-    const fields = mergeFields(own, merged);
-    expect(fields.descriptors).toEqual([
-      { i: 'f0', t: 'input:text', al: 'Email' },
-      { i: 'f1', t: 'input:text', al: 'Card number', w: 'm', fr: 1 },
-    ]);
-    expect(fields.registry.get('f1')).toEqual({ el: iframe, fingerprint: 'input|text|cardnumber|||Card number', frame: { token: 'abc', remoteId: 'f0' } });
-    const elements = mergeElements({ descriptors: [], registry: new Map() }, merged);
-    // The Pay button sits 900px into a 300px-tall frame: off-screen from the top's point of view.
-    expect(elements.descriptors).toEqual([{ i: 'e0', r: 'button', nm: 'Pay now', p: 1, m: 1, fr: 1, o: 1 }]);
-    expect(elements.registry.get('e0')).toMatchObject({ el: iframe, role: 'button', name: 'Pay now', key: 'button|pay now', money: true, frame: { token: 'abc', remoteId: 'e0' } });
+    fromFrame(win, stamp({ type: 'report', token: 'abc', reply: false, report: report() }));
+    expect(hub.outlines()).toEqual([{ frame: iframe, token: 'abc', controls: report().controls }]);
   });
 
   it('asks frames for a fresh report and waits for the replies or the cap, without re-triggering a snapshot', async () => {
@@ -216,27 +176,27 @@ describe('frame hub', () => {
     fromFrame(win, stamp({ type: 'report', token: 'abc', reply: false, report: report() }));
     const frame = hub.frames()[0]!;
 
-    const pending = hub.perform(frame, { kind: 'fill', id: 'f0', value: '4242 4242 4242 4242', host: 'shop.example' });
+    const pending = hub.perform(frame, { kind: 'outline', n: 1, action: 'fill', value: '4242 4242 4242 4242', host: 'shop.example' });
     const sent = posted.find((m) => m.type === 'perform') as Extract<ToChild, { type: 'perform' }>;
-    expect(sent.req).toEqual({ kind: 'fill', id: 'f0', value: '4242 4242 4242 4242', host: 'shop.example' });
+    expect(sent.req).toEqual({ kind: 'outline', n: 1, action: 'fill', value: '4242 4242 4242 4242', host: 'shop.example' });
     fromFrame(win, stamp({ type: 'performed', token: 'abc', seq: sent.seq, reply: { ok: true, outcome: 'done' } }));
     expect(await pending).toEqual({ ok: true, outcome: 'done' });
 
-    const late = hub.perform(frame, { kind: 'interact', id: 'e0', verb: 'click', value: 'Pay now' });
+    const late = hub.perform(frame, { kind: 'outline', n: 2, action: 'click', value: '' });
     await tick(HUB_TIMING.performMs);
     expect(await late).toEqual({ ok: false });
 
-    hub.arm(frame, 'Enter');
-    expect(posted.at(-1)).toMatchObject({ type: 'arm', key: 'Enter' });
-    fromFrame(win, stamp({ type: 'key', token: 'abc', key: 'Enter' }));
-    expect(onKey).toHaveBeenCalledWith('Enter');
+    hub.arm(frame, 'Tab');
+    expect(posted.at(-1)).toMatchObject({ type: 'arm', key: 'Tab' });
+    fromFrame(win, stamp({ type: 'key', token: 'abc', key: 'Tab' }));
+    expect(onKey).toHaveBeenCalledWith('Tab');
     hub.disarm();
     expect(posted.at(-1)).toMatchObject({ type: 'disarm' });
-    fromFrame(win, stamp({ type: 'key', token: 'abc', key: 'Enter' }));
+    fromFrame(win, stamp({ type: 'key', token: 'abc', key: 'Tab' }));
     expect(onKey).toHaveBeenCalledTimes(1);
     // A key under someone else's token, or from a window that is not the frame's, is ignored.
-    fromFrame(win, stamp({ type: 'key', token: 'nope', key: 'Enter' }));
-    fromFrame({ postMessage: vi.fn() } as unknown as Window, stamp({ type: 'key', token: 'abc', key: 'Enter' }));
+    fromFrame(win, stamp({ type: 'key', token: 'nope', key: 'Tab' }));
+    fromFrame({ postMessage: vi.fn() } as unknown as Window, stamp({ type: 'key', token: 'abc', key: 'Tab' }));
     expect(onKey).toHaveBeenCalledTimes(1);
   });
 
@@ -251,10 +211,10 @@ describe('frame hub', () => {
 });
 
 describe('frame agent', () => {
-  function agentIn(doc: Document, allowPayments = false) {
+  function agentIn(doc: Document) {
     const top = { postMessage: vi.fn<(msg: ToTop, origin: string) => void>() };
     const ctx = fakeCtx();
-    const agent = startFrameAgent(ctx, doc, { allowPayments: async () => allowPayments, top: top as unknown as Window });
+    const agent = startFrameAgent(ctx, doc, { top: top as unknown as Window });
     const fromTop = (msg: ToChild): void => {
       doc.defaultView!.dispatchEvent(new MessageEvent('message', { data: msg, source: top as unknown as Window }));
     };
@@ -262,19 +222,17 @@ describe('frame agent', () => {
     return { agent, ctx, top, fromTop, sent };
   }
 
-  it('reports its fields and elements with boxes after the initial delay, again only when they change, and always when asked', async () => {
+  it('reports its own controls with boxes after the initial delay, again only when they change, and always when asked', async () => {
     const { doc } = sameOriginFrame();
-    doc.body.innerHTML = '<input aria-label="Card number"><button>Pay now</button>';
+    doc.body.innerHTML = '<main><input aria-label="Card number"><button>Pay now</button></main>';
     for (const el of doc.querySelectorAll('input,button')) lay(el, 10, 20, 200, 30);
     const { fromTop, sent } = agentIn(doc);
     await tick(FRAME_TIMING.initialMs);
     expect(sent()).toHaveLength(1);
     const first = sent()[0] as Extract<ToTop, { type: 'report' }>;
     expect(first.reply).toBe(false);
-    expect(first.report.fields.map((f) => f.al)).toEqual(['Card number']);
-    expect(first.report.elements).toEqual([]); // money is off
-    expect(first.report.rects.f0).toEqual({ x: 10, y: 20, w: 200, h: 30 });
-    expect(first.report.fingerprints.f0).toContain('Card number');
+    expect(first.report.controls.map((c) => c.name)).toEqual(['Card number', 'Pay now']);
+    expect(first.report.rects['1']).toEqual({ x: 10, y: 20, w: 200, h: 30 });
 
     // Same page, a focus: nothing new to say.
     doc.querySelector('input')!.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
@@ -285,57 +243,45 @@ describe('frame agent', () => {
     await tick(0);
     expect(sent()).toHaveLength(2);
     expect((sent()[1] as Extract<ToTop, { type: 'report' }>).reply).toBe(true);
-    // The page changed: an unasked-for report.
-    doc.body.insertAdjacentHTML('beforeend', '<input aria-label="Expiry">');
-    lay(doc.querySelectorAll('input')[1]!, 10, 60, 100, 30);
-    await tick(FRAME_TIMING.debounceMs);
-    expect(sent()).toHaveLength(3);
-    expect((sent()[2] as Extract<ToTop, { type: 'report' }>).report.fields.map((f) => f.al)).toEqual(['Card number', 'Expiry']);
   });
 
-  it('describes money controls when allowed, and reports their entries', async () => {
+  it('performs a fill or a click on the control it numbered, from the top window only', async () => {
     const { doc } = sameOriginFrame();
-    doc.body.innerHTML = '<button>Pay now</button>';
-    lay(doc.querySelector('button')!, 10, 20, 200, 30);
-    const { sent } = agentIn(doc, true);
-    await tick(FRAME_TIMING.initialMs);
-    const r = (sent()[0] as Extract<ToTop, { type: 'report' }>).report;
-    expect(r.elements).toEqual([{ i: 'e0', r: 'button', nm: 'Pay now', m: 1 }]);
-    expect(r.entries.e0).toEqual({ role: 'button', name: 'Pay now', money: true });
-  });
-
-  it('performs a fill or a click on request, from the top window only, and answers with the outcome', async () => {
-    const { doc } = sameOriginFrame();
-    doc.body.innerHTML = '<input aria-label="Card number"><button>Pay now</button>';
+    doc.body.innerHTML = '<main><input aria-label="Card number"><button>Pay now</button></main>';
     for (const el of doc.querySelectorAll('input,button')) lay(el, 10, 20, 200, 30);
     const clicks = vi.fn();
     doc.querySelector('button')!.addEventListener('click', clicks);
-    const { fromTop, sent, top } = agentIn(doc, true);
+    const { fromTop, sent, top } = agentIn(doc);
     await tick(FRAME_TIMING.initialMs);
 
-    fromTop(stamp({ type: 'perform', seq: 7, req: { kind: 'fill', id: 'f0', value: '4242 4242 4242 4242', host: 'shop.example' } }));
+    fromTop(stamp({ type: 'perform', seq: 7, req: { kind: 'outline', n: 1, action: 'fill', value: '4242 4242 4242 4242', host: 'shop.example' } }));
     await tick(0);
     expect(doc.querySelector('input')!.value).toBe('4242 4242 4242 4242');
     expect(sent().at(-1)).toMatchObject({ type: 'performed', seq: 7, reply: { ok: true, outcome: 'done' } });
 
-    fromTop(stamp({ type: 'perform', seq: 8, req: { kind: 'interact', id: 'e0', verb: 'click', value: 'Pay now' } }));
+    fromTop(stamp({ type: 'perform', seq: 8, req: { kind: 'outline', n: 2, action: 'click', value: '' } }));
     await tick(0);
     expect(clicks).toHaveBeenCalledTimes(1);
     expect(sent().at(-1)).toMatchObject({ type: 'performed', seq: 8, reply: { ok: true } });
 
-    fromTop(stamp({ type: 'perform', seq: 9, req: { kind: 'fill', id: 'f7', value: 'x', host: 'shop.example' } }));
+    fromTop(stamp({ type: 'perform', seq: 9, req: { kind: 'outline', n: 99, action: 'fill', value: 'x', host: 'shop.example' } }));
     await tick(0);
     expect(sent().at(-1)).toMatchObject({ type: 'performed', seq: 9, reply: { ok: false } });
 
     // The same request from a window that is not the top is ignored.
     const before = clicks.mock.calls.length;
-    doc.defaultView!.dispatchEvent(new MessageEvent('message', { data: stamp({ type: 'perform', seq: 10, req: { kind: 'interact', id: 'e0', verb: 'click', value: 'Pay now' } }), source: doc.defaultView }));
+    doc.defaultView!.dispatchEvent(
+      new MessageEvent('message', {
+        data: stamp({ type: 'perform', seq: 10, req: { kind: 'outline', n: 2, action: 'click', value: '' } }),
+        source: doc.defaultView,
+      }),
+    );
     await tick(0);
     expect(clicks.mock.calls.length).toBe(before);
     expect(top.postMessage.mock.calls.some((c) => (c[0] as { seq?: number }).seq === 10)).toBe(false);
   });
 
-  it('takes the armed key in the frame and relays it, lets Tab through when armed for Enter, relays Esc and typing, and stops when disarmed', async () => {
+  it('takes the armed key in the frame and relays it, relays Esc and typing, and stops when disarmed', async () => {
     const { doc, win } = sameOriginFrame();
     doc.body.innerHTML = '<input aria-label="CVC">';
     const { fromTop, sent } = agentIn(doc);
@@ -345,14 +291,13 @@ describe('frame agent', () => {
       return e;
     };
     expect(press('Tab').defaultPrevented).toBe(false);
-    fromTop(stamp({ type: 'arm', key: 'Enter' }));
-    expect(press('Tab').defaultPrevented).toBe(false);
-    expect(press('Enter').defaultPrevented).toBe(true);
+    fromTop(stamp({ type: 'arm', key: 'Tab' }));
+    expect(press('Tab').defaultPrevented).toBe(true);
     expect(press('Escape').defaultPrevented).toBe(true);
     doc.querySelector('input')!.dispatchEvent(new Event('input', { bubbles: true }));
-    expect(sent().map((m) => (m as { key?: string }).key)).toEqual(['Enter', 'Escape', 'typed']);
+    expect(sent().map((m) => (m as { key?: string }).key)).toEqual(['Tab', 'Escape', 'typed']);
     fromTop(stamp({ type: 'disarm' }));
-    expect(press('Enter').defaultPrevented).toBe(false);
+    expect(press('Tab').defaultPrevented).toBe(false);
     expect(sent()).toHaveLength(3);
   });
 });

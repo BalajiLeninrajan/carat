@@ -2,18 +2,15 @@ import type { AcceptKey, RelayedKey } from '../chip';
 import type { ScriptContext } from '../content/context';
 import { debounce } from '../content/context';
 import { performFill } from '../fill';
-import type { ElementEntry } from '../interact';
-import { enumerateElements, performInteraction, stillFits } from '../interact';
-import type { FieldEntry } from '../snapshot';
-import { enumerateFields, valueOf } from '../snapshot';
+import { performInteraction, roleOf, stillFits } from '../interact';
+import type { OutlineTarget } from '../outline';
+import { buildOutline } from '../outline';
 import type { Box, FrameReport, PerformReply, PerformRequest, ToChild, ToTop } from './protocol';
 import { isFrameMessage, stamp } from './protocol';
 
 export const FRAME_TIMING = { initialMs: 800, debounceMs: 400 } as const;
 
 export interface FrameAgentOptions {
-  /** Whether money controls may be described; asked before each report. */
-  allowPayments: () => Promise<boolean>;
   /** The window to report to; the real top window unless a test says otherwise. */
   top?: Window;
 }
@@ -36,8 +33,7 @@ export function startFrameAgent(ctx: ScriptContext, doc: Document, opts: FrameAg
   const win = doc.defaultView!;
   const top = opts.top ?? win.top!;
   const token = Math.random().toString(36).slice(2, 10);
-  let fields = new Map<string, FieldEntry>();
-  let elements = new Map<string, ElementEntry>();
+  let outline = new Map<number, OutlineTarget>();
   let lastKey = '';
   let armed: AcceptKey | null = null;
   let stopped = false;
@@ -58,21 +54,11 @@ export function startFrameAgent(ctx: ScriptContext, doc: Document, opts: FrameAg
 
   async function report(reply = false): Promise<void> {
     if (stopped || !ctx.isValid) return;
-    const allowPayments = await opts.allowPayments();
-    const f = enumerateFields(doc, win, { frame: true });
-    const e = enumerateElements(doc, win, { frame: true, allowPayments });
-    fields = f.registry;
-    elements = e.registry;
-    const body: FrameReport = { fields: f.descriptors, elements: e.descriptors, rects: {}, fingerprints: {}, entries: {} };
-    for (const [id, entry] of fields) {
-      body.rects[id] = box(entry.el);
-      body.fingerprints[id] = entry.fingerprint;
-    }
-    for (const [id, entry] of elements) {
-      body.rects[id] = box(entry.el);
-      body.entries[id] = { role: entry.role, name: entry.name, ...(entry.money ? { money: true } : {}) };
-    }
-    const key = JSON.stringify([body.fields, body.elements]);
+    const o = buildOutline(doc, win);
+    outline = o.registry;
+    const body: FrameReport = { controls: o.controls, rects: {} };
+    for (const [n, target] of outline) body.rects[String(n)] = box(target.el);
+    const key = JSON.stringify(body.controls);
     // An unasked-for report only when something changed; a reply always, so the top stops waiting.
     if (!reply && key === lastKey) return;
     lastKey = key;
@@ -81,15 +67,16 @@ export function startFrameAgent(ctx: ScriptContext, doc: Document, opts: FrameAg
   const reportSoon = debounce(ctx, () => void report(), FRAME_TIMING.debounceMs);
 
   async function perform(req: PerformRequest): Promise<PerformReply> {
-    if (req.kind === 'fill') {
-      const entry = fields.get(req.id);
-      if (!entry || !entry.el.isConnected || valueOf(entry.el)) return { ok: false };
-      const outcome = await performFill(entry.el, req.value, req.host, req.locale ? { locale: req.locale } : {});
+    const target = outline.get(req.n)?.el;
+    if (!target?.isConnected) return { ok: false };
+    if (req.action === 'fill') {
+      const outcome = await performFill(target, req.value, req.host ?? doc.location.host, req.locale ? { locale: req.locale } : {});
       return outcome ? { ok: true, outcome } : { ok: false };
     }
-    const entry = elements.get(req.id);
-    if (!entry || !stillFits(entry.el, req.verb, entry.role)) return { ok: false };
-    return { ok: performInteraction(entry.el, req.verb, req.value, entry.role) };
+    const role = roleOf(target) ?? 'button';
+    const verb = req.action === 'select' ? 'choose' : 'click';
+    if (!stillFits(target, verb, role)) return { ok: false };
+    return { ok: performInteraction(target, verb, req.value, role) };
   }
 
   const onMessage = (e: MessageEvent): void => {

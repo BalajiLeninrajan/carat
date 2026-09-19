@@ -1,9 +1,12 @@
-import type { ElementRole, InteractVerb } from '@carat/shared';
 import { normalizeWhitespace } from '@carat/shared';
 import { isHtml, isInput, isSelect } from '../dom/tags';
 import { fillSelect } from '../fill/select';
 import { inViewport, scrollToTarget } from '../scroll';
-import { SELECT_BUTTON, isSelectedCard, sliderFacts, toggleState } from './enumerate';
+import type { ActionRole } from './controls';
+import { SELECT_BUTTON, isSelectedCard, sliderFacts, toggleState } from './controls';
+
+/** The verbs the content script can carry out on one control. */
+export type ActionVerb = 'click' | 'check' | 'uncheck' | 'set' | 'choose' | 'scroll';
 
 const MAX_KEY_STEPS = 200;
 
@@ -13,7 +16,7 @@ const MAX_KEY_STEPS = 200;
  * `role` is what the snapshot called the element; an option card is clicked
  * through its own Select button or radio when it has one.
  */
-export function performInteraction(el: Element, verb: InteractVerb, value: string, role?: ElementRole): boolean {
+export function performInteraction(el: Element, verb: ActionVerb, value: string, role?: ActionRole): boolean {
   switch (verb) {
     case 'click':
       return role === 'option' ? selectCard(el) : click(el);
@@ -45,7 +48,7 @@ export function performInteraction(el: Element, verb: InteractVerb, value: strin
  * have been ticked since the snapshot, and an element the user has since
  * scrolled to has nothing left to scroll to.
  */
-export function stillFits(el: Element, verb: InteractVerb, role?: ElementRole): boolean {
+export function stillFits(el: Element, verb: ActionVerb, role?: ActionRole): boolean {
   if (!el.isConnected) return false;
   if (verb === 'check') return toggleState(el) === 'off';
   if (verb === 'uncheck') return toggleState(el) === 'on';

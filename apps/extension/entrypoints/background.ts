@@ -1,21 +1,23 @@
 import { defineBackground } from 'wxt/utils/define-background';
 import { isDenylisted } from '@carat/shared';
+import { createVisionProvider } from '@carat/providers';
 import { onMessage, sendMessage } from '../src/messaging';
-import { ContextStore, EntityStore, ShotStore, createSettingsStore, isSiteOff, parseLocation } from '../src/store';
+import { ContextStore, ShotStore, createSettingsStore, isSiteOff, parseLocation } from '../src/store';
 import {
   DiagLog,
+  HistoryStore,
   RefineQueue,
   chromeTabsApi,
+  clearActionCache,
   clearKnown,
-  createPredictPipeline,
-  createPrewarmer,
+  createNotes,
   createVisionPipeline,
   describeStatus,
+  describedTabs,
   getKnown,
   handleFeedback,
   isExtensionPage,
-  openTabs,
-  orchestrate,
+  nextAction,
   performNavigation,
   redactSettings,
   requesterFromSender,
@@ -36,25 +38,26 @@ export default defineBackground(() => {
   const trusted = (sender: chrome.runtime.MessageSender) => isExtensionPage(sender, extensionBase);
   const tabs = chromeTabsApi();
   const refine = new RefineQueue();
-  // Entities are predicted as text is captured, so a suggest request can be answered from them with no call.
-  const entities = new EntityStore(chrome.storage.session);
-  const predict = createPredictPipeline({ store, entities, settings: () => settings.get() });
+  // What the user did, per tab: clicks and typing from the page, navigations and carat's own chips from here.
+  const history = new HistoryStore(chrome.storage.session);
+  history.attach(chrome.webNavigation, chrome.tabs);
+  // What they read elsewhere, distilled by the same model the engine uses.
+  const notes = createNotes({
+    area: chrome.storage.session,
+    distill: async (text, host, signal) => {
+      const provider = createVisionProvider(await settings.get());
+      return provider ? provider.distill(text, host, signal) : [];
+    },
+    pinned: () => store.isPinned(),
+  });
   const vision = createVisionPipeline({
     store,
     shots,
     settings: () => settings.get(),
     tabs: screenApi(),
     onDiag: (tabId, d) => void diag.recordVision(tabId, d),
-    predict,
+    onText: (item) => notes.onCapture(item, true),
   });
-  // A navigation onto Maps, Calendar, Gmail or Google search starts the fast call before the page has a DOM.
-  // Attached here, at worker start, so the event wakes the worker.
-  const prewarm = createPrewarmer({
-    store,
-    settings: () => settings.get(),
-    onDiag: (tabId, d) => void diag.recordPrewarm(tabId, d),
-  });
-  prewarm.attach(chrome.webNavigation);
 
   onMessage('capture', async ({ data, sender }) => {
     const tabId = sender.tab?.id;
@@ -72,8 +75,15 @@ export default defineBackground(() => {
     if (await store.isPinned()) return note('pinned');
     const input = { tabId, url: data.url, title: data.title, text: data.text };
     const item = data.kind === 'selection' ? await store.upsertSelection(input) : await store.upsertPage(input);
-    if (item) predict.onCapture(item);
+    // A page the user is leaving is finished being read, so it is distilled now.
+    if (item) notes.onCapture(item, data.leaving === true);
     return note(item ? 'stored' : 'empty');
+  });
+
+  // What the user just did on the page, batched by the content script.
+  onMessage('history', ({ data, sender }) => {
+    const tabId = sender.tab?.id;
+    if (tabId !== undefined) void history.recordAll(tabId, data.entries).catch(() => undefined);
   });
 
   // Fire and forget from the content script's side; a picture or a model call must never hold a message port.
@@ -82,34 +92,40 @@ export default defineBackground(() => {
     if (tabId !== undefined) void vision.handle(data, tabId).catch(() => undefined);
   });
 
-  onMessage('suggestRequest', async ({ data, sender }) => {
+  onMessage('nextAction', async ({ data, sender }) => {
     const tabId = sender.tab?.id;
     try {
-      return await orchestrate(data, requesterFromSender(sender, data.page), {
-        store,
-        entities,
+      return await nextAction(data, requesterFromSender(sender, data.page), {
         settings: () => settings.get(),
-        tabs: openTabs,
+        history,
+        notes: { lines: async () => notes.top({ tabId }) },
+        tabs: () => describedTabs(tabId),
         refine,
-        vision,
         ...(tabId !== undefined ? { onDiag: (d) => void diag.recordSuggest(tabId, d) } : {}),
       });
     } catch {
-      return { suggestions: [], navigation: [], interactions: [] };
+      return { action: null };
     }
   });
 
-  onMessage('suggestRefine', async ({ data, sender }) => {
+  onMessage('nextActionRefine', async ({ data, sender }) => {
     try {
       return await refine.claim(data.ticket, sender.tab?.id);
     } catch {
-      return { suggestions: [], interactions: [] };
+      return {};
     }
   });
 
-  // Every accepted money control and every fill that stopped short is logged per tab, with the control's name.
+  // Tab and Esc on the chip: the timeline learns what happened, and Esc keeps that control quiet for a while.
   onMessage('feedback', ({ data, sender }) =>
-    handleFeedback(data, store, sender.tab?.id, { onPerform: (tabId, entry) => void diag.recordPerform(tabId, entry) }),
+    handleFeedback(data, store, sender.tab?.id, {
+      onPerform: (tabId, entry) => void diag.recordPerform(tabId, entry),
+      onHistory: (tabId, line) => {
+        if (tabId === undefined) return;
+        if (data.accepted) void history.recordAccepted(tabId, line).catch(() => undefined);
+        else void history.recordDismissed(tabId, line).catch(() => undefined);
+      },
+    }),
   );
 
   // The only place carat ever opens or focuses a tab, and only in answer to a Tab press on a visible chip.
@@ -129,7 +145,8 @@ export default defineBackground(() => {
   onMessage('getKnown', ({ sender }) => (trusted(sender) ? getKnown(store) : { items: [], pinned: false }));
   onMessage('clearKnown', async ({ sender }) => {
     if (!trusted(sender)) return;
-    await Promise.all([clearKnown(store), shots.clear(), entities.clear()]);
+    clearActionCache();
+    await Promise.all([clearKnown(store), shots.clear(), history.clear(), notes.clear()]);
   });
   onMessage('setPinned', async ({ data, sender }) =>
     trusted(sender) ? setPinned(store, data.pinned) : { pinned: await store.isPinned() },
@@ -147,11 +164,12 @@ export default defineBackground(() => {
     if (!trusted(sender)) return redactSettings(await settings.get());
     const next = await settings.set(data);
     if (!next.screenshots) await shots.clear();
+    // The level and the payments setting are part of every request, so what was cached under the old ones is stale.
+    clearActionCache();
     return next;
   });
 
-  // The shortcut asks the focused tab's content script to snapshot again, past
-  // every cache. A tab with no content script (chrome://, the store) rejects; that is fine.
+  // The shortcut asks the focused tab's content script to read the page again, past every cache.
   chrome.commands?.onCommand.addListener((command, tab) => {
     if (command !== SUGGEST_COMMAND || tab?.id === undefined) return;
     sendMessage('forceSuggest', undefined, tab.id).catch(() => undefined);
@@ -163,7 +181,8 @@ export default defineBackground(() => {
     if (alarm.name !== SWEEP_ALARM) return;
     void store.sweep();
     void shots.sweep();
-    void predict.sweep();
+    void history.sweep();
+    void notes.sweep();
   });
 });
 

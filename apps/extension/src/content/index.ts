@@ -1,7 +1,7 @@
 export { startCapture, CAPTURE_TIMING } from './capture-scheduler';
 export type { CaptureOptions } from './capture-scheduler';
-export { startSuggestions, SNAPSHOT_TIMING } from './suggest-scheduler';
-export type { SuggestionsHandle } from './suggest-scheduler';
+export { startActions, SNAPSHOT_TIMING } from './action-scheduler';
+export type { ActionsHandle, ActionOptions } from './action-scheduler';
 export { send } from './send';
 export { pageMeta } from './page-meta';
 export type { ScriptContext } from './context';

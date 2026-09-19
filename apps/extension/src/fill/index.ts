@@ -8,7 +8,7 @@ import { fillTextControl, isTextControl } from './text';
 
 export { fillContentEditable, isContentEditable } from './contenteditable';
 export { fillSelect } from './select';
-export { fillTextControl, isTextControl } from './text';
+export { fillTextControl, isTextControl, valueOf } from './text';
 export { ADAPTERS, getAdapter, resolveTarget, serpLinks } from './adapters';
 export type { HostAdapter, LinkCandidate } from './adapters';
 export { PICK_TIMING, findListbox, isPickCombobox, matchOption, pickFromListbox } from './pick';

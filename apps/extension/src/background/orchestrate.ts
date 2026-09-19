@@ -13,8 +13,8 @@ import { LocalProvider, RaceProvider, createProvider } from '@carat/providers';
 import type { NextActionResponse, PageSnapshot } from '../messaging';
 import type { AnswerOrigin, SuggestDiag } from './diag';
 import { explainGate } from './gate';
-import type { HistoryLog } from './history';
-import type { Notes } from './notes';
+import type { HistoryStore } from './history';
+
 import type { RefineQueue } from './refine';
 import type { Requester } from './requester';
 
@@ -24,9 +24,9 @@ export interface NextActionDeps {
   /** The instant answer. Defaults to the regex placeholder. */
   localProvider?: Provider;
   /** The per-tab timeline: read for the request, written when a chip is accepted or dismissed. */
-  history?: HistoryLog;
-  /** Facts distilled from pages read in other tabs. */
-  notes?: Pick<Notes, 'lines'>;
+  history?: Pick<HistoryStore, 'lines'>;
+  /** Facts distilled from pages read in other tabs, newest first. */
+  notes?: { lines(host: string): Promise<string[]> };
   /** The user's open tabs, so `switch` has something to name. */
   tabs?: () => Promise<OpenTab[]>;
   /** Where the model's later answer goes. Without it the reply waits for the model. */
@@ -73,7 +73,7 @@ export async function nextAction(input: PageSnapshot, requester: Requester, deps
   }
 
   const [history, notes, tabs] = await Promise.all([
-    deps.history?.lines(requester.tabId) ?? [],
+    requester.tabId === undefined ? [] : (deps.history?.lines(requester.tabId, started) ?? []),
     deps.notes?.lines(input.page.host) ?? [],
     deps.tabs?.().catch(() => []) ?? [],
   ]);
@@ -84,7 +84,7 @@ export async function nextAction(input: PageSnapshot, requester: Requester, deps
     ...(input.focused !== undefined ? { focused: input.focused } : {}),
     history,
     notes,
-    tabs: tabs.filter((t) => t.id !== requester.tabId),
+    tabs: tabs.filter((t: OpenTab) => t.id !== requester.tabId),
     now: new Date(started).toISOString(),
     eagerness: settings.eagerness,
     allowPayments: settings.allowPayments,
