@@ -11,7 +11,12 @@ export const STORE_LIMITS = {
   /** Screenshots: gone after three minutes, two at most, one per tab. */
   shotTtlMs: 3 * 60_000,
   maxShots: 2,
+  /** Predicted entities kept per context item. */
+  maxEntitiesPerItem: 12,
 } as const;
 
 export const STORE_KEYS = ['ctx', 'consumed', 'dismissed', 'cache', 'pinned', 'filled'] as const;
 export type StoreKey = (typeof STORE_KEYS)[number];
+
+/** Session key for predicted entities, kept apart from the context store's own keys so its `clear` and `load` never see it. */
+export const ENTITY_KEY = 'entities';
