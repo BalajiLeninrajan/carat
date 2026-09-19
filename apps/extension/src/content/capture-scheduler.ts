@@ -73,7 +73,8 @@ export function startCapture(ctx: ScriptContext, doc: Document = document, opts:
     const hash = hashText(text);
     if (onlyIfChanged && hash === lastPageHash) return;
     lastPageHash = hash;
-    void send('capture', { url: doc.location.href, title: doc.title, text, kind: 'page' }).then(captured);
+    // `leaving` tells the background this reading is finished, which is when its notes are distilled.
+    void send('capture', { url: doc.location.href, title: doc.title, text, kind: 'page', leaving }).then(captured);
   };
 
   const captureSelection = (): void => {

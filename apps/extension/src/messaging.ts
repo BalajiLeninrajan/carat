@@ -12,6 +12,7 @@ import type {
   Settings,
 } from '@carat/shared';
 import type { TabDiag } from './background/diag';
+import type { HistoryEntry } from './history';
 import type { FeedbackInput } from './background/feedback';
 import type { StatusInfo } from './background/status';
 import type { VisionCue } from './background/vision';
@@ -50,7 +51,9 @@ export type RefineResponse = Pick<SuggestResponse, 'suggestions' | 'interactions
 // tab's content script when the keyboard shortcut fires. Content scripts and
 // extension pages otherwise only send.
 export interface Protocol {
-  capture(data: { url: string; title: string; text: string; kind: 'page' | 'selection' }): void;
+  capture(data: { url: string; title: string; text: string; kind: 'page' | 'selection'; leaving?: boolean }): void;
+  /** What the user just did on the page: clicks and typing, for the per-tab timeline. */
+  history(data: { entries: HistoryEntry[] }): void;
   /** `force` skips the answer cache and the dismissed/consumed filter: the user asked out loud. */
   suggestRequest(data: { page: PageMeta; fields: FieldDescriptor[]; elements?: ElementDescriptor[]; state?: PageState; force?: boolean }): SuggestResponse;
   /** Long-poll for the next answer on a fast reply's `ticket`; polled again while the answer says `more`. */

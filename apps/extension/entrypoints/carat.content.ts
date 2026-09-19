@@ -2,6 +2,7 @@ import { defineContentScript } from 'wxt/utils/define-content-script';
 import { createChip } from '../src/chip';
 import { createPageState, send, startCapture, startStatus, startSuggestions } from '../src/content';
 import { startFrameAgent } from '../src/frames';
+import { startHistoryRecorder } from '../src/history';
 import { createStatusLine } from '../src/status';
 import { onMessage } from '../src/messaging';
 
@@ -32,6 +33,8 @@ export default defineContentScript({
     });
     // The page's own text is what a navigation chip is built from, so a new capture re-asks.
     startCapture(ctx, document, { page, onCaptured: () => suggestions.refresh() });
+    // What the user clicked and typed here, for the timeline the next request carries.
+    startHistoryRecorder(ctx, document, { emit: (entry) => void send('history', { entries: [entry] }) });
     // The keyboard shortcut lands here from the background; the only message a content script receives.
     const stop = onMessage('forceSuggest', () => {
       if (ctx.isValid) suggestions.force();
