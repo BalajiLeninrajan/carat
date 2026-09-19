@@ -311,7 +311,7 @@ async function quickAnswer(req: SuggestRequest, pass: Pass, items: ContextItem[]
   const { input, elements } = shape;
   const lists = deps.entities ? await deps.entities.forItems(items, at) : new Map<string, Entity[]>();
   const sources: EntitySource[] = context.map((c) => ({ id: c.id, origin: c.origin, entities: lists.get(c.id) ?? [] }));
-  const fromEntities = sources.some((s) => s.entities.length > 0) ? matchEntities(sources, input.fields, elements, input.page) : [];
+  const fromEntities = sources.some((s) => s.entities.length > 0) ? matchEntities(sources, input.fields, elements, input.page, shape.eagerness) : [];
   let fromLocal: Suggestion[] = [];
   try {
     fromLocal = await (deps.localProvider ?? new LocalProvider(settings.eagerness)).suggest(req, { signal: AbortSignal.timeout(pass.timeoutMs), onUnderFloor: bump });

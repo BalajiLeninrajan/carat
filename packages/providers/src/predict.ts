@@ -1,5 +1,5 @@
-import type { ElementDescriptor, Entity, EntityKind, FieldDescriptor, InteractSuggestion, PageMeta, PredictInput, Settings, Suggestion } from '@carat/shared';
-import { CONTROL_ROLES, ENTITY_RESPONSE_FORMAT, EntityListSchema, LIMITS, MAX_ENTITIES, buildPredictMessages, isDestructiveName, verbFits } from '@carat/shared';
+import type { Eagerness, ElementDescriptor, Entity, EntityKind, FieldDescriptor, InteractSuggestion, PageMeta, PredictInput, Settings, Suggestion } from '@carat/shared';
+import { CONTROL_ROLES, DEFAULT_EAGERNESS, EAGERNESS, ENTITY_RESPONSE_FORMAT, EntityListSchema, MAX_ENTITIES, buildPredictMessages, isDestructiveName, verbFits } from '@carat/shared';
 import type { Candidate } from './local/candidates';
 import { classifyField, isNeverFill, type FieldKind } from './local/fields';
 import type { OutputMode } from './openai-compat';
@@ -109,7 +109,8 @@ const KIND_HINTS: Record<EntityKind, readonly string[]> = {
   other: [],
 };
 
-const CANDIDATE_KIND: Record<Candidate['kind'], EntityKind> = {
+// A bare `name` has no kind of its own; the regex provider offers it at eager, so the level-free store never holds one.
+const CANDIDATE_KIND: Record<Exclude<Candidate['kind'], 'name'>, EntityKind> = {
   email: 'email',
   phone: 'phone',
   address: 'address',
@@ -123,6 +124,7 @@ export function entitiesFromCandidates(candidates: readonly Candidate[]): Entity
   const seen = new Set<string>();
   const out: Entity[] = [];
   for (const c of candidates) {
+    if (c.kind === 'name') continue;
     const kind = CANDIDATE_KIND[c.kind];
     const key = `${kind}\u0000${c.value}`;
     if (seen.has(key)) continue;
@@ -184,13 +186,20 @@ const MIN_CONTROL_NAME_CHARS = 4;
  * well it fits the field: a hint word on the field, the input type or the
  * autocomplete attribute is a full match; the field's classified kind is a
  * close one; a plausible second choice is weaker. One winner per field and
- * per element, over the minimum confidence, best first. Controls: a checkbox,
+ * per element, over the level's confidence floor, best first. Controls: a checkbox,
  * switch or radio whose name the entity names gets `check`; a slider named
  * the same with a numeric value gets `set`; a select with an option equal to
  * the value gets `choose`. Buttons are never offered here; a click needs a
  * fill on the page first, which is the provider's call.
  */
-export function matchEntities(sources: readonly EntitySource[], fields: readonly FieldDescriptor[], elements: readonly ElementDescriptor[], page: PageMeta): Suggestion[] {
+export function matchEntities(
+  sources: readonly EntitySource[],
+  fields: readonly FieldDescriptor[],
+  elements: readonly ElementDescriptor[],
+  page: PageMeta,
+  eagerness: Eagerness = DEFAULT_EAGERNESS,
+): Suggestion[] {
+  const floor = EAGERNESS[eagerness].minConfidence;
   const foreign = sources.filter((s) => !sameSite(s.origin, page.host));
   // An address belongs in a location field; while one is on offer a place only gets a weak claim there.
   const addressAvailable = foreign.some((s) => s.entities.some((e) => e.kind === 'address'));
@@ -205,7 +214,7 @@ export function matchEntities(sources: readonly EntitySource[], fields: readonly
         const fit = fieldFit(entity, view, addressAvailable);
         if (!fit) continue;
         const confidence = round(entity.confidence * fit.strength);
-        if (confidence < LIMITS.minConfidence || (best && confidence <= best.confidence)) continue;
+        if (confidence < floor || (best && confidence <= best.confidence)) continue;
         best = { kind: 'fill', fieldId: field.i, value: entity.value, confidence, reason: fit.reason, sourceContextId: source.id };
       }
     }
@@ -220,7 +229,7 @@ export function matchEntities(sources: readonly EntitySource[], fields: readonly
         const fit = elementFit(entity, element);
         if (!fit) continue;
         const confidence = round(entity.confidence * fit.strength);
-        if (confidence < LIMITS.minConfidence || (best && confidence <= best.confidence)) continue;
+        if (confidence < floor || (best && confidence <= best.confidence)) continue;
         best = { kind: 'interact', elementId: element.i, verb: fit.verb, value: fit.value, confidence, reason: fit.reason, sourceContextId: source.id };
       }
     }

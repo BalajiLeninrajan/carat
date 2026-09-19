@@ -141,7 +141,11 @@ describe('matchEntities', () => {
     const { request } = fixture('neg-news-search');
     expect(matchEntities(regexSources('neg-news-search'), request.fields, [], request.page)).toEqual([]);
     const timid: Entity = { value: 'Parliament Hill', kind: 'place', fieldHints: ['search'], confidence: 0.4 };
-    expect(matchEntities([{ id: 'c1', origin: 'https://www.cbc.ca', entities: [timid] }], request.fields, [], request.page)).toEqual([]);
+    const sources = [{ id: 'c1', origin: 'https://www.cbc.ca', entities: [timid] }];
+    expect(matchEntities(sources, request.fields, [], request.page, 'balanced')).toEqual([]);
+    expect(matchEntities(sources, request.fields, [], request.page, 'conservative')).toEqual([]);
+    // The eager floor (0.35) lets a timid entity through: one Esc, by that level's own rule.
+    expect(matchEntities(sources, request.fields, [], request.page, 'eager').map((s) => s.confidence)).toEqual([0.4]);
   });
 
   it('never fills from the page\'s own site, over a value, or into a credential field', () => {

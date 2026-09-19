@@ -21,7 +21,7 @@ describe('createProvider', () => {
   it('hands the eagerness setting to whichever provider it builds', () => {
     expect((createProvider({ ...DEFAULT_SETTINGS, provider: 'local', eagerness: 'balanced' }) as LocalProvider).eagerness).toBe('balanced');
     expect((createProvider({ ...DEFAULT_SETTINGS, apiKey: '' }) as LocalProvider).eagerness).toBe('eager');
-    expect((createProvider({ ...DEFAULT_SETTINGS, apiKey: 'sk-x', eagerness: 'conservative' }) as OpenAICompatProvider).options.eagerness).toBe('conservative');
+    expect(inside(createProvider({ ...DEFAULT_SETTINGS, apiKey: 'sk-x', eagerness: 'conservative' }), OpenAICompatProvider).options.eagerness).toBe('conservative');
     const both = createProvider({ ...DEFAULT_SETTINGS, provider: 'cloudflare', ...cf, apiKey: 'sk-x', eagerness: 'balanced' });
     expect(inside(both, LocalProvider).eagerness).toBe('balanced');
     expect(inside(both, JevProvider).options.eagerness).toBe('balanced');

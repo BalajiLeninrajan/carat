@@ -273,7 +273,8 @@ describe('prewarm on navigation', () => {
         fill({ sourceContextId: ctxId }),
         fill({ sourceContextId: ctxId, fieldId: 'f9' }),
         fill({ sourceContextId: 'someone-else' }),
-        fill({ sourceContextId: ctxId, confidence: 0.5 }),
+        // Under every level's floor; the default level is eager, whose floor is 0.35.
+        fill({ sourceContextId: ctxId, confidence: 0.3 }),
         fill({ sourceContextId: ctxId, value: '  ' }),
         { kind: 'action', intent: 'maps', value: 'x', when: '', location: '', confidence: 0.9, reason: 'r', sourceContextId: ctxId },
       ];

@@ -1,5 +1,5 @@
-import type { FieldDescriptor, FillSuggestion, KnownPage, KnownPageId, PageMeta, RequestContext, Settings, SuggestRequest, Suggestion } from '@carat/shared';
-import { KNOWN_PAGES, LIMITS, fnv1a, knownPageFor, knownPageForUrl, matchesKnownField } from '@carat/shared';
+import type { Eagerness, FieldDescriptor, FillSuggestion, KnownPage, KnownPageId, PageMeta, RequestContext, Settings, SuggestRequest, Suggestion } from '@carat/shared';
+import { EAGERNESS, KNOWN_PAGES, LIMITS, fnv1a, knownPageFor, knownPageForUrl, matchesKnownField } from '@carat/shared';
 import type { Provider } from '@carat/providers';
 import { createProvider } from '@carat/providers';
 import type { ContextStore } from '../store';
@@ -108,7 +108,7 @@ export function createPrewarmer(deps: PrewarmDeps): Prewarmer {
     const gate = explainGate({ page: known.page, fields: known.fields }, items, settings, requester, at);
     if (gate !== 'ok') return note(gate);
     // The gate also passes on the tab's own text, which only ever feeds tab offers; a fill needs another tab's.
-    const context = scoreAndPickContext(items, requester, at);
+    const context = scoreAndPickContext(items, requester, at, settings.eagerness);
     if (context.length === 0) return note('own-context');
 
     const key = prewarmKey(known.id, context);
@@ -135,7 +135,7 @@ export function createPrewarmer(deps: PrewarmDeps): Prewarmer {
     };
     const attempt = await ask(req, settings);
     if (attempt.error) return note('failed', { attempts: [attempt] });
-    const fills = validFills(attempt.suggestions, known.fields, context);
+    const fills = validFills(attempt.suggestions, known.fields, context, settings.eagerness);
     await deps.store.setCached(key, fills);
     return note('warmed', { attempts: [attempt], count: fills.length });
   }
@@ -208,12 +208,13 @@ export function adoptFills(suggestions: Suggestion[], known: FieldDescriptor[], 
   return out;
 }
 
-/** The orchestrator's fill rule: an empty known field, a real value, confident enough, citing another tab's text. */
-function validFills(suggestions: Suggestion[], fields: FieldDescriptor[], context: RequestContext): FillSuggestion[] {
+/** The orchestrator's fill rule: an empty known field, a real value, over the level's floor, citing another tab's text. */
+function validFills(suggestions: Suggestion[], fields: FieldDescriptor[], context: RequestContext, eagerness: Eagerness): FillSuggestion[] {
   const ids = new Set(context.map((c) => c.id));
+  const floor = EAGERNESS[eagerness].minConfidence;
   return suggestions.filter((s): s is FillSuggestion => {
     if (s.kind !== 'fill') return false;
-    if (typeof s.value !== 'string' || s.value.trim().length === 0 || s.confidence < LIMITS.minConfidence) return false;
+    if (typeof s.value !== 'string' || s.value.trim().length === 0 || s.confidence < floor) return false;
     return fields.some((f) => f.i === s.fieldId && !f.v) && ids.has(s.sourceContextId);
   });
 }

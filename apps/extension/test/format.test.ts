@@ -98,7 +98,7 @@ describe('describeVision', () => {
     expect(describeSuggest({ ...base, offered: 1, eagerness: 'balanced', underFloor: 1, navigation: 1 }, NOW)).toBe(
       'checked just now: openai answered in 40 ms with 0, offered 1, 1 tab offer, 1 candidate under the balanced floor (0.55)',
     );
-    expect(describeSuggest({ ...base, offered: 0, eagerness: 'conservative', underFloor: 3, refine: true }, NOW)).toBe(
+    expect(describeSuggest({ ...base, offered: 0, eagerness: 'conservative', underFloor: 3, refine: true, smart: true }, NOW)).toBe(
       'checked just now: openai answered in 40 ms with 0, offered 0, 3 candidates under the conservative floor (0.7); smart model asked for a second opinion',
     );
     // Nothing dropped, nothing said; a record from before the setting existed reads as the default.
