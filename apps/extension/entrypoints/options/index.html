@@ -91,9 +91,10 @@
           <select name="provider">
             <option value="openai">OpenAI</option>
             <option value="baseten">Baseten (OpenAI-compatible)</option>
+            <option value="cloudflare">Cloudflare Jev first, then the model below</option>
             <option value="local">Local (regex only, no network)</option>
           </select>
-          <span class="hint">Local runs when there is no key or the network call fails, whatever you pick here.</span>
+          <span class="hint">Local runs when there is no key or the network call fails, whatever you pick here. Cloudflare asks TypeSafe's Jev to pick from what the regexes found, and only calls the model below when Jev has nothing.</span>
         </label>
 
         <label>
@@ -110,6 +111,18 @@
         <label>
           <span class="name">Model</span>
           <input type="text" name="model" placeholder="gpt-5.6-luna" autocomplete="off" spellcheck="false" />
+        </label>
+
+        <label>
+          <span class="name">Cloudflare account ID</span>
+          <input type="text" name="cfAccountId" autocomplete="off" spellcheck="false" />
+          <span class="hint">Only used by the Cloudflare provider. The Workers AI account id from the Cloudflare dashboard.</span>
+        </label>
+
+        <label>
+          <span class="name">Cloudflare API token</span>
+          <input type="password" name="cfApiToken" autocomplete="off" spellcheck="false" />
+          <span class="hint">A token with the Workers AI permission. Stored like the API key above: local extension storage, background worker only.</span>
         </label>
 
         <label class="row">

@@ -13,7 +13,7 @@ export function isExtensionPage(sender: chrome.runtime.MessageSender, base: stri
   return sender.origin !== undefined && `${sender.origin}/` === base;
 }
 
-/** What a content script may learn about settings: everything but the key. */
+/** What a content script may learn about settings: everything but the keys. */
 export function redactSettings(settings: Settings): Settings {
-  return { ...settings, apiKey: '' };
+  return { ...settings, apiKey: '', cfApiToken: '' };
 }

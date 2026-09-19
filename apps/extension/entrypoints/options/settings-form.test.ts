@@ -2,7 +2,7 @@ import { DEFAULT_SETTINGS } from '@carat/shared';
 import { describe, expect, it } from 'vitest';
 import { normalizeSettings } from './settings-form';
 
-const base = { enabled: true, provider: 'openai', baseURL: '', apiKey: '', model: '', statusLine: false };
+const base = { enabled: true, provider: 'openai', baseURL: '', apiKey: '', model: '', statusLine: false, cfAccountId: '', cfApiToken: '' };
 
 describe('normalizeSettings', () => {
   it('fills blank baseURL and model with the defaults', () => {
@@ -32,7 +32,16 @@ describe('normalizeSettings', () => {
       DEFAULT_SETTINGS.provider,
     );
     expect(normalizeSettings({ ...base, provider: 'local' }).provider).toBe('local');
+    expect(normalizeSettings({ ...base, provider: 'cloudflare' }).provider).toBe('cloudflare');
     expect(normalizeSettings({ ...base, enabled: false }).enabled).toBe(false);
+  });
+
+  it('trims the Cloudflare account id and token and keeps them empty otherwise', () => {
+    const s = normalizeSettings({ ...base, provider: 'cloudflare', cfAccountId: ' 0123abcd ', cfApiToken: ' cf-x ' });
+    expect(s.cfAccountId).toBe('0123abcd');
+    expect(s.cfApiToken).toBe('cf-x');
+    expect(normalizeSettings(base).cfAccountId).toBe('');
+    expect(normalizeSettings(base).cfApiToken).toBe('');
   });
 
   it('carries the status line toggle through', () => {

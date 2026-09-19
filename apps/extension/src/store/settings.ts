@@ -3,14 +3,14 @@ import { DEFAULT_SETTINGS } from '@carat/shared';
 import type { StorageArea } from './storage-area';
 
 const KEY = 'settings';
-const PROVIDERS: ReadonlySet<Settings['provider']> = new Set(['openai', 'baseten', 'local']);
+const PROVIDERS: ReadonlySet<Settings['provider']> = new Set(['openai', 'baseten', 'local', 'cloudflare']);
 
 export interface SettingsStore {
   get(): Promise<Settings>;
   set(patch: Partial<Settings>): Promise<Settings>;
 }
 
-/** Settings live in chrome.storage.local; the key never leaves the background context. */
+/** Settings live in chrome.storage.local; the keys never leave the background context. */
 export function createSettingsStore(area: Pick<StorageArea, 'get' | 'set'>): SettingsStore {
   return {
     async get() {
@@ -38,6 +38,8 @@ function sanitize(raw: unknown): Settings {
     baseURL: str(r.baseURL, DEFAULT_SETTINGS.baseURL).trim().replace(/\/+$/, '') || DEFAULT_SETTINGS.baseURL,
     apiKey: str(r.apiKey, DEFAULT_SETTINGS.apiKey).trim(),
     model: str(r.model, DEFAULT_SETTINGS.model).trim() || DEFAULT_SETTINGS.model,
+    cfAccountId: str(r.cfAccountId, DEFAULT_SETTINGS.cfAccountId).trim(),
+    cfApiToken: str(r.cfApiToken, DEFAULT_SETTINGS.cfApiToken).trim(),
     disabledHosts: hosts(r.disabledHosts),
     statusLine: typeof r.statusLine === 'boolean' ? r.statusLine : DEFAULT_SETTINGS.statusLine,
   };

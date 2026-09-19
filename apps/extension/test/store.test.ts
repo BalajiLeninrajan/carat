@@ -262,6 +262,8 @@ describe('settings store', () => {
       baseURL: 'https://api.openai.com/v1',
       apiKey: '',
       model: 'gpt-5.6-luna',
+      cfAccountId: '',
+      cfApiToken: '',
       disabledHosts: [],
       statusLine: false,
     });
@@ -270,11 +272,13 @@ describe('settings store', () => {
   it('merges patches and drops unknown values', async () => {
     const area = new FakeArea();
     const settings = createSettingsStore(area);
-    const next = await settings.set({ apiKey: ' sk-1 ', provider: 'nope' as never, baseURL: 'https://x.test/v1/' });
+    const next = await settings.set({ apiKey: ' sk-1 ', provider: 'nope' as never, baseURL: 'https://x.test/v1/', cfApiToken: ' cf-1 ' });
     expect(next.apiKey).toBe('sk-1');
+    expect(next.cfApiToken).toBe('cf-1');
     expect(next.provider).toBe('openai');
     expect(next.baseURL).toBe('https://x.test/v1');
     expect(await settings.get()).toEqual(next);
+    expect((await settings.set({ provider: 'cloudflare' })).provider).toBe('cloudflare');
   });
 
   it('keeps disabled hosts lowercased, deduped and free of junk', async () => {

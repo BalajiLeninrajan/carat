@@ -304,6 +304,47 @@ describe('orchestrate', () => {
     }
   });
 
+  it('runs Jev, then the chat model, then regex, all inside one call when the provider is cloudflare', async () => {
+    const cloudflare: Settings = { ...enabled, provider: 'cloudflare', cfAccountId: 'acct', cfApiToken: 'cf' };
+    const envelope = (answers: Record<string, unknown>) =>
+      new Response(JSON.stringify({ success: true, errors: [], result: { model: 'jev', answers } }), { status: 200 });
+    const completion = (value: string, sourceContextId: string) =>
+      new Response(
+        JSON.stringify({ choices: [{ message: { content: JSON.stringify({ suggestions: [{ fieldId: 'f0', value, confidence: 0.9, reason: 'r', sourceContextId }] }) } }] }),
+        { status: 200 },
+      );
+
+    // Jev picks the regex candidate; the chat model is never called.
+    {
+      const { store, now } = await seeded();
+      const fetchImpl = vi.fn(async () => envelope({ relevant: { type: 'noul', noul: 0.9 }, field_f0: { type: 'choice', choice: 'k0', confidence: 0.9, probabilities: { k0: 0.9, k1: 0.05, none: 0.05 } } }));
+      const res = await orchestrate(maps, requester, { store, settings: async () => cloudflare, createProvider: (s) => createProvider(s, fetchImpl as unknown as typeof fetch), now });
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      expect(String((fetchImpl.mock.calls[0] as unknown as [string])[0])).toContain('api.cloudflare.com');
+      expect(res.suggestions.map((s) => [s.fieldId, s.value])).toEqual([['f0', 'Seven Shores Cafe']]);
+    }
+    // Jev says none; the chat model answers on the same budget.
+    {
+      const { store, ctxId, now } = await seeded();
+      const fetchImpl = vi
+        .fn()
+        .mockResolvedValueOnce(envelope({ relevant: { type: 'noul', noul: 0.2 } }))
+        .mockResolvedValueOnce(completion('From the model', ctxId));
+      const res = await orchestrate(maps, requester, { store, settings: async () => cloudflare, createProvider: (s) => createProvider(s, fetchImpl as unknown as typeof fetch), now });
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      expect(String((fetchImpl.mock.calls[1] as unknown as [string])[0])).toContain('api.openai.com');
+      expect(res.suggestions.map((s) => s.value)).toEqual(['From the model']);
+    }
+    // No chat key: Jev alone, and an error envelope falls back to regex.
+    {
+      const { store, now } = await seeded();
+      const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ success: false, errors: [{ code: 10000, message: 'Authentication error' }] }), { status: 401 }));
+      const res = await orchestrate(maps, requester, { store, settings: async () => ({ ...cloudflare, apiKey: '' }), createProvider: (s) => createProvider(s, fetchImpl as unknown as typeof fetch), now });
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      expect(res.suggestions.map((s) => [s.fieldId, s.value])).toEqual([['f0', 'Seven Shores Cafe']]);
+    }
+  });
+
   it('falls back to the local provider when the provider times out', async () => {
     const { store, ctxId, now } = await seeded();
     let aborted = false;
@@ -526,8 +567,9 @@ describe('trusted senders', () => {
     expect(isExtensionPage({}, base)).toBe(false);
   });
 
-  it('redacts the key and nothing else', () => {
-    expect(redactSettings(enabled)).toEqual({ ...enabled, apiKey: '' });
+  it('redacts the keys and nothing else', () => {
+    const withCloudflare = { ...enabled, cfAccountId: 'acct', cfApiToken: 'cf-secret' };
+    expect(redactSettings(withCloudflare)).toEqual({ ...withCloudflare, apiKey: '', cfApiToken: '' });
   });
 });
 

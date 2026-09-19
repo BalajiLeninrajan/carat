@@ -17,6 +17,8 @@ const baseURL = field<HTMLInputElement>('baseURL');
 const apiKey = field<HTMLInputElement>('apiKey');
 const model = field<HTMLInputElement>('model');
 const statusLine = field<HTMLInputElement>('statusLine');
+const cfAccountId = field<HTMLInputElement>('cfAccountId');
+const cfApiToken = field<HTMLInputElement>('cfApiToken');
 
 // A fresh service worker can take a moment to wake; a dead one never answers.
 // Cap the wait so the page can offer a retry instead of hanging.
@@ -34,6 +36,8 @@ function render(s: Settings): void {
   apiKey.value = s.apiKey;
   model.value = s.model;
   statusLine.checked = s.statusLine;
+  cfAccountId.value = s.cfAccountId;
+  cfApiToken.value = s.cfApiToken;
 }
 
 function read(): Partial<Settings> {
@@ -44,6 +48,8 @@ function read(): Partial<Settings> {
     apiKey: apiKey.value,
     model: model.value,
     statusLine: statusLine.checked,
+    cfAccountId: cfAccountId.value,
+    cfApiToken: cfApiToken.value,
   });
 }
 
