@@ -259,6 +259,22 @@ describe('when it asks', () => {
     chip.destroy();
   });
 
+  it('asks again once a scroll of the user’s own settles', async () => {
+    // The outline now stops at the fold, so a scroll changes what the model would see.
+    document.body.innerHTML = '<main><button>Save</button></main>';
+    layAll();
+    answer(null);
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    expect(asks()).toHaveLength(1);
+
+    window.dispatchEvent(new Event('scroll'));
+    await settled();
+    expect(asks()).toHaveLength(2);
+    chip.destroy();
+  });
+
   it('coalesces a burst of interactions into one request', async () => {
     document.body.innerHTML = '<main><input aria-label="Title"><button>Save</button></main>';
     layAll();
