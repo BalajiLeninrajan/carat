@@ -1,0 +1,299 @@
+/**
+ * Request bodies for the OpenAI Responses API.
+ *
+ * Order matters for prompt caching, which matches on a shared prefix: static
+ * instructions and few-shots first, then the page outline (stable while the
+ * user types), and the typed text last.
+ */
+
+import type { FieldInfo } from "../shared/protocol.js";
+import type { Settings } from "../shared/settings.js";
+
+type InputMessage = { role: "user" | "assistant"; content: string };
+
+export interface ResponsesRequest {
+  model: string;
+  instructions: string;
+  input: InputMessage[];
+  max_output_tokens: number;
+  stream: boolean;
+  store: boolean;
+  reasoning?: { effort: string };
+  service_tier?: string;
+  prompt_cache_key?: string;
+  text?: { format: object };
+}
+
+/** Short stable hash (FNV-1a) for prompt_cache_key. */
+function hash(s: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(36);
+}
+
+function cacheKey(kind: string, url: string): string {
+  try {
+    const u = new URL(url);
+    return `carat-${kind}-${hash(u.origin + u.pathname)}`;
+  } catch {
+    return `carat-${kind}`;
+  }
+}
+
+function common(settings: Settings, model: string, url: string, kind: string) {
+  return {
+    model,
+    stream: true,
+    store: false,
+    // Autocomplete is a latency path: no thinking on a few dozen output tokens.
+    reasoning: { effort: "none" },
+    prompt_cache_key: cacheKey(kind, url),
+    ...(settings.serviceTier !== "auto" ? { service_tier: settings.serviceTier } : {}),
+  };
+}
+
+function escapeAttr(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+}
+
+function fieldTag(field: FieldInfo, axName: string | undefined, role: string | undefined): string {
+  const attrs: string[] = [
+    `role="${role ?? (field.multiline ? "textbox" : field.inputType === "search" ? "searchbox" : "textbox")}"`,
+    `name="${escapeAttr(axName || field.name)}"`,
+    `type="${field.inputType}"`,
+    `multiline="${field.multiline}"`,
+  ];
+  if (field.placeholder) attrs.push(`placeholder="${escapeAttr(field.placeholder)}"`);
+  if (field.maxLength != null) attrs.push(`maxlength="${field.maxLength}"`);
+  return `<field ${attrs.join(" ")}/>`;
+}
+
+// ---------------------------------------------------------------------------
+// Ghost text
+
+export const TEXT_INSTRUCTIONS = `You are Carat, an inline autocomplete engine inside a web browser. The user is typing into a text field on a web page. Predict what they will type next, continuing exactly from the end of <typed>.
+
+Rules:
+- Output ONLY the continuation text. No quotes, no preamble, no explanation. Never repeat anything already in <typed>.
+- If <typed> ends mid-word, finish that word first (no leading space). If it ends with a space, do not start with another space.
+- Ground the suggestion in the page: names, numbers, products, dates and facts that appear in <page> are fair game. Do not invent specifics that are not there.
+- Match what the field is for and the tone of the page: a search box wants a query, a subject line wants a short title, a message body wants natural prose in the user's own voice.
+- Single-line fields: one line, never a newline. Multi-line fields: at most one sentence or clause past the caret.
+- Short and likely beats long and speculative. If there is no confident continuation, output nothing at all.`;
+
+const TEXT_SHOTS: InputMessage[] = [
+  {
+    role: "user",
+    content: `<page>
+PAGE: Hiking Boots | TrailGear (https://trailgear.example/boots)
+navigation "Main":
+  link "Men"
+  link "Women"
+search:
+  >> FOCUSED searchbox "Search TrailGear"
+main:
+  heading(1) "Hiking Boots"
+  text: Waterproof · Gore-Tex · Wide fit available
+</page>
+<field role="searchbox" name="Search TrailGear" type="search" multiline="false"/>
+<typed>waterproof hiking boots wi</typed>`,
+  },
+  { role: "assistant", content: "de fit" },
+  {
+    role: "user",
+    content: `<page>
+PAGE: Inbox (3) — Mail (https://mail.example.com/compose)
+dialog "New message":
+  textbox "To" = "dana.lee@acme.com"
+  >> FOCUSED textbox "Subject"
+  textbox "Message body" = "Hi Dana, attaching the Q3 vendor invoices you asked for on Friday."
+</page>
+<field role="textbox" name="Subject" type="text" multiline="false"/>
+<typed>Q3 vendor </typed>`,
+  },
+  { role: "assistant", content: "invoices" },
+  {
+    role: "user",
+    content: `<page>
+PAGE: Ticket #4821 — Support Desk (https://desk.example.com/t/4821)
+main:
+  heading(1) "Printer offline after firmware update"
+  region "Conversation":
+    text: Customer · 2 days ago
+    text: Since the 3.2 firmware update my HP M452 shows as offline after every reboot. Three machines on the same subnet are affected.
+    text: Customer · 1 hour ago
+    text: It says 3.2.0.4711. The other two are on the same build.
+  form "Reply":
+    combobox "Status" = "Awaiting customer"
+    >> FOCUSED textbox "Reply body"
+    button "Send reply"
+</page>
+<field role="textbox" name="Reply body" type="textarea" multiline="true"/>
+<typed>Thanks for confirming. Since all three are on 3.2.0.4711, </typed>`,
+  },
+  {
+    role: "assistant",
+    content: "could you try rolling one of them back to 3.1 and let me know if it stays online after a reboot?",
+  },
+];
+
+export function buildTextRequest(opts: {
+  settings: Settings;
+  url: string;
+  outline: string;
+  field: FieldInfo;
+  axName?: string;
+  axRole?: string;
+}): ResponsesRequest {
+  const { settings, url, outline, field } = opts;
+  const content = `<page>
+${outline}
+</page>
+${fieldTag(field, opts.axName, opts.axRole)}
+<typed>${field.typed}</typed>`;
+  return {
+    ...common(settings, settings.textModel, url, "text"),
+    instructions: TEXT_INSTRUCTIONS,
+    input: [...TEXT_SHOTS, { role: "user", content }],
+    max_output_tokens: field.multiline ? 48 : 24,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Next action
+
+export const ACTION_INSTRUCTIONS = `You are Carat's next-action predictor, running inside a web browser. You see the current page as an accessibility outline in which every control the user could operate is numbered [n], plus a log of what the user just did. Predict the single action the user is most likely to take next, so they can accept it with one keypress.
+
+Kinds:
+- "click": press button / link / checkbox / radio / tab / menu item [n].
+- "fill": move to text field [n] and type "value". Only when the value is clearly implied by the page or the history (e.g. a quantity, a search term, a reply the context makes obvious). Never invent personal data such as names, addresses, emails, phone numbers, passwords or card numbers.
+- "select": choose the option whose exact text is "value" in combobox [n].
+
+You must always suggest an action. There is no "nothing" answer: even when the next step is uncertain, pick the single most likely one.
+
+How to decide:
+- Follow the flow the user is in. Read the history as a sequence: what were they trying to get done, and what step comes next? A filled-in form wants its submit button; an opened dialog wants its primary action; a just-added cart item wants checkout.
+- The focused control and the controls near it are the strongest signal. "(required)" fields that are still empty come before submitting.
+- Only use numbers that appear in the outline. Never target a disabled control.
+- Do not repeat the action the user just took, and never propose something the history shows they dismissed.
+- Do not lead the user away from a task in progress (logout, footer links, ads, unrelated navigation) unless the history points there.
+- When unsure, choose the control the user is most likely to want next on this page (usually the primary action near the focus, or the first item of the main content).
+
+Output fields:
+- target: the [n] of the control. Always a number from the outline.
+- kind: one of the kinds above.
+- value: the text to type or the option to select; "" for click.
+- label: 1 to 4 words for the Tab hint, e.g. "Send reply", "Checkout", "Status: Resolved", "Quantity 2".
+- irreversible: true if the action sends, submits, posts, publishes, pays, buys, deletes, or otherwise cannot be undone.`;
+
+export const ACTION_SCHEMA = {
+  type: "object",
+  // `target` first: the ring can move before the rest of the JSON has streamed.
+  properties: {
+    target: { type: "integer" },
+    kind: { type: "string", enum: ["click", "fill", "select"] },
+    value: { type: "string" },
+    label: { type: "string" },
+    irreversible: { type: "boolean" },
+  },
+  required: ["target", "kind", "value", "label", "irreversible"],
+  additionalProperties: false,
+};
+
+const ACTION_SHOTS: InputMessage[] = [
+  {
+    role: "user",
+    content: `<page>
+PAGE: Your cart — ShopCo (https://shop.example/cart)
+banner:
+  [1] link "ShopCo home"
+  [2] searchbox "Search"
+main:
+  heading(1) "Your cart (1 item)"
+  text: Ceramic pour-over set · $34.00
+  [3] spinbutton "Quantity" = "1"
+  [4] button "Remove"
+  text: Subtotal $34.00
+  [5] button "Proceed to checkout"
+contentinfo:
+  [6] link "Careers"
+</page>
+<history>
+- 12s ago: clicked button "Add to cart" [on shop.example/p/pour-over-set]
+- 3s ago: clicked link "Cart (1)" [on shop.example/p/pour-over-set]
+</history>`,
+  },
+  {
+    role: "assistant",
+    content: `{"target":5,"kind":"click","value":"","label":"Checkout","irreversible":false}`,
+  },
+  {
+    role: "user",
+    content: `<page>
+PAGE: Ticket #4821 — Support Desk (https://desk.example.com/t/4821)
+main:
+  heading(1) "Printer offline after firmware update"
+  form "Reply":
+    [1] combobox "Status" = "Awaiting customer"
+      option "Open"
+      option "Awaiting customer"
+      option "Resolved"
+    >> FOCUSED [2] textbox "Reply body" = "Glad the rollback fixed it! I'll close this ticket now, just reply here if it comes back."
+    [3] button "Send reply"
+</page>
+<history>
+- 40s ago: typed into textbox "Reply body"
+</history>`,
+  },
+  {
+    role: "assistant",
+    content: `{"target":1,"kind":"select","value":"Resolved","label":"Status: Resolved","irreversible":false}`,
+  },
+  {
+    role: "user",
+    content: `<page>
+PAGE: News — Daily Planet (https://planet.example/)
+banner:
+  [1] link "Home"
+  [2] link "World"
+  [3] link "Sports"
+main:
+  heading(2) "City council approves new transit budget"
+  [4] link "Read more"
+  heading(2) "Local team wins opener"
+  [5] link "Read more"
+</page>
+<history>
+(nothing yet)
+</history>`,
+  },
+  {
+    role: "assistant",
+    content: `{"target":4,"kind":"click","value":"","label":"Read top story","irreversible":false}`,
+  },
+];
+
+export function buildActionRequest(opts: {
+  settings: Settings;
+  url: string;
+  outline: string;
+  history: string;
+}): ResponsesRequest {
+  const { settings, url, outline, history } = opts;
+  const content = `<page>
+${outline}
+</page>
+<history>
+${history}
+</history>`;
+  return {
+    ...common(settings, settings.actionModel, url, "action"),
+    instructions: ACTION_INSTRUCTIONS,
+    input: [...ACTION_SHOTS, { role: "user", content }],
+    max_output_tokens: 80,
+    text: { format: { type: "json_schema", name: "next_action", strict: true, schema: ACTION_SCHEMA } },
+  };
+}

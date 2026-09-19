@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "Carat",
+  "version": "0.2.0",
+  "description": "Cursor-style Tab for the browser, grounded in Chrome's accessibility tree.",
+  "permissions": [
+    "debugger",
+    "storage",
+    "tabs",
+    "webNavigation"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background/index.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content/index.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "options_page": "options/options.html",
+  "action": {
+    "default_title": "Carat"
+  }
+}

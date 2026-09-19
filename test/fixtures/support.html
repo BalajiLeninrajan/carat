@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Ticket #4821 — Support Desk</title>
+  <style>
+    body { font: 15px/1.5 system-ui, sans-serif; margin: 0; color: #1f2937; }
+    header, footer { background: #111827; color: white; padding: 10px 24px; }
+    header nav a, footer a { color: #c4b5fd; margin-right: 14px; }
+    main { max-width: 720px; margin: 24px auto; padding: 0 16px; }
+    .msg { border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px 14px; margin: 10px 0; }
+    .meta { color: #6b7280; font-size: 13px; }
+    label { display: block; font-weight: 600; margin: 12px 0 4px; }
+    input[type=text], textarea, select { width: 100%; box-sizing: border-box; padding: 8px; font: inherit; }
+    textarea { min-height: 120px; }
+    button { margin-top: 12px; padding: 8px 16px; font: inherit; }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>Support Desk</strong>
+    <nav aria-label="Main">
+      <a href="#">Inbox</a><a href="#">My tickets</a><a href="#">Reports</a>
+    </nav>
+  </header>
+  <main>
+    <h1>Printer offline after firmware update</h1>
+    <p class="meta">Ticket #4821 · opened by Sam Ortiz · Priority: High</p>
+    <section aria-label="Conversation">
+      <div class="msg">
+        <div class="meta">Customer · 2 days ago</div>
+        <p>Since the 3.2 firmware update my HP M452 shows as offline after every reboot. Printing works
+        for a few minutes if I power-cycle it. Three machines on the same subnet are affected.</p>
+      </div>
+      <div class="msg">
+        <div class="meta">Agent (you) · 1 day ago</div>
+        <p>Thanks Sam. Can you print a configuration page and tell me the exact firmware build?</p>
+      </div>
+      <div class="msg">
+        <div class="meta">Customer · 1 hour ago</div>
+        <p>It says 3.2.0.4711. The other two are on the same build.</p>
+      </div>
+    </section>
+    <form aria-label="Reply" onsubmit="event.preventDefault(); document.getElementById('sent').hidden = false;">
+      <fieldset>
+        <legend>Reply</legend>
+        <label for="status">Status</label>
+        <select id="status">
+          <option>Open</option>
+          <option selected>Awaiting customer</option>
+          <option>Resolved</option>
+        </select>
+        <label for="subject">Subject</label>
+        <input type="text" id="subject" value="Re: Printer offline after firmware update" />
+        <label for="body">Reply body</label>
+        <textarea id="body" placeholder="Write your reply…" required></textarea>
+        <label><input type="checkbox" id="kb" /> Attach knowledge-base article</label>
+        <label for="note">Internal note (not sent to customer)</label>
+        <input type="text" id="note" />
+        <button type="submit">Send reply</button>
+        <button type="button">Save draft</button>
+      </fieldset>
+    </form>
+    <p id="sent" role="status" hidden>Reply sent.</p>
+  </main>
+  <footer><a href="#">Help</a><a href="#">Privacy</a></footer>
+</body>
+</html>
