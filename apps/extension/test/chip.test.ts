@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { AUTO_DISMISS_MS, CORNER_INSET_PX, createChip, type Chip, type DismissReason } from '../src/chip';
 
+// Grabbed before any test spies on it, so a spy never wraps an earlier spy.
+const attachShadow = Element.prototype.attachShadow;
+
 function key(target: EventTarget, k: string, init: KeyboardEventInit = {}): KeyboardEvent {
   const e = new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, ...init });
   target.dispatchEvent(e);
@@ -206,10 +209,16 @@ describe('corner chip', () => {
   let onAccept: Mock<() => void>;
   let onDismiss: Mock<(reason: DismissReason) => void>;
 
+  let root: ShadowRoot;
+
   beforeEach(() => {
     vi.useFakeTimers();
     composer = document.createElement('textarea');
     document.body.append(composer);
+    vi.spyOn(Element.prototype, 'attachShadow').mockImplementation(function (this: Element, init) {
+      root = attachShadow.call(this, init);
+      return root;
+    });
     chip = createChip();
     onAccept = vi.fn<() => void>();
     onDismiss = vi.fn<(reason: DismissReason) => void>();
@@ -218,17 +227,20 @@ describe('corner chip', () => {
 
   afterEach(() => {
     chip.destroy();
+    vi.restoreAllMocks();
     document.body.innerHTML = '';
     vi.useRealTimers();
   });
 
-  it('sits in the bottom-right corner with the label, the value and a Tab keycap', () => {
+  it('sits centred at the bottom as a banner with the label, the value and a Tab keycap', () => {
     const host = hosts()[0] as HTMLElement;
     expect(host.style.display).toBe('block');
-    expect(host.style.right).toBe(`${CORNER_INSET_PX}px`);
     expect(host.style.bottom).toBe(`${CORNER_INSET_PX}px`);
+    expect(host.style.left).toBe('50%');
+    expect(host.style.transform).toBe('translateX(-50%)');
     expect(host.style.top).toBe('auto');
-    expect(host.style.left).toBe('auto');
+    expect(host.style.right).toBe('auto');
+    expect(root.querySelector('.chip')!.classList.contains('is-banner')).toBe(true);
     expect(chip.visible).toBe(true);
   });
 
@@ -277,6 +289,8 @@ describe('corner chip', () => {
     const host = hosts()[0] as HTMLElement;
     expect(host.style.right).toBe('');
     expect(host.style.bottom).toBe('');
+    expect(host.style.transform).toBe('');
+    expect(root.querySelector('.chip')!.classList.contains('is-banner')).toBe(false);
     expect(host.style.top).toBe('136px');
     expect(hosts().length).toBe(1);
   });

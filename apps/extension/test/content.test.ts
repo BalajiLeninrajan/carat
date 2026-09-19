@@ -327,7 +327,7 @@ describe('navigation chip', () => {
     await flush();
     const host = document.querySelector('[data-carat-chip]') as HTMLElement;
     expect(host.style.display).toBe('block');
-    expect(host.style.bottom).toBe('16px');
+    expect(host.style.bottom).toBe('24px');
 
     const e = tab();
     expect(e.defaultPrevented).toBe(true);
@@ -377,7 +377,7 @@ describe('navigation chip', () => {
     expect(calls('navigate')).toEqual([]);
     // With the fill consumed, the same answer's navigation takes the corner.
     expect(host.style.display).toBe('block');
-    expect(host.style.bottom).toBe('16px');
+    expect(host.style.bottom).toBe('24px');
   });
 
   it('reports a dismissal on Escape and never navigates', async () => {

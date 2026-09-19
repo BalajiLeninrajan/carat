@@ -6,7 +6,7 @@ Hack The North 2026 project
 
 Carat is a Chrome extension that remembers the text on the tabs you read and, when you land on a page with an empty field, offers to fill that field from what you just read. The offer is a small chip beside the field that says `Fill "Seven Shores Cafe"? Tab`; Tab fills it, Esc dismisses it, and nothing else happens.
 
-When the page you are reading names a place, a plan with a time, or someone to email, and there is no field on it worth filling, Carat instead offers the next tab: a chip in the bottom-right corner that says `Open in Google Maps: "Seven Shores Cafe"? Tab`. Tab opens that tab (or switches to it, if you already have Maps open) with the search, event or recipient prefilled through the URL. Esc dismisses it. Carat never navigates on its own; a tab only opens or changes after a Tab press on a visible chip. It never clicks, and it never fills more than the one field you accepted.
+When the page you are reading names a place, a plan with a time, or someone to email, and there is no field on it worth filling, Carat instead offers the next tab: a banner centred at the bottom of the page that says `Open in Google Maps: "Seven Shores Cafe"? Tab`. Tab opens that tab (or switches to it, if you already have Maps open) with the search, event or recipient prefilled through the URL. Esc dismisses it. Carat never navigates on its own; a tab only opens or changes after a Tab press on a visible chip. It never clicks, and it never fills more than the one field you accepted.
 
 ## The errand it was built around
 

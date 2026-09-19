@@ -28,7 +28,7 @@ export interface ChipShowOptions extends ChipText {
   interceptFrom?: Element | null;
 }
 
-/** A chip with no field: it sits in the bottom-right corner and takes Tab from anywhere on the page. */
+/** A chip with no field: a larger banner centred at the bottom of the viewport that takes Tab from anywhere on the page. */
 export interface CornerShowOptions extends ChipText {
   label: string; // "Open in Google Maps"
 }
@@ -42,7 +42,7 @@ export interface Chip {
 }
 
 export const AUTO_DISMISS_MS = 20_000;
-export const CORNER_INSET_PX = 16;
+export const CORNER_INSET_PX = 24;
 const VALUE_MAX = 40;
 const HOST_ATTR = 'data-carat-chip';
 
@@ -154,8 +154,10 @@ export function createChip(doc: Document = document): Chip {
     const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(() => reposition()) : null;
     observer?.observe(opts.target);
     session = { ...base, mode: 'field', target: opts.target, interceptFrom: opts.interceptFrom ?? null, observer };
+    pill.classList.remove('is-banner');
     host.style.right = '';
     host.style.bottom = '';
+    host.style.transform = '';
     win.addEventListener('scroll', reposition, { capture: true, passive: true });
     win.addEventListener('resize', reposition, { passive: true });
     opts.target.addEventListener('input', onTyped);
@@ -165,10 +167,12 @@ export function createChip(doc: Document = document): Chip {
   function showCorner(opts: CornerShowOptions): void {
     const base = mount(`${opts.label}:`, opts);
     session = { ...base, mode: 'corner', onScreen: true };
+    pill.classList.add('is-banner');
     host.style.top = 'auto';
-    host.style.left = 'auto';
-    host.style.right = `${CORNER_INSET_PX}px`;
+    host.style.right = 'auto';
+    host.style.left = '50%';
     host.style.bottom = `${CORNER_INSET_PX}px`;
+    host.style.transform = 'translateX(-50%)';
     host.style.display = 'block';
     // Typing anywhere means the user is busy; the offer gets out of the way.
     doc.addEventListener('input', onTyped, true);
