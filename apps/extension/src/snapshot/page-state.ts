@@ -2,13 +2,11 @@ import type { PageKind, PageState } from '@carat/shared';
 import { normalizeWhitespace, truncate } from '@carat/shared';
 import { hasVisiblePasswordField } from '../capture/should-capture';
 import { hasMoreBelow, viewportsOf } from '../scroll';
+import { pageQuery } from './query';
 
 /** The parts of `location` the kind detector reads; jsdom will not let a test move the real one. */
 export type PageLocation = Pick<Location, 'host' | 'pathname' | 'search'>;
 
-/** Query parameters sites put their search words in, in the order they are tried. */
-const QUERY_PARAMS = ['q', 'query', 'search_query', 'search', 'k', 'text', 'wd'];
-const QUERY_MAX = 80;
 /** Accepted actions carried back to the provider; older ones fall off first. */
 const MAX_DONE = 12;
 
@@ -47,7 +45,7 @@ export function pageStateOf(
   if (!win || win.self !== win.top) return undefined;
   const { y, pages } = viewportsOf(win, doc);
   const state: PageState = { kind: pageKind(doc, location), y, pages, more: hasMoreBelow(win, doc) };
-  const q = queryOf(doc, location);
+  const q = pageQuery(doc, location);
   if (q) state.q = q;
   if (done.length > 0) state.done = done.slice(-MAX_DONE);
   return state;
@@ -106,22 +104,11 @@ function readingText(doc: Document): number {
   return normalizeWhitespace(root?.textContent ?? '').length;
 }
 
-/** The page's own query: its URL parameter, else whatever is typed in its search box. */
-export function queryOf(doc: Document, location: PageLocation = doc.location): string | undefined {
-  const fromUrl = queryParam(location);
-  if (fromUrl) return fromUrl;
-  const box = doc.querySelector('input[type="search" i],[role="searchbox"],input[name="q" i]');
-  if (!box) return undefined;
-  const value = box instanceof HTMLInputElement ? box.value : (box.getAttribute('value') ?? box.textContent ?? '');
-  const text = normalizeWhitespace(value);
-  return text ? truncate(text, QUERY_MAX) : undefined;
-}
-
 function queryParam(location: PageLocation): string | undefined {
   const params = new URLSearchParams(location.search);
-  for (const key of QUERY_PARAMS) {
+  for (const key of ['q', 'query', 'search_query', 'search', 'k', 'text', 'wd']) {
     const value = normalizeWhitespace(params.get(key) ?? '');
-    if (value) return truncate(value, QUERY_MAX);
+    if (value) return value.slice(0, 80);
   }
   return undefined;
 }

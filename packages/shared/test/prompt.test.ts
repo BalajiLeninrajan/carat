@@ -49,7 +49,7 @@ describe('buildMessages', () => {
     expect(new Set(prompts.map(head)).size).toBe(1);
     expect(head(prompts[0]!)).toContain('10. A context item with `kind` "vision"');
     expect(head(prompts[0]!)).toContain('11. Propose `scroll` only');
-    expect(head(prompts[0]!)).toContain('12. The one exception to rule 9: a real link');
+    expect(head(prompts[0]!)).toContain("12. The one exception to rule 9's fill requirement: a real link");
     for (const l of EAGERNESS_LEVELS) {
       expect(buildMessages(req, l)[0]!.content).toBe(systemPrompt(l));
       expect(buildMessages({ ...req, context: [] }, l)[0]!.content).toBe(systemPrompt(l));
@@ -88,7 +88,7 @@ describe('buildMessages', () => {
     expect(serp).toBeGreaterThan(0);
     expect(JSON.parse(FEW_SHOTS[serp]!.content).context).toEqual([]);
     expect(JSON.parse(FEW_SHOTS[serp + 1]!.content).suggestions).toEqual([
-      expect.objectContaining({ kind: 'interact', elementId: 'e0', verb: 'click', sourceContextId: 'page' }),
+      expect.objectContaining({ kind: 'interact', elementId: 'e1', verb: 'click', sourceContextId: 'page' }),
     ]);
   });
 });

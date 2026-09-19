@@ -12,6 +12,6 @@
     "now": "2026-09-16T14:12:00-04:00",
     "locale": "en-CA"
   },
-  "expect": [],
-  "expectAt": { "eager": [{ "elementId": "", "verb": "scroll" }] }
+  "expect": [{ "elementId": "", "verb": "scroll" }],
+  "expectAt": { "conservative": [] }
 }

@@ -27,13 +27,12 @@ describe('pageQuery', () => {
     expect(pageQuery(document)).toBe('');
   });
 
-  it('is empty on a page with a visible password field, and lands in the page meta', () => {
+  it('is empty on a page with a visible password field', () => {
     window.history.pushState({}, '', '/search?q=doordash');
     document.body.innerHTML = '';
-    expect(pageMeta(document).query).toBe('doordash');
+    expect(pageQuery(document)).toBe('doordash');
     document.body.innerHTML = '<input type="password">';
     expect(pageQuery(document)).toBe('');
-    expect(pageMeta(document).query).toBeUndefined();
     document.body.innerHTML = '<input type="password" hidden>';
     expect(pageQuery(document)).toBe('doordash');
   });

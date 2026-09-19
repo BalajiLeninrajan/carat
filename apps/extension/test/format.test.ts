@@ -157,8 +157,8 @@ describe('describePrewarm', () => {
     expect(describePrewarm({ at: NOW - 3_000, host: 'www.google.com', verdict: 'warmed', count: 1, attempts: [{ id: 'openai', ms: 640, count: 1 }] }, NOW)).toBe(
       'navigation to www.google.com just now: pre-warmed 1 fill (openai, 640 ms)',
     );
-    expect(describePrewarm({ at: NOW - 30_000, host: 'calendar.google.com', verdict: 'stale-context' }, NOW)).toBe(
-      'navigation to calendar.google.com 30s ago: nothing pre-warmed, all context is older than 30 min',
+    expect(describePrewarm({ at: NOW - 30_000, host: 'calendar.google.com', verdict: 'no-context' }, NOW)).toBe(
+      'navigation to calendar.google.com 30s ago: nothing pre-warmed, nothing read in another tab to answer from',
     );
     expect(describePrewarm({ at: NOW, host: 'mail.google.com', verdict: 'failed', attempts: [{ id: 'openai', ms: 6000, count: 0, error: 'timed out' }] }, NOW)).toBe(
       'navigation to mail.google.com just now: provider failed (timed out), nothing cached',

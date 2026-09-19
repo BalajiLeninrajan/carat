@@ -1451,7 +1451,8 @@ describe('orchestrate interactions', () => {
 });
 
 describe('orchestrate page query', () => {
-  const serpPage = { host: 'www.google.com', title: 'doordash - Google Search', path: '/search', query: 'doordash' };
+  const serpPage = { host: 'www.google.com', title: 'doordash - Google Search', path: '/search' };
+  const searched = (q?: string) => (q === undefined ? undefined : { kind: 'serp' as const, q, y: 0, pages: 3, more: true });
   const links: ElementDescriptor[] = [
     { i: 'e0', r: 'button', nm: 'Search', p: 1 },
     { i: 'e1', r: 'link', nm: 'Order Now | Quick and Easy Food Delivery', h: 'doordash.com' },
@@ -1459,7 +1460,7 @@ describe('orchestrate page query', () => {
     { i: 'e3', r: 'link', nm: 'Best restaurants near you', h: 'yelp.com' },
     { i: 'e4', r: 'button', nm: 'Tools' },
   ];
-  const serp = { page: serpPage, fields: [], elements: links };
+  const serp = { page: serpPage, fields: [], elements: links, state: searched('doordash') };
   const onSerp = { tabId: 2, origin: 'https://www.google.com' };
   const empty = () => ({ store: new ContextStore(new FakeArea(), { now: () => NOW }), now: () => NOW });
   const pageClick = (over: Partial<InteractSuggestion> = {}): InteractSuggestion =>
@@ -1468,20 +1469,15 @@ describe('orchestrate page query', () => {
   it('counts a real link on a page with a query as work, and lets the request through with nothing read', () => {
     // The results without the page's own Search button, which the eager click rule counts on its own.
     const results = { ...serp, elements: [links[1]!, links[2]!, links[3]!, links[4]!] };
-    const noQuery = { ...results, page: { ...serpPage, query: undefined } };
+    const bare = { page: serpPage, fields: [] };
     expect(hasWork(serp)).toBe(true);
     expect(hasWork(results)).toBe(true);
-    expect(hasWork(noQuery)).toBe(false);
-    expect(hasWork({ ...results, elements: [links[4]!] })).toBe(false);
-    expect(hasWork({ page: serpPage, fields: [{ i: 'f0', t: 'textarea', nm: 'q', v: 'doordash', f: 1 }], elements: [links[1]!] })).toBe(true);
-    // A primary Search button is work at eager whether or not a link answers the query, and not below it.
-    const buttons = { ...serp, page: { ...serpPage, query: undefined }, elements: [links[0]!, links[4]!] };
-    expect(hasWork(buttons)).toBe(true);
-    expect(hasWork(buttons, 'balanced')).toBe(false);
-    expect(explainGate(serp, [], enabled, onSerp, NOW)).toBe('ok');
-    expect(explainGate(noQuery, [], enabled, onSerp, NOW)).toBe('no-fields');
-    expect(explainGate(noQuery, [item()], enabled, onSerp, NOW)).toBe('no-fields');
-    expect(explainGate(serp, [], { ...enabled, disabledHosts: ['www.google.com'] }, onSerp, NOW)).toBe('site-off');
+    // A page state is work on its own; an empty snapshot from an old content script is not.
+    expect(hasWork(bare)).toBe(false);
+    expect(hasWork({ ...results, state: undefined })).toBe(true);
+    expect(explainGate(serp, enabled)).toBe('ok');
+    expect(explainGate(bare, enabled)).toBe('no-snapshot');
+    expect(explainGate(serp, { ...enabled, disabledHosts: ['www.google.com'] })).toBe('site-off');
   });
 
   it('offers the first link the query names at once, without asking any provider, and caches it', async () => {
@@ -1518,15 +1514,15 @@ describe('orchestrate page query', () => {
     const deps = { store, settings: async () => ({ ...enabled, provider: 'local' as const, apiKey: '' }), now };
     const sponsoredFirst = { ...serp, elements: [links[0]!, { i: 'e9', r: 'link' as const, nm: 'DoorDash Promo Codes', h: 'coupons.example' }, ...links.slice(1)] };
     expect((await orchestrate(sponsoredFirst, onSerp, deps)).interactions.map((s) => s.elementId)).toEqual(['e9']);
-    const wiki = { ...serp, page: { ...serpPage, query: 'doordash wikipedia' } };
+    const wiki = { ...serp, state: searched('doordash wikipedia') };
     expect((await orchestrate(wiki, onSerp, deps)).interactions.map((s) => s.elementId)).toEqual(['e2']);
-    const uber = { ...serp, page: { ...serpPage, query: 'Food Delivery!' } };
+    const uber = { ...serp, state: searched('Food Delivery!') };
     expect((await orchestrate(uber, onSerp, deps)).interactions.map((s) => s.elementId)).toEqual(['e1']);
   });
 
   it('asks the provider when no link matches outright, keeps its pick only when the link relates to the query, and never a button or an unrelated link', async () => {
     const { store, now } = empty();
-    const fuzzy = { ...serp, page: { ...serpPage, query: 'food delivery near me' } };
+    const fuzzy = { ...serp, state: searched('food delivery near me') };
     let answer: Suggestion[] = [];
     const remote = fakeProvider('openai', async () => answer);
     const reports: SuggestDiag[] = [];
@@ -1546,12 +1542,12 @@ describe('orchestrate page query', () => {
 
     // "weather" relates to nothing here: even the model's pick is dropped.
     answer = [pageClick({ confidence: 0.95 })];
-    const weather = { ...serp, page: { ...serpPage, query: 'weather' }, force: true };
+    const weather = { ...serp, state: searched('weather'), force: true };
     expect((await orchestrate(weather, onSerp, deps)).interactions).toEqual([]);
 
     // Without a query the page is not a source at all, and a link click still needs a fill first.
     const { store: seededStore, ctxId } = await seeded();
-    const noQuery = { ...serp, page: { ...serpPage, query: undefined }, fields: [{ i: 'f0', t: 'input:search', al: 'Search' }] };
+    const noQuery = { ...serp, state: { kind: 'unknown' as const, y: 0, pages: 1, more: false }, fields: [{ i: 'f0', t: 'input:search', al: 'Search' }] };
     answer = [pageClick(), pageClick({ sourceContextId: ctxId })];
     expect((await orchestrate(noQuery, onSerp, { ...deps, store: seededStore })).interactions).toEqual([]);
     expect(remote.calls).toBe(3);
@@ -1574,7 +1570,7 @@ describe('orchestrate page query', () => {
     expect(remote.calls).toBe(0);
 
     // The same links under another query are a different question.
-    expect((await orchestrate({ ...serp, page: { ...serpPage, query: 'weather' } }, onSerp, deps)).interactions).toEqual([]);
+    expect((await orchestrate({ ...serp, state: searched('weather') }, onSerp, deps)).interactions).toEqual([]);
     expect(remote.calls).toBe(1);
   });
 
@@ -1582,7 +1578,7 @@ describe('orchestrate page query', () => {
     const { store, now } = empty();
     const remote = fakeProvider('openai', async () => [suggestion({ sourceContextId: 'page', fieldId: 'f0', value: 'doordash' })]);
     const deps = { store, settings: async () => enabled, createProvider: () => remote, now };
-    const withField = { ...serp, page: { ...serpPage, query: 'food delivery near me' }, fields: [{ i: 'f0', t: 'input:text', al: 'Add title' }] };
+    const withField = { ...serp, state: searched('food delivery near me'), fields: [{ i: 'f0', t: 'input:text', al: 'Add title' }] };
     const res = await orchestrate(withField, onSerp, deps);
     expect(remote.calls).toBe(1);
     expect(res.suggestions).toEqual([]);
@@ -1591,6 +1587,7 @@ describe('orchestrate page query', () => {
     const bank = { ...serp, page: { ...serpPage, host: 'www.chase.com' } };
     expect(await orchestrate(bank, { tabId: 2, origin: 'https://www.chase.com' }, deps)).toEqual({ suggestions: [], navigation: [], interactions: [] });
     expect(remote.calls).toBe(1);
+  });
 });
 
 describe('orchestrate predicts the next step from the page alone', () => {
@@ -1598,8 +1595,8 @@ describe('orchestrate predicts the next step from the page alone', () => {
   const onSerp = { tabId: 2, origin: 'https://www.google.com' };
   const results: ElementDescriptor[] = [
     { i: 'e0', r: 'button', nm: 'Tools' },
-    { i: 'e1', r: 'link', nm: 'DoorDash Food Delivery & Takeout', v: 'www.doordash.com' },
-    { i: 'e2', r: 'link', nm: 'DoorDash - Wikipedia', v: 'en.wikipedia.org' },
+    { i: 'e1', r: 'link', nm: 'DoorDash Food Delivery & Takeout', h: 'doordash.com' },
+    { i: 'e2', r: 'link', nm: 'DoorDash - Wikipedia', h: 'wikipedia.org' },
   ];
   const serp = {
     page: serpPage,
@@ -1628,15 +1625,20 @@ describe('orchestrate predicts the next step from the page alone', () => {
     expect(reports[0]).toMatchObject({ gate: 'ok', pageKind: 'serp', prior: "first result matches query 'doordash'", interactions: 1 });
   });
 
-  it('shows nothing from the page at conservative, and asks the model there instead', async () => {
-    const store = new ContextStore(new FakeArea(), { now: () => NOW });
-    const model = fakeProvider('openai', async () => []);
+  it('at conservative, still clicks the result that is what was searched for, but takes no prior and asks the model', async () => {
     const careful: Settings = { ...enabled, eagerness: 'conservative' };
-    const res = await orchestrate(serp, onSerp, { store, settings: async () => careful, createProvider: () => model, now: () => NOW });
+    // The exact match is backed by the user's own typed query, so every level offers it, and no model is asked.
+    const exact = fakeProvider('openai', async () => []);
+    const hit = await orchestrate(serp, onSerp, { store: new ContextStore(new FakeArea(), { now: () => NOW }), settings: async () => careful, createProvider: () => exact, now: () => NOW });
+    expect(hit.interactions.map((s) => s.elementId)).toEqual(['e1']);
+    expect(exact.calls).toBe(0);
+
+    // A query nothing on the page relates to: the "first result" prior is an eager guess, so conservative asks the model instead.
+    const model = fakeProvider('openai', async () => []);
+    const vague = { ...serp, state: { ...serp.state, q: 'weather tomorrow' } };
+    const res = await orchestrate(vague, onSerp, { store: new ContextStore(new FakeArea(), { now: () => NOW }), settings: async () => careful, createProvider: () => model, now: () => NOW });
     expect(res.interactions).toEqual([]);
     expect(model.calls).toBe(1);
-    // The state travels with the request, so the model can answer from it too.
-    expect(await orchestrate(serp, onSerp, { store, settings: async () => careful, createProvider: () => model, now: () => NOW, localProvider: fakeProvider('local', async () => []) })).toBeTruthy();
   });
 
   it('offers a page scroll on an article at eager and refuses one the page cannot justify', async () => {

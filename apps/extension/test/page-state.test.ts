@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { PageLocation } from '../src/snapshot';
 import { pageKind, pageStateOf } from '../src/snapshot';
-import { enumerateLinks } from '../src/interact';
 import { documentHeight, hasMoreBelow, viewportsOf } from '../src/scroll';
 
 /** jsdom lays nothing out, so every element a test cares about gets a box by hand. */
@@ -144,45 +143,5 @@ describe('pageStateOf', () => {
   it('says nothing in a sub-frame', () => {
     const frame = { self: {}, top: {}, innerHeight: 800, scrollY: 0 } as unknown as Window;
     expect(pageStateOf(document, frame)).toBeUndefined();
-  });
-});
-
-describe('enumerateLinks', () => {
-  const names = (els: Array<{ name: string }>) => els.map((e) => e.name);
-
-  it('takes content links and leaves the furniture, the banners and the money alone', () => {
-    onHost('www.google.com');
-    document.body.innerHTML = `
-      <nav><a href="/images">Images</a></nav>
-      <header><a href="/about">About us</a></header>
-      <div id="cookie-consent-bar"><a href="/privacy">Privacy policy</a></div>
-      <div id="results">
-        <a href="https://www.doordash.com/">DoorDash Food Delivery</a>
-        <a href="https://www.doordash.com/">DoorDash Food Delivery image</a>
-        <a href="https://en.wikipedia.org/wiki/DoorDash">DoorDash - Wikipedia</a>
-        <a href="mailto:tips@example.com">tips@example.com</a>
-        <a href="#top">Go</a>
-        <a href="/buy">Buy now for $19.99</a>
-        <a href="/delete">Delete this account</a>
-      </div>
-      <footer><a href="/terms">Terms</a></footer>
-    `;
-    for (const a of document.querySelectorAll('a')) lay(a);
-    const links = enumerateLinks(document, window, new Set());
-    // The duplicate destination, the furniture, the consent bar, mailto, the anchor, the price and the destructive name are all out.
-    expect(names(links)).toEqual(['DoorDash Food Delivery', 'DoorDash - Wikipedia']);
-    expect(links[0]!.host).toBe('doordash.com');
-  });
-
-  it('puts what is on screen first and stops at the cap', () => {
-    onHost('www.example.com');
-    document.body.innerHTML = Array.from({ length: 9 }, (_, i) => `<a href="/r/${i}">Result number ${i}</a>`).join('');
-    const all = Array.from(document.querySelectorAll('a'));
-    all.forEach((a, i) => lay(a, i === 8 ? 100 : 2000));
-    const links = enumerateLinks(document, window, new Set());
-    expect(links).toHaveLength(6);
-    expect(links[0]!.name).toBe('Result number 8');
-    // Elements the control enumerator already described are not described twice.
-    expect(enumerateLinks(document, window, new Set([all[8]!]))[0]!.name).not.toBe('Result number 8');
   });
 });

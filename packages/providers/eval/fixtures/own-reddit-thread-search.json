@@ -21,5 +21,5 @@
     "locale": "en-CA"
   },
   "expect": [],
-  "expectAt": { "eager": [{ "fieldId": "f0", "valueIncludes": "Pho Dau Bo" }] }
+  "expectAt": { "balanced": [{ "elementId": "", "verb": "scroll" }], "eager": [{ "fieldId": "f0", "valueIncludes": "Pho Dau Bo" }] }
 }

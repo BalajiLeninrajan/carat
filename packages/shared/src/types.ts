@@ -77,8 +77,6 @@ export interface PageMeta {
   title: string;
   path: string;
   h1?: string;
-  /** What the user searched for on this page: the URL's `q`, `query` or `search` param, else a search field's text. <= 80. */
-  query?: string;
 }
 
 /**

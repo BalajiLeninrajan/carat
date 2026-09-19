@@ -79,7 +79,6 @@ describe('LocalProvider', () => {
     }
     const eagerOnly = [...fixtures.values()].filter((f) => f.expect.length === 0 && f.expectAt?.eager);
     expect(eagerOnly.map((f) => f.name)).toEqual([
-      'article-scroll-down',
       'eager-discord-bare-name-search',
       'eager-selection-single-name-maps',
       'eager-slack-quoted-issue-title',
@@ -90,12 +89,12 @@ describe('LocalProvider', () => {
     ]);
   });
 
-  it('shows the recipe page its weak bare name and the scroll at eager, and nothing below', async () => {
+  it('shows the recipe page its weak bare name and the scroll at eager, the scroll alone at balanced, nothing below', async () => {
     const req = fixture('neg-recipe-comment').request;
     const eager = await at('eager').suggest(req, { signal });
-    // Best first: the scroll (0.55) outranks the bare name (0.45).
+    // Best first: the scroll (0.6) outranks the bare name (0.45).
     expect(eager.map((s) => (s.kind === 'fill' ? `fill:${s.confidence}` : `${s.kind}:${s.kind === 'interact' ? s.verb : ''}`))).toEqual(['interact:scroll', 'fill:0.45']);
-    expect(await at('balanced').suggest(req, { signal })).toEqual([]);
+    expect((await at('balanced').suggest(req, { signal })).map((s) => s.kind === 'interact' && s.verb)).toEqual(['scroll']);
     expect(await at('conservative').suggest(req, { signal })).toEqual([]);
   });
 
@@ -281,19 +280,16 @@ describe('LocalProvider page query links', () => {
     for (const level of EAGERNESS_LEVELS) expect((await at(level).suggest(serp(), { signal })).map((s) => s.confidence)).toEqual([0.8]);
   });
 
-  it('reads the query off a filled search field when the page carries none', async () => {
-    const req = serp();
-    const { query: _q, ...page } = req.page;
-    const out = await local.suggest({ ...req, page }, { signal });
+  it('reads the query off a filled search field when no page state carries one', async () => {
+    const out = await local.suggest(serp(), { signal });
     expect(out.map((s) => s.kind === 'interact' && s.elementId)).toEqual(['e1']);
   });
 
   it('offers nothing for a query no link answers, for a link with no destination, or with no query at all', async () => {
     const req = serp();
-    const { query: _q, ...page } = req.page;
     expect(await local.suggest(fixture('neg-serp-weather').request, { signal })).toEqual([]);
     expect(await local.suggest({ ...req, elements: req.elements!.map(({ h: _h, ...e }) => e) }, { signal })).toEqual([]);
-    expect(await local.suggest({ ...req, page, fields: [{ i: 'f0', t: 'input:text', al: 'Add title', v: 'doordash' }] }, { signal })).toEqual([]);
+    expect(await local.suggest({ ...req, fields: [{ i: 'f0', t: 'input:text', al: 'Add title', v: 'doordash' }] }, { signal })).toEqual([]);
   });
 
   it('never follows a short link named like an action, even when the query names it', async () => {

@@ -122,7 +122,8 @@ export function emptyFieldRemains(fields: ReadonlyArray<Pick<FieldDescriptor, 'v
  * Whether the page itself, with no text from another tab behind it, justifies
  * an interaction: the one rule the providers, the service worker and the
  * content script all check before a `page`-sourced suggestion gets a chip.
- * A link click on a results page; a Continue-like button on a form or
+ * A link click on a results page, or on any page whose own query the link
+ * could answer; a Continue-like button on a form or
  * checkout once no empty field remains; a page scroll when there is more
  * below and the last accepted action was not already a scroll. Nothing else:
  * checks, sliders and selects need a stated preference, and a destructive
@@ -138,7 +139,7 @@ export function pageJustifies(
   if (verb === 'scroll' && !el) return state.more && !(state.done ?? []).includes(PAGE_SCROLL_DONE);
   if (!el || verb !== 'click' || isDestructiveName(el.nm)) return false;
   if ((state.done ?? []).includes(elementKey(el.r, el.nm))) return false;
-  if (el.r === 'link') return state.kind === 'serp';
+  if (el.r === 'link') return state.kind === 'serp' || (state.q ?? '') !== '';
   if (el.r === 'button') return (state.kind === 'checkout' || state.kind === 'form') && isContinueName(el.nm) && !emptyFieldRemains(fields);
   return false;
 }
@@ -205,19 +206,12 @@ export interface ChipText {
   tail: string; // " to 40", or ""
 }
 
-<<<<<<< HEAD
 /**
  * The words on the chip: `Click "Save"`, `Select "7:00 AM Air Canada"`, `Check "Vegetarian"`,
- * `Set "Volume" to 40`, `Choose "Canada"`, `Scroll to "Save"`; with a link's site, `Open "Order Now" on doordash.com`.
+ * `Set "Volume" to 40`, `Choose "Canada"`, `Scroll to "Save"`, `Scroll down` for the page
+ * itself; with a link's site, `Open "Order Now" on doordash.com`.
  */
 export function interactionChipText(verb: InteractVerb, name: string, value: string, role?: ElementRole, site?: string): ChipText {
-||||||| parent of 8a35abe (Add a page state, a prior floor per level, the page scroll and the next-step prompt section)
-/** The words on the chip: `Click "Save"`, `Check "Vegetarian"`, `Set "Volume" to 40`, `Choose "Canada"`, `Scroll to "Save"`. */
-export function interactionChipText(verb: InteractVerb, name: string, value: string): ChipText {
-=======
-/** The words on the chip: `Click "Save"`, `Check "Vegetarian"`, `Set "Volume" to 40`, `Choose "Canada"`, `Scroll to "Save"`, or `Scroll down` for the page itself. */
-export function interactionChipText(verb: InteractVerb, name: string, value: string): ChipText {
->>>>>>> 8a35abe (Add a page state, a prior floor per level, the page scroll and the next-step prompt section)
   switch (verb) {
     case 'click':
       if (site) return { verb: 'Open', value: name, tail: ` on ${site}` };

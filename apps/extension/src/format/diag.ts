@@ -47,6 +47,7 @@ export function describeCapture(d: CaptureDiag, now: number = Date.now()): strin
 
 const ORIGIN: Record<Exclude<AnswerOrigin, 'cache' | 'prewarm'>, string> = {
   entities: 'entities predicted at capture',
+  prior: 'the page kind',
   local: 'regex pass',
   jev: 'jev',
   chat: 'chat model',
@@ -83,6 +84,7 @@ const PREWARM: Record<Exclude<PrewarmVerdict, 'warmed' | 'failed'>, string> = {
   ...GATE,
   warm: 'an answer was already cached or on its way',
   'unknown-page': 'not a page carat knows the fields of',
+  'no-context': 'nothing read in another tab to answer from',
 };
 
 /** One line: "navigation to www.google.com 3s ago: pre-warmed 1 fill (openai, 640 ms)". */

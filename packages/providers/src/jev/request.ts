@@ -125,8 +125,11 @@ export function buildJevRequest(req: SuggestRequest, context: Ctx[], eagerness: 
           .slice(0, MAX_OPTIONS)
           .map((candidate, i) => ({ key: `k${i}`, candidate, source: byId.get(candidate.sourceContextId)! }));
   const gate: ClickGate = { filled: (req.filled?.length ?? 0) > 0, flow: req.flow === true, eagerness, fillable: askedFields.length > 0 };
-  const interactOptions = interactionOptions(req.elements ?? [], context, req.filled ?? [], gate, pageIntent(req.state, req.fields));
   const nextOptions = nextStepOptions(req, eagerness);
+  // The next-step question already covers what the page itself justifies. Asking both would
+  // put the same result link in two questions and offer it twice.
+  const intent = nextOptions.length > 0 ? null : pageIntent(req.state, req.fields);
+  const interactOptions = interactionOptions(req.elements ?? [], context, req.filled ?? [], gate, intent);
   if (options.length === 0 && interactOptions.length === 0 && nextOptions.length === 0) return null;
 
   const state: Record<string, unknown> = {
@@ -237,7 +240,8 @@ function describeNext(s: Suggestion, req: SuggestRequest): string {
   if (s.kind === 'interact') {
     if (isPageScroll(s)) return 'scroll the page one screen down';
     const el = (req.elements ?? []).find((e) => e.i === s.elementId);
-    return `${s.verb} "${el?.nm ?? s.elementId}"${el?.v ? ` (${el.v})` : ''}`;
+    const site = el?.h ?? el?.v;
+    return `${s.verb} "${el?.nm ?? s.elementId}"${site ? ` (${site})` : ''}`;
   }
   return `open ${s.intent} for "${s.value}"`;
 }

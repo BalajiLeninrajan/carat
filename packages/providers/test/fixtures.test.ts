@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { FIXTURES_DIR, judge, loadFixtures, type Fixture } from '../eval/fixtures';
 
-const FIXTURE_COUNT = 25;
+const FIXTURE_COUNT = 29;
 const cleanup: string[] = [];
 afterAll(() => Promise.all(cleanup.map((d) => rm(d, { recursive: true, force: true }))));
 

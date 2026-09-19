@@ -13,9 +13,9 @@ function serp(over: Partial<PageState> = {}, elements?: ElementDescriptor[]): Su
     fields: [],
     elements: elements ?? [
       { i: 'e0', r: 'button', nm: 'Tools' },
-      { i: 'e1', r: 'link', nm: 'DoorDash - Wikipedia', v: 'en.wikipedia.org' },
-      { i: 'e2', r: 'link', nm: 'DoorDash Food Delivery & Takeout', v: 'www.doordash.com' },
-      { i: 'e3', r: 'link', nm: 'Best delivery apps 2026', v: 'www.cnet.com', o: 1 },
+      { i: 'e1', r: 'link', nm: 'DoorDash - Wikipedia', h: 'wikipedia.org' },
+      { i: 'e2', r: 'link', nm: 'DoorDash Food Delivery & Takeout', h: 'doordash.com' },
+      { i: 'e3', r: 'link', nm: 'Best delivery apps 2026', h: 'cnet.com', o: 1 },
     ],
     context: [],
     now: NOW,
@@ -40,7 +40,7 @@ function checkout(fields: FieldDescriptor[], elements?: ElementDescriptor[], kin
     elements: elements ?? [
       { i: 'e0', r: 'button', nm: 'Apply' },
       { i: 'e1', r: 'button', nm: 'Continue to payment', p: 1 },
-      { i: 'e2', r: 'link', nm: 'Return to cart', v: 'shop.example.com' },
+      { i: 'e2', r: 'link', nm: 'Return to cart', h: 'shop.example.com' },
     ],
     context: [discord],
     now: NOW,
@@ -50,12 +50,15 @@ function checkout(fields: FieldDescriptor[], elements?: ElementDescriptor[], kin
 const ids = (out: Suggestion[]) => out.map((s) => (s.kind === 'fill' ? `fill:${s.fieldId}` : s.kind === 'interact' ? `${s.verb}:${s.elementId || 'page'}` : `action:${s.intent}`));
 
 describe('nextStep on a results page', () => {
-  it('picks the result whose host matches the query over an earlier one whose title merely mentions it', () => {
+  it('picks the first result in page order the query names, at the pre-check\'s own confidence', () => {
     const step = nextStep(serp(), 'eager');
-    expect(ids(step.suggestions)).toEqual(['click:e2']);
-    expect(step.suggestions[0]).toMatchObject({ confidence: PRIOR_CONFIDENCE.serpMatch, sourceContextId: 'page', value: 'DoorDash Food Delivery & Takeout' });
+    expect(ids(step.suggestions)).toEqual(['click:e1']);
+    expect(step.suggestions[0]).toMatchObject({ confidence: PRIOR_CONFIDENCE.serpMatch, sourceContextId: 'page', value: 'DoorDash - Wikipedia' });
     expect(step.note).toBe("serp: first result matches query 'doordash'");
     expect(step.best).toBe(PRIOR_CONFIDENCE.serpMatch);
+    // Only the site's own result is left once the first is taken; it is the same suggestion the orchestrator's pre-check builds.
+    const rest = nextStep(serp({ done: ['link|doordash - wikipedia'] }), 'eager');
+    expect(rest.suggestions[0]).toMatchObject({ elementId: 'e2', confidence: PRIOR_CONFIDENCE.serpMatch });
   });
 
   it('falls back to a title match, then to the first result at a lower confidence', () => {
@@ -72,12 +75,12 @@ describe('nextStep on a results page', () => {
   });
 
   it('skips a result already clicked on this page load, and offers a scroll instead once past the first screen', () => {
-    expect(ids(nextStep(serp({ done: ['link|doordash food delivery & takeout'] }), 'eager').suggestions)).toEqual(['click:e1']);
-    const scrolled = nextStep(serp({ y: 1.4 }, [{ i: 'e3', r: 'link', nm: 'Best delivery apps 2026', v: 'www.cnet.com', o: 1 }]), 'eager');
+    expect(ids(nextStep(serp({ done: ['link|doordash - wikipedia'] }), 'eager').suggestions)).toEqual(['click:e2']);
+    const scrolled = nextStep(serp({ y: 1.4 }, [{ i: 'e3', r: 'link', nm: 'Best delivery apps 2026', h: 'cnet.com', o: 1 }]), 'eager');
     expect(ids(scrolled.suggestions)).toEqual(['scroll:page']);
     expect(scrolled.note).toBe('serp: past the first screen, scroll');
     // An on-screen match still wins past the first screen.
-    expect(ids(nextStep(serp({ y: 1.4 }), 'eager').suggestions)).toEqual(['click:e2']);
+    expect(ids(nextStep(serp({ y: 1.4 }), 'eager').suggestions)).toEqual(['click:e1']);
   });
 
   it('never names a link without a state, and nothing at conservative', () => {
@@ -89,13 +92,15 @@ describe('nextStep on a results page', () => {
 });
 
 describe('nextStep on an article or feed', () => {
-  it('yields one page scroll at eager, none below, and none when there is nothing below the fold', () => {
+  it('yields one page scroll at balanced and eager, none at conservative, and none with nothing below the fold', () => {
     const eager = nextStep(article(), 'eager');
     expect(eager.suggestions).toEqual([
       { kind: 'interact', elementId: '', verb: 'scroll', value: '', confidence: PRIOR_CONFIDENCE.scroll, reason: expect.any(String), sourceContextId: 'page' },
     ]);
     expect(eager.note).toBe('article: scroll');
-    expect(nextStep(article(), 'balanced').suggestions).toEqual([]);
+    // The scroll sits exactly on the balanced prior floor, so an article is answered locally there too.
+    expect(nextStep(article(), 'balanced').suggestions).toEqual(eager.suggestions);
+    expect(nextStep(article(), 'conservative').suggestions).toEqual([]);
     expect(nextStep(article({ more: false }), 'eager')).toMatchObject({ suggestions: [], note: 'article: at the end' });
     expect(nextStep({ ...article(), state: { ...article().state!, kind: 'feed' } }, 'eager').note).toBe('feed: scroll');
   });

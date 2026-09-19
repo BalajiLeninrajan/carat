@@ -1,22 +1,44 @@
 import type { Eagerness, ElementDescriptor, FieldDescriptor, InteractSuggestion, PageKind, PageState, SuggestRequest, Suggestion } from '@carat/shared';
-import { DEFAULT_EAGERNESS, EAGERNESS, PAGE_SCROLL_DONE, PAGE_SOURCE, elementKey, isContinueName, isDestructiveName, isOffScreen, isOptionalField, weakBelow } from '@carat/shared';
+import {
+  DEFAULT_EAGERNESS,
+  EAGERNESS,
+  PAGE_QUERY_CONFIDENCE,
+  PAGE_SCROLL_DONE,
+  PAGE_SOURCE,
+  elementKey,
+  firstMatchingLink,
+  isContinueName,
+  isDestructiveName,
+  isOffScreen,
+  isOptionalField,
+  pageIntent,
+  pageQueryClick,
+  weakBelow,
+} from '@carat/shared';
 import { sameSite } from './same-site';
 import { fillSources, fills, type FillSources } from './local/fills';
 
 /**
  * What each prior is worth. The obvious cases sit above the eager prior
- * floor (0.5); the first result and Continue clear the balanced one (0.6)
- * too; nothing clears conservative, which shows only context-backed fills.
+ * floor (0.5); the matching result, Continue and a scroll clear the balanced
+ * one (0.6) too; nothing clears conservative, which shows only
+ * context-backed fills.
  */
 export const PRIOR_CONFIDENCE = {
-  /** A result whose host or title matches the page's query. */
-  serpMatch: 0.8,
+  /** A result whose host or title matches the page's query. The pre-check's number, so the two answers are one. */
+  serpMatch: PAGE_QUERY_CONFIDENCE,
   /** No result matches; the first organic one is still the likeliest click. */
   serpFirst: 0.5,
   checkoutContinue: 0.7,
   /** A plain form's Continue: likely, but the form may still want something carat cannot see. Eager only. */
   formContinue: 0.55,
-  scroll: 0.55,
+  /**
+   * One screen down an article or a feed. At the balanced floor, not under
+   * it: a page with more below and nothing else to do is the one case where
+   * the next step is obvious, and leaving it at 0.55 sent every article to
+   * the model at balanced for an answer the page already had.
+   */
+  scroll: 0.6,
 } as const;
 
 /** One next action the page itself justifies, before any floor is applied. */
@@ -117,25 +139,21 @@ export function nextStep(req: SuggestRequest, eagerness: Eagerness = DEFAULT_EAG
 const isScroll = (s: Suggestion): boolean => s.kind === 'interact' && s.verb === 'scroll';
 
 /**
- * The result link whose host or title carries every word of the query, else
- * the first result link. Past the first screen only on-screen links count, so
- * the scroll takes over once the user has read past the top matches.
+ * The result link whose site or title is what the user searched for, else the
+ * first result link. The match is `pageQueryClick`, the very suggestion the
+ * orchestrator's synchronous pre-check builds, so the pre-check and this
+ * prior are one answer and not two chips; this side only adds the case the
+ * pre-check has nothing to say about, the first organic result at 0.5. Past
+ * the first screen only on-screen links count, so the scroll takes over once
+ * the user has read past the top matches.
  */
 function serpResult(state: PageState, elements: ElementDescriptor[], done: Set<string>): Prior | null {
   const links = elements.filter((e) => e.r === 'link' && !done.has(elementKey(e.r, e.nm)) && (state.y < 1 || !isOffScreen(e)));
   if (links.length === 0) return null;
-  const words = (state.q ?? '')
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((w) => w.length >= 2);
-  const has = (text: string | undefined): boolean => words.length > 0 && words.every((w) => (text ?? '').toLowerCase().includes(w));
-  // A host that carries the query ("doordash.com" for "doordash") beats a title that merely mentions it.
-  const match = links.find((e) => has(e.v?.replace(/^www\./, ''))) ?? links.find((e) => has(e.nm));
-  if (match) {
-    return {
-      suggestion: click(match, PRIOR_CONFIDENCE.serpMatch, `results page for "${state.q}"; this result matches the query`),
-      note: `first result matches query '${state.q}'`,
-    };
+  const intent = pageIntent(state);
+  const match = firstMatchingLink(links, intent);
+  if (match && intent) {
+    return { suggestion: pageQueryClick(match, intent), note: `first result matches query '${intent.query}'` };
   }
   return { suggestion: click(links[0]!, PRIOR_CONFIDENCE.serpFirst, 'first result on the results page'), note: 'first result' };
 }

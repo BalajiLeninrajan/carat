@@ -126,7 +126,7 @@ export async function orchestrate(input: SuggestInput, requester: Requester, dep
   diag.gate = explainGate({ ...input, elements, filled, flow }, settings);
   const smart = smartPath(settings, deps, requester);
   // What the user searched for on this page, and the links it names outright. Never a fill source.
-  const intent = pageIntent(input.page, input.fields);
+  const intent = pageIntent(input.state, input.fields);
   const matched = intent ? elements.filter((e) => isSiteLink(e) && linkMatchesQuery(e, intent)) : [];
   if (intent && elements.some(isSiteLink)) {
     diag.query = intent.query;
@@ -208,6 +208,25 @@ export async function orchestrate(input: SuggestInput, requester: Requester, dep
       diag.attempts = [];
       await store.setCached(key, link);
       return finish(pass, link, linkOffered);
+    }
+  }
+
+  // What the page kind alone justifies, once it clears the level's prior floor,
+  // needs no model either: a checkout's Continue, a feed's next screen. With no
+  // text from any tab and no query typed here there is nothing a model could add,
+  // so it answers outright; otherwise the prior goes up at once and the providers
+  // refine behind the ticket, since they may know a better step than the page does.
+  if (step.suggestions.length > 0) {
+    const prior = valid(step.suggestions, shape, context, own, bump);
+    const priorOffered = await offer(prior, shape, context, own);
+    const hasText = context.length > 0 || own.length > 0 || intent !== null;
+    if ((priorOffered.fills.length > 0 || priorOffered.interactions.length > 0) && (deps.refine || !hasText)) {
+      diag.source = 'prior';
+      diag.attempts = [];
+      await store.setCached(key, prior);
+      const behind = request(shape, context, own, now());
+      const follow = deps.refine && hasText ? (r: Refinement) => withSmart(pass, r, () => providerPass(pass, behind, r, prior)) : undefined;
+      return finish(pass, prior, priorOffered, follow);
     }
   }
 

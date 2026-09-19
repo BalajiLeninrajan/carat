@@ -61,7 +61,7 @@ export interface CaptureDiag {
  * capture time, a pre-warmed call made on navigation, the regex pass, Jev,
  * the chat model, or the 60s cache.
  */
-export type AnswerOrigin = 'entities' | 'prewarm' | 'local' | 'jev' | 'chat' | 'cache';
+export type AnswerOrigin = 'entities' | 'prewarm' | 'prior' | 'local' | 'jev' | 'chat' | 'cache';
 
 export interface SuggestDiag {
   at: number;
