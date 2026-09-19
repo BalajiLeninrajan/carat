@@ -14,6 +14,8 @@ import { scoreAndPickContext } from './score';
 export interface SuggestInput {
   page: PageMeta;
   fields: FieldDescriptor[];
+  /** The user asked with the shortcut: ask the provider again and show what they dismissed. */
+  force?: boolean;
 }
 
 export interface OrchestrateDeps {
@@ -53,7 +55,7 @@ export async function orchestrate(
   if (context.length === 0) return NONE;
 
   const key = cacheKey(input, context);
-  let suggestions = await store.getCached(key);
+  let suggestions = input.force ? undefined : await store.getCached(key);
   diag.cached = suggestions !== undefined;
   if (!suggestions) {
     const req: SuggestRequest = {
@@ -71,7 +73,7 @@ export async function orchestrate(
     if (!outcome.failed) await store.setCached(key, suggestions);
   }
 
-  const suppressed = await store.suppressedKeys();
+  const suppressed = input.force ? [] : await store.suppressedKeys();
   const visible = suggestions.filter((s) => !isSuppressed(s, input, suppressed));
   const sources = new Map(context.map((c) => [c.id, sourceOf(c)] as const));
   const offered = topPerField(visible)

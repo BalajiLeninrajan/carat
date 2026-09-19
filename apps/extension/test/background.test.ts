@@ -426,6 +426,28 @@ describe('orchestrate', () => {
     expect((await orchestrate(other, requester, deps)).suggestions).toHaveLength(1);
   });
 
+  it('a forced request skips the cache and shows what the user dismissed', async () => {
+    const { store, ctxId, now } = await seeded();
+    const remote = fakeProvider('openai', async () => [suggestion({ sourceContextId: ctxId })]);
+    const deps = { store, settings: async () => enabled, createProvider: () => remote, now };
+    expect((await orchestrate(maps, requester, deps)).suggestions).toHaveLength(1);
+    await handleFeedback(
+      {
+        fieldId: 'f0',
+        fingerprint: 'INPUT|text|searchboxinput|searchboxinput|Search Google Maps|Search Google Maps',
+        contextId: ctxId,
+        accepted: false,
+        host: 'www.google.com',
+      },
+      store,
+    );
+    expect((await orchestrate(maps, requester, deps)).suggestions).toEqual([]);
+    expect(remote.calls).toBe(1);
+
+    expect((await orchestrate({ ...maps, force: true }, requester, deps)).suggestions).toHaveLength(1);
+    expect(remote.calls).toBe(2);
+  });
+
   it('never suggests into a field that already has a value', async () => {
     const { store, ctxId, now } = await seeded();
     const remote = fakeProvider('openai', async () => [suggestion({ sourceContextId: ctxId })]);

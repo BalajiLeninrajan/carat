@@ -15,10 +15,16 @@ export interface SuggestionSource {
 
 export type SuggestionView = Suggestion & { source?: SuggestionSource };
 
-// Background handles every message; content scripts and extension pages only send.
+// Background handles every message but `forceSuggest`, which it sends to one
+// tab's content script when the keyboard shortcut fires. Content scripts and
+// extension pages otherwise only send.
 export interface Protocol {
   capture(data: { url: string; title: string; text: string; kind: 'page' | 'selection' }): void;
-  suggestRequest(data: { page: PageMeta; fields: FieldDescriptor[] }): { suggestions: SuggestionView[] };
+  /** `force` skips the answer cache and the dismissed/consumed filter: the user asked out loud. */
+  suggestRequest(data: { page: PageMeta; fields: FieldDescriptor[]; force?: boolean }): {
+    suggestions: SuggestionView[];
+  };
+  forceSuggest(): void;
   feedback(data: {
     fieldId: string;
     fingerprint: string;

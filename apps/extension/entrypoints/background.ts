@@ -1,6 +1,6 @@
 import { defineBackground } from 'wxt/utils/define-background';
 import { isDenylisted } from '@carat/shared';
-import { onMessage } from '../src/messaging';
+import { onMessage, sendMessage } from '../src/messaging';
 import { ContextStore, createSettingsStore, isSiteOff, parseLocation } from '../src/store';
 import {
   DiagLog,
@@ -16,6 +16,7 @@ import {
 import type { CaptureVerdict } from '../src/background';
 
 const SWEEP_ALARM = 'carat-sweep';
+const SUGGEST_COMMAND = 'carat-suggest';
 
 export default defineBackground(() => {
   // Constructed eagerly, loaded lazily: the first store call after a wake reads storage.session back.
@@ -75,6 +76,13 @@ export default defineBackground(() => {
   onMessage('setSettings', async ({ data, sender }) => {
     if (!trusted(sender)) return redactSettings(await settings.get());
     return settings.set(data);
+  });
+
+  // The shortcut asks the focused tab's content script to snapshot again, past
+  // every cache. A tab with no content script (chrome://, the store) rejects; that is fine.
+  chrome.commands?.onCommand.addListener((command, tab) => {
+    if (command !== SUGGEST_COMMAND || tab?.id === undefined) return;
+    sendMessage('forceSuggest', undefined, tab.id).catch(() => undefined);
   });
 
   void chrome.alarms.create(SWEEP_ALARM, { periodInMinutes: 5 });

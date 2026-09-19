@@ -25,16 +25,23 @@ interface LastSnapshot {
   suggestions: Suggestion[];
 }
 
-export function startSuggestions(ctx: ScriptContext, chip: Chip, doc: Document = document): void {
+export interface SuggestionsHandle {
+  /** Ask again right now, past the local memo, the answer cache and the dismissed filter. */
+  refresh(): void;
+}
+
+const NO_HANDLE: SuggestionsHandle = { refresh: () => undefined };
+
+export function startSuggestions(ctx: ScriptContext, chip: Chip, doc: Document = document): SuggestionsHandle {
   const win = doc.defaultView;
-  if (!win) return;
+  if (!win) return NO_HANDLE;
 
   let last: LastSnapshot | null = null;
   let seq = 0;
   // The field carat just filled keeps focus; the next chip must still take Tab from it.
   let justFilled: Element | null = null;
 
-  const snapshot = async (): Promise<void> => {
+  const snapshot = async (force = false): Promise<void> => {
     if (!ctx.isValid || doc.visibilityState === 'hidden') return;
     const { descriptors, registry } = enumerateFields(doc, win);
     if (descriptors.length === 0) {
@@ -43,12 +50,16 @@ export function startSuggestions(ctx: ScriptContext, chip: Chip, doc: Document =
     }
     const key = snapshotKey(descriptors);
     const now = Date.now();
-    if (last && last.key === key && now - last.at < SNAPSHOT_TIMING.identicalMs) {
+    if (!force && last && last.key === key && now - last.at < SNAPSHOT_TIMING.identicalMs) {
       present(last.suggestions, descriptors, registry);
       return;
     }
     const mine = ++seq;
-    const res = await send('suggestRequest', { page: pageMeta(doc), fields: descriptors });
+    const res = await send('suggestRequest', {
+      page: pageMeta(doc),
+      fields: descriptors,
+      ...(force ? { force: true } : {}),
+    });
     // A newer snapshot owns the chip now; this answer describes fields that may be gone.
     if (mine !== seq || !ctx.isValid) return;
     const suggestions = res?.suggestions ?? [];
@@ -135,6 +146,14 @@ export function startSuggestions(ctx: ScriptContext, chip: Chip, doc: Document =
     snapshotSoon();
   });
   ctx.onInvalidated(() => chip.destroy());
+
+  return {
+    refresh() {
+      last = null;
+      chip.hide();
+      void snapshot(true);
+    },
+  };
 }
 
 function describeSource(source: NonNullable<Suggestion['source']>): string {

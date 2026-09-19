@@ -202,6 +202,27 @@ describe('content wiring', () => {
     expect(calls('feedback')).toHaveLength(0);
   });
 
+  it('refresh asks again at once with force set, past the identical-snapshot memo', async () => {
+    field('Title', 100);
+    sent.mockImplementation(async (type) => (type === 'suggestRequest' ? { suggestions: [] } : undefined));
+    const handle = startSuggestions(ctx, createChip(document), document);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
+    await flush();
+    expect(calls('suggestRequest')).toHaveLength(1);
+    expect(calls('suggestRequest')[0]).not.toHaveProperty('force');
+
+    // Same fields inside the memo window: an ordinary trigger is answered locally.
+    document.dispatchEvent(new Event('visibilitychange'));
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.debounceMs);
+    await flush();
+    expect(calls('suggestRequest')).toHaveLength(1);
+
+    handle.refresh();
+    await flush();
+    expect(calls('suggestRequest')).toHaveLength(2);
+    expect(calls('suggestRequest')[1]).toMatchObject({ force: true });
+  });
+
   it('tells the chip where the value came from and why', async () => {
     field('Title', 100);
     const twoMinutesAgo = Date.now() - 2 * 60_000;
