@@ -1,4 +1,4 @@
-import type { ChatMessage, Eagerness, ElementDescriptor, ImageInput, InteractSuggestion, SuggestRequest, Suggestion } from '@carat/shared';
+import type { ChatMessage, ClickGate, Eagerness, ElementDescriptor, ImageInput, InteractSuggestion, SuggestRequest, Suggestion } from '@carat/shared';
 import {
   DEFAULT_EAGERNESS,
   EAGERNESS,
@@ -7,6 +7,7 @@ import {
   SuggestionListSchema,
   TRANSCRIBE_PROMPT,
   buildMessages,
+  clickAllowed,
   isDestructiveName,
   isIntentDestination,
   normalizeWhitespace,
@@ -197,12 +198,13 @@ function finalize(suggestions: Suggestion[], req: SuggestRequest, eagerness: Eag
   const interactSources = new Set([...fillSources, ...filled]);
   const elements = new Map((req.elements ?? []).map((e) => [e.i, e] as const));
   const here = `https://${req.page.host}${req.page.path}`;
+  const gate: ClickGate = { filled: filled.length > 0, flow: req.flow === true, eagerness, fillable: fillable.size > 0 };
   // One winner per field, per element and per intent.
   const best = new Map<string, Suggestion>();
   for (const s of suggestions) {
     if (s.kind === 'fill' && (!fillable.has(s.fieldId) || !fillSources.has(s.sourceContextId))) continue;
     if (s.kind === 'action' && (!actionSources.has(s.sourceContextId) || isIntentDestination(s.intent, here))) continue;
-    if (s.kind === 'interact' && !interactionAllowed(s, elements.get(s.elementId), interactSources, filled.length > 0)) continue;
+    if (s.kind === 'interact' && !interactionAllowed(s, elements.get(s.elementId), interactSources, gate)) continue;
     // Checked last, so what is counted here would have shown at a looser level.
     if (s.confidence < knobs.minConfidence) {
       onUnderFloor?.(s);
@@ -221,19 +223,21 @@ function finalize(suggestions: Suggestion[], req: SuggestRequest, eagerness: Eag
 /**
  * An interaction names a described element, a verb that fits its role and
  * state, and a source the user read. A click on a button or link only stands
- * once carat filled something on the page; the model does not get to press
- * buttons on a page it merely looked at. Destructive names never pass, even
- * if the content script somehow described one.
+ * once carat filled something on the page, or when it is the primary action
+ * and a flow or the level lets that through (`clickAllowed`); the model does
+ * not get to press other buttons on a page it merely looked at. Destructive
+ * names never pass, even if the content script somehow described one. The
+ * service worker applies the money rule; the provider has no settings.
  */
 function interactionAllowed(
   s: InteractSuggestion,
   element: ElementDescriptor | undefined,
   sources: Set<string>,
-  filledSomething: boolean,
+  gate: ClickGate,
 ): boolean {
   if (!element || !sources.has(s.sourceContextId)) return false;
   if (isDestructiveName(element.nm)) return false;
   if (!verbFits(element, s.verb, s.value.trim())) return false;
-  if (s.verb === 'click' && (element.r === 'button' || element.r === 'link') && !filledSomething) return false;
+  if (s.verb === 'click' && !clickAllowed(element, gate)) return false;
   return true;
 }

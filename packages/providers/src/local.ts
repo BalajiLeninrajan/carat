@@ -35,7 +35,10 @@ export class LocalProvider implements Provider {
     const context = knobs.sameOriginContext ? req.context : req.context.filter((c) => !sameSite(c.origin, req.page.host));
     return [
       ...fills(req.fields, context, knobs.looseNames),
-      ...interactions(req.elements ?? [], context, req.filled ?? []),
+      ...interactions(req.elements ?? [], context, {
+        filled: req.filled ?? [],
+        gate: { eagerness: this.eagerness, flow: req.flow === true, fillable: req.fields.some((f) => !f.v) },
+      }),
       ...actions(req.own ?? [], req.page, req.now),
     ];
   }

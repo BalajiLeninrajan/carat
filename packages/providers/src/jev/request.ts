@@ -1,5 +1,5 @@
-import type { Eagerness, ElementDescriptor, FieldDescriptor, InteractVerb, SuggestRequest } from '@carat/shared';
-import { DEFAULT_EAGERNESS, EAGERNESS, isDestructiveName } from '@carat/shared';
+import type { ClickGate, Eagerness, ElementDescriptor, FieldDescriptor, InteractVerb, SuggestRequest } from '@carat/shared';
+import { DEFAULT_EAGERNESS, EAGERNESS, clickAllowed, isDestructiveName, isPrimaryActionName } from '@carat/shared';
 import { isNeverFill } from '../local/fields';
 import { CANDIDATE_LABEL, extractCandidates, type Candidate } from '../local/candidates';
 import { mentions } from '../local/interact';
@@ -69,7 +69,7 @@ const UNSURE_RULE: Record<Eagerness, string> = {
 export const fillRules = (eagerness: Eagerness): string[] => [...RULES_HEAD, UNSURE_RULE[eagerness]];
 
 const INTERACT_RULES = [
-  'A button or link is pressed only to commit fields carat itself just filled on this page (`filled` names their sources). Save, Create, Done and Apply are typical. A button that does anything else is `none`.',
+  'A button or link is pressed only to commit fields carat itself just filled on this page (`filled` names their sources), or when it is the page\'s primary action with a continue-style name (Search, Continue, Next) and the option says so. Save, Create, Done and Apply are typical. A button that does anything else is `none`.',
   'A checkbox, switch or radio is changed only when a sentence in `context` states the user\'s own preference or fact in those words ("I\'m a vegetarian"), not negated and not about someone else.',
   'Never anything that sends, pays, orders, deletes or signs out. Nothing is chained: one control, pressed once.',
   'When unsure, pick `none`. No chip beats a wrong click.',
@@ -89,7 +89,8 @@ export function buildJevRequest(req: SuggestRequest, context: Ctx[], eagerness: 
       : extractCandidates(context, EAGERNESS[eagerness].looseNames)
           .slice(0, MAX_OPTIONS)
           .map((candidate, i) => ({ key: `k${i}`, candidate, source: byId.get(candidate.sourceContextId)! }));
-  const interactOptions = interactionOptions(req.elements ?? [], context, req.filled ?? []);
+  const gate: ClickGate = { filled: (req.filled?.length ?? 0) > 0, flow: req.flow === true, eagerness, fillable: askedFields.length > 0 };
+  const interactOptions = interactionOptions(req.elements ?? [], context, req.filled ?? [], gate);
   if (options.length === 0 && interactOptions.length === 0) return null;
 
   const state: Record<string, unknown> = {
@@ -167,19 +168,24 @@ export function buildJevRequest(req: SuggestRequest, context: Ctx[], eagerness: 
 }
 
 /**
- * Elements Jev may be asked about: a button or link only after carat filled
- * something (it cites the fill's source), a toggle only when a context item
- * names it (it cites that item). Destructive names never appear. Whether the
- * sentence affirms or negates the toggle is Jev's call.
+ * Elements Jev may be asked about: a button or link after carat filled
+ * something (it cites the fill's source), or the primary action when the
+ * click gate lets it through without one (it cites the newest context item);
+ * a toggle only when a context item names it (it cites that item).
+ * Destructive names never appear, nor do money controls: Jev is not asked
+ * about paying. Whether the sentence affirms or negates the toggle is Jev's call.
  */
-function interactionOptions(elements: ElementDescriptor[], context: Ctx[], filled: string[]): JevInteractOption[] {
+function interactionOptions(elements: ElementDescriptor[], context: Ctx[], filled: string[], gate: ClickGate): JevInteractOption[] {
   const out: JevInteractOption[] = [];
   for (const element of elements) {
-    if (isDestructiveName(element.nm)) continue;
+    if (isDestructiveName(element.nm) || element.m === 1) continue;
     if (element.r === 'button' || element.r === 'link') {
       const source = filled[0];
-      if (source === undefined) continue;
-      out.push({ key: element.i, element, verb: 'click', sourceContextId: source, reason: 'carat just filled fields on this page' });
+      if (source !== undefined) {
+        out.push({ key: element.i, element, verb: 'click', sourceContextId: source, reason: 'carat just filled fields on this page' });
+      } else if (context[0] && element.p === 1 && isPrimaryActionName(element.nm) && clickAllowed(element, gate)) {
+        out.push({ key: element.i, element, verb: 'click', sourceContextId: context[0].id, reason: gate.flow ? 'the primary action of a step in the flow under way' : 'the primary action, with nothing left to fill' });
+      }
     } else if (element.r === 'checkbox' || element.r === 'switch' || element.r === 'radio') {
       if (element.r === 'radio' && element.st === 'on') continue;
       const named = context.find((c) => mentions(c.text, element.nm));

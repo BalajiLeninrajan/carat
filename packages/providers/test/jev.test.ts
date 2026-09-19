@@ -142,9 +142,14 @@ describe('buildJevRequest', () => {
     expect(Object.keys(criteria)).toEqual(['e0', 'e2', 'e5', 'none']);
     expect(criteria.e0).toMatchObject({ action: 'click "Save"', role: 'button', primary: true });
 
-    // Without a fill there is no button to ask about, and a slider or select never is.
+    // Without a fill, only the primary action is asked about, and only at eager with nothing left to fill (the title has a value);
+    // it cites the newest context item. Below eager no button is asked about, and a slider or select never is.
     const noFill = buildJevRequest({ ...afterFills, filled: undefined }, afterFills.context)!;
-    expect(noFill.interactOptions.map((o) => o.key)).toEqual(['e5']);
+    expect(noFill.interactOptions.map((o) => [o.key, o.sourceContextId])).toEqual([['e0', 'c2'], ['e5', 'c1']]);
+    const noFillBalanced = buildJevRequest({ ...afterFills, filled: undefined }, afterFills.context, 'balanced')!;
+    expect(noFillBalanced.interactOptions.map((o) => o.key)).toEqual(['e5']);
+    const noFillWithField = buildJevRequest({ ...afterFills, filled: undefined, fields: [{ i: 'f0', t: 'input:text', al: 'Add title' }] }, afterFills.context)!;
+    expect(noFillWithField.interactOptions.map((o) => o.key)).toEqual(['e5']);
     const vegetarian = buildJevRequest(rsvp, rsvp.context)!;
     expect(Object.keys(vegetarian.questions)).toEqual(['interact']);
     expect(vegetarian.interactOptions.map((o) => [o.key, o.verb, o.sourceContextId])).toEqual([['e0', 'check', 'c1']]);
