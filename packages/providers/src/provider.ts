@@ -5,10 +5,20 @@ import { LocalProvider } from './local';
 import { OpenAICompatProvider } from './openai-compat';
 import type { ReasoningEffort } from './openai-compat';
 
+export interface SuggestOptions {
+  signal: AbortSignal;
+  /**
+   * Called for each otherwise valid suggestion the provider dropped for
+   * sitting under the eagerness level's confidence floor, so the popup can
+   * say "2 candidates under the eager floor" rather than "answered with 0".
+   */
+  onUnderFloor?: (s: Suggestion) => void;
+}
+
 /** The fast path: text in, suggestions out. Swapping providers only ever means implementing this. */
 export interface Provider {
   readonly id: Settings['provider'];
-  suggest(req: SuggestRequest, opts: { signal: AbortSignal }): Promise<Suggestion[]>;
+  suggest(req: SuggestRequest, opts: SuggestOptions): Promise<Suggestion[]>;
 }
 
 /** The smart path: the same text-only suggest on a bigger model, plus reading a screenshot into text. */
@@ -24,14 +34,14 @@ export interface VisionProvider extends Provider {
  * has a 6s budget and the prompt carries the few-shots it needs.
  */
 export function createProvider(settings: Settings, fetchImpl: typeof fetch = fetch): Provider {
-  if (settings.provider === 'local') return new LocalProvider();
+  if (settings.provider === 'local') return new LocalProvider(settings.eagerness);
   const llm = chatProvider(settings, settings.model, 'none', fetchImpl);
 
   if (settings.provider === 'cloudflare' && settings.cfAccountId && settings.cfApiToken) {
-    const jev = new JevProvider({ accountId: settings.cfAccountId, apiToken: settings.cfApiToken }, fetchImpl);
+    const jev = new JevProvider({ accountId: settings.cfAccountId, apiToken: settings.cfApiToken, eagerness: settings.eagerness }, fetchImpl);
     return llm ? new FastThenSmartProvider(jev, llm) : jev;
   }
-  return llm ?? new LocalProvider();
+  return llm ?? new LocalProvider(settings.eagerness);
 }
 
 /**
@@ -58,6 +68,7 @@ function chatProvider(settings: Settings, model: string, effort: ReasoningEffort
       apiKey: settings.apiKey,
       model,
       mode: chat === 'openai' ? 'json_schema' : 'json_object',
+      eagerness: settings.eagerness,
       // Only OpenAI's own endpoint is known to take reasoning_effort; a vLLM or Baseten server may 400 on it.
       ...(isOpenAI(settings.baseURL) ? { reasoningEffort: effort } : {}),
     },

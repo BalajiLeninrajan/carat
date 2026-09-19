@@ -18,5 +18,8 @@
     "now": "2026-09-16T14:07:00-04:00",
     "locale": "en-CA"
   },
-  "expect": []
+  "expect": [],
+  "expectAt": {
+    "eager": [{ "fieldId": "f0", "valueIncludes": "Seven Shores Cafe" }]
+  }
 }

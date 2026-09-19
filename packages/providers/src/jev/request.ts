@@ -1,5 +1,5 @@
-import type { ElementDescriptor, FieldDescriptor, InteractVerb, SuggestRequest } from '@carat/shared';
-import { isDestructiveName } from '@carat/shared';
+import type { Eagerness, ElementDescriptor, FieldDescriptor, InteractVerb, SuggestRequest } from '@carat/shared';
+import { DEFAULT_EAGERNESS, EAGERNESS, isDestructiveName } from '@carat/shared';
 import { isNeverFill } from '../local/fields';
 import { CANDIDATE_LABEL, extractCandidates, type Candidate } from '../local/candidates';
 import { mentions } from '../local/interact';
@@ -51,13 +51,22 @@ export interface JevRequest {
 
 export const questionKey = (fieldId: string): string => `field_${fieldId}`;
 
-const RULES = [
+const RULES_HEAD = [
   'Only pick a candidate when its value clearly matches the purpose of the field. A vague topical match is `none`.',
   'A street address belongs in a location field. A place, plan or event name belongs in a title or search field. An email belongs in a recipient field. A phone number belongs in a phone field. Do not swap them.',
   'A comment box, description, message body, guest list or anything free-form takes `none`.',
   'The candidates were found by pattern matching and may be noise from an unrelated page; pick one only when the recent text shows the user is about to use it.',
-  'When unsure, pick `none`. No suggestion beats a wrong one.',
 ];
+
+// The last fill rule follows the eagerness level, like rule 11 of the chat
+// prompt. The interaction rules do not: Esc undoes a chip, not a click.
+const UNSURE_RULE: Record<Eagerness, string> = {
+  conservative: 'When unsure, pick `none`. No suggestion beats a wrong one.',
+  balanced: 'When unsure between candidates, pick the likelier one. Pick `none` when nothing specific fits.',
+  eager: 'Lean toward picking: a wrong pick costs the user one keypress, a missed one a retype. Pick `none` only when no candidate relates to the field at all.',
+};
+
+export const fillRules = (eagerness: Eagerness): string[] => [...RULES_HEAD, UNSURE_RULE[eagerness]];
 
 const INTERACT_RULES = [
   'A button or link is pressed only to commit fields carat itself just filled on this page (`filled` names their sources). Save, Create, Done and Apply are typical. A button that does anything else is `none`.',
@@ -70,13 +79,14 @@ const INTERACT_RULES = [
  * Null when there is nothing to ask: no fillable field with a candidate and no
  * element worth a question. `context` must already exclude the page being filled.
  */
-export function buildJevRequest(req: SuggestRequest, context: Ctx[]): JevRequest | null {
+export function buildJevRequest(req: SuggestRequest, context: Ctx[], eagerness: Eagerness = DEFAULT_EAGERNESS): JevRequest | null {
+  const rules = fillRules(eagerness);
   const askedFields = req.fields.filter((f) => !f.v && !isNeverFill(f));
   const byId = new Map(context.map((c) => [c.id, c]));
   const options: JevOption[] =
     askedFields.length === 0
       ? []
-      : extractCandidates(context)
+      : extractCandidates(context, EAGERNESS[eagerness].looseNames)
           .slice(0, MAX_OPTIONS)
           .map((candidate, i) => ({ key: `k${i}`, candidate, source: byId.get(candidate.sourceContextId)! }));
   const interactOptions = interactionOptions(req.elements ?? [], context, req.filled ?? []);
@@ -113,7 +123,7 @@ export function buildJevRequest(req: SuggestRequest, context: Ctx[]): JevRequest
       type: 'noul',
       instructions: {
         question: 'The user is on `page` with the empty `fields` listed. Is there a specific value in `context` (something in `candidates`) that they are about to type into one of these fields?',
-        rules: RULES,
+        rules,
       },
       criteria: {
         true: 'At least one candidate is exactly what the user would type into one of the fields on this page',
@@ -126,7 +136,7 @@ export function buildJevRequest(req: SuggestRequest, context: Ctx[]): JevRequest
         instructions: {
           task: 'Pick the candidate whose value the user is about to type into this field, or `none`.',
           field: describeField(field),
-          rules: RULES,
+          rules,
         },
         criteria,
       };

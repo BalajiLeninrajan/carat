@@ -1,0 +1,25 @@
+{
+  "name": "eager-selection-single-name-maps",
+  "request": {
+    "page": { "host": "www.google.com", "title": "Google Maps", "path": "/maps" },
+    "fields": [
+      { "i": "f0", "t": "input:text", "nm": "searchboxinput", "ph": "Search Google Maps", "al": "Search Google Maps", "f": 1, "w": "l" }
+    ],
+    "context": [
+      {
+        "id": "c1",
+        "origin": "https://discord.com",
+        "title": "Discord | #food | Waterloo Friends",
+        "kind": "selection",
+        "text": "has anyone tried Vincenzos for lunch",
+        "capturedAt": 1758064920000
+      }
+    ],
+    "now": "2026-09-16T19:06:00-04:00",
+    "locale": "en-CA"
+  },
+  "expect": [],
+  "expectAt": {
+    "eager": [{ "fieldId": "f0", "valueIncludes": "Vincenzos" }]
+  }
+}

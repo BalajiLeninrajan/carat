@@ -1,9 +1,9 @@
-export type { Provider, VisionProvider } from './provider';
+export type { Provider, SuggestOptions, VisionProvider } from './provider';
 export { createProvider, createSmartProvider } from './provider';
 export { LocalProvider } from './local';
 export { OpenAICompatProvider } from './openai-compat';
 export type { OpenAICompatOptions, OutputMode, ReasoningEffort } from './openai-compat';
-export { JevProvider, JEV_MODEL, GATE_MIN } from './jev';
+export { JevProvider, JEV_MODEL } from './jev';
 export type { JevOptions } from './jev';
 export { FastThenSmartProvider } from './fast-then-smart';
 export { extractCandidates, candidatesFrom } from './local/candidates';

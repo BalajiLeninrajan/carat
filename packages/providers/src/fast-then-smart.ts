@@ -1,5 +1,5 @@
 import type { SuggestRequest, Suggestion } from '@carat/shared';
-import type { Provider } from './provider';
+import type { Provider, SuggestOptions } from './provider';
 
 /**
  * Two providers under one budget. The fast one (Jev over regex candidates)
@@ -18,7 +18,7 @@ export class FastThenSmartProvider implements Provider {
     this.id = fast.id;
   }
 
-  async suggest(req: SuggestRequest, opts: { signal: AbortSignal }): Promise<Suggestion[]> {
+  async suggest(req: SuggestRequest, opts: SuggestOptions): Promise<Suggestion[]> {
     if (opts.signal.aborted) return [];
     let first: Suggestion[] = [];
     try {

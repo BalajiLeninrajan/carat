@@ -41,6 +41,15 @@ describe('extractCandidates on the fixtures', () => {
     }
   });
 
+  it('adds the most recent bare name only when loose, and never one that repeats a cued candidate', () => {
+    expect(extractCandidates(context('neg-news-search'), true)).toEqual([{ kind: 'name', value: 'Parliament Hill', sourceContextId: 'c1' }]);
+    expect(extractCandidates(context('neg-recipe-comment'), true)).toEqual([{ kind: 'name', value: 'Southeast Asia', sourceContextId: 'c1' }]);
+    // "Seven Shores Cafe" is already the planned place, so no `name` doubles it.
+    expect(extractCandidates(context('discord-maps-search'), true).map((c) => c.kind)).toEqual(['place', 'plan']);
+    // An author stamp is not a name, so the Slack thread still yields the email alone.
+    expect(extractCandidates(context('slack-gmail-to'), true).map((c) => c.kind)).toEqual(['email']);
+  });
+
   it('drops an exact repeat after its first source but keeps different kinds of the same text', () => {
     const a = { id: 'a', text: 'lunch at Vincenzos Saturday?' };
     const b = { id: 'b', text: 'see you at Vincenzos' };

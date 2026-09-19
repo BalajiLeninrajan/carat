@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { ImageInput, SuggestRequest } from '@carat/shared';
+import type { Eagerness, ImageInput, SuggestRequest, Suggestion } from '@carat/shared';
+import { EAGERNESS, EAGERNESS_LEVELS, systemPrompt } from '@carat/shared';
 import { OpenAICompatProvider, type OutputMode, type ReasoningEffort } from '../src/openai-compat';
 
 const req: SuggestRequest = {
@@ -42,12 +43,21 @@ function completion(content: string | null, status = 200): Response {
   });
 }
 
-function provider(fetchImpl: typeof fetch, mode: OutputMode = 'json_schema', reasoningEffort?: ReasoningEffort) {
+function provider(fetchImpl: typeof fetch, mode: OutputMode = 'json_schema', reasoningEffort?: ReasoningEffort, eagerness?: Eagerness) {
   return new OpenAICompatProvider(
-    { id: 'openai', baseURL: 'https://api.openai.com/v1', apiKey: 'sk-test', model: 'gpt-5-mini', mode, ...(reasoningEffort ? { reasoningEffort } : {}) },
+    {
+      id: 'openai',
+      baseURL: 'https://api.openai.com/v1',
+      apiKey: 'sk-test',
+      model: 'gpt-5-mini',
+      mode,
+      ...(reasoningEffort ? { reasoningEffort } : {}),
+      ...(eagerness ? { eagerness } : {}),
+    },
     fetchImpl,
   );
 }
+const at = (fetchImpl: typeof fetch, eagerness: Eagerness) => provider(fetchImpl, 'json_schema', undefined, eagerness);
 
 function requestBody(call: unknown[]): { messages: Array<{ role: string; content: string }>; response_format?: unknown; reasoning_effort?: string } {
   return JSON.parse((call[1] as RequestInit).body as string);
@@ -106,7 +116,7 @@ describe('OpenAICompatProvider', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
-  it('drops suggestions under 0.7, for unknown fields, and for fields with a value', async () => {
+  it('drops suggestions under the level\'s floor, for unknown fields, and for fields with a value', async () => {
     const fetchImpl = vi.fn(async () =>
       completion(
         JSON.stringify({
@@ -119,27 +129,64 @@ describe('OpenAICompatProvider', () => {
         }),
       ),
     );
-    const out = await provider(fetchImpl).suggest(req, { signal: new AbortController().signal });
+    const out = await at(fetchImpl, 'conservative').suggest(req, { signal: new AbortController().signal });
     expect(out).toEqual([{ ...good, confidence: 0.7 }]);
   });
 
-  it('drops suggestions whose source is not one of the request context items or is the page itself', async () => {
+  it('applies the floor of the eagerness level it was built with, and reports what fell under it', async () => {
+    const reply = (confidences: number[]) =>
+      vi.fn(async () => completion(JSON.stringify({ suggestions: confidences.map((c, i) => ({ ...good, confidence: c, value: `v${i}` })) })));
+    for (const level of EAGERNESS_LEVELS) {
+      const floor = EAGERNESS[level].minConfidence;
+      const dropped: Suggestion[] = [];
+      const fetchImpl = reply([floor - 0.01, floor, floor + 0.2]);
+      const out = await at(fetchImpl, level).suggest(req, { signal: new AbortController().signal, onUnderFloor: (s) => void dropped.push(s) });
+      // One field, so the surest survivor wins; the one under the floor is reported, not returned.
+      expect(out.map((s) => s.confidence), level).toEqual([floor + 0.2]);
+      expect(dropped.map((s) => s.confidence), level).toEqual([floor - 0.01]);
+    }
+    // Only an otherwise valid suggestion counts as "under the floor"; junk is just junk.
+    const dropped: Suggestion[] = [];
+    const junk = vi.fn(async () => completion(JSON.stringify({ suggestions: [{ ...good, fieldId: 'f9', confidence: 0.1 }, { ...good, sourceContextId: 'c2', confidence: 0.1 }] })));
+    expect(await at(junk, 'eager').suggest(req, { signal: new AbortController().signal, onUnderFloor: (s) => void dropped.push(s) })).toEqual([]);
+    expect(dropped).toEqual([]);
+  });
+
+  it('sends the system prompt of its eagerness level, the default being eager', async () => {
+    for (const level of EAGERNESS_LEVELS) {
+      const fetchImpl = vi.fn(async () => completion(JSON.stringify({ suggestions: [good] })));
+      await at(fetchImpl, level).suggest(req, { signal: new AbortController().signal });
+      expect(requestBody(fetchImpl.mock.calls[0]!).messages[0]!.content).toBe(systemPrompt(level));
+    }
+    const fetchImpl = vi.fn(async () => completion(JSON.stringify({ suggestions: [good] })));
+    await provider(fetchImpl).suggest(req, { signal: new AbortController().signal });
+    expect(requestBody(fetchImpl.mock.calls[0]!).messages[0]!.content).toBe(systemPrompt('eager'));
+  });
+
+  it('drops suggestions whose source is not one of the request context items, or is another tab on the same site below eager', async () => {
     const withSelf: SuggestRequest = {
       ...req,
       context: [...req.context, { id: 'c9', origin: 'https://www.google.com', title: 'Maps', kind: 'page', text: 'Seven Shores Cafe', capturedAt: 2 }],
     };
-    const fetchImpl = vi.fn(async () =>
-      completion(
-        JSON.stringify({
-          suggestions: [
-            { ...good, sourceContextId: 'c2' }, // few-shot id echoed
-            { ...good, sourceContextId: 'c9' }, // same site as the page
-          ],
-        }),
-      ),
-    );
-    expect(await provider(fetchImpl).suggest(withSelf, { signal: new AbortController().signal })).toEqual([]);
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const reply = () =>
+      vi.fn(async () =>
+        completion(
+          JSON.stringify({
+            suggestions: [
+              { ...good, sourceContextId: 'c2' }, // few-shot id echoed
+              { ...good, sourceContextId: 'c9' }, // same site as the page
+            ],
+          }),
+        ),
+      );
+    for (const level of ['conservative', 'balanced'] as const) {
+      const fetchImpl = reply();
+      expect(await at(fetchImpl, level).suggest(withSelf, { signal: new AbortController().signal }), level).toEqual([]);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    }
+    // At eager another tab on the same site is context like any other; the echoed few-shot id still is not.
+    const eager = reply();
+    expect(await at(eager, 'eager').suggest(withSelf, { signal: new AbortController().signal })).toEqual([{ ...good, sourceContextId: 'c9' }]);
   });
 
   it('returns [] instead of throwing when the signal aborts mid-flight', async () => {
@@ -200,13 +247,13 @@ describe('OpenAICompatProvider', () => {
         }),
       ),
     );
-    const out = await provider(fetchImpl).suggest(discord, { signal: new AbortController().signal });
+    const out = await at(fetchImpl, 'conservative').suggest(discord, { signal: new AbortController().signal });
     expect(out).toEqual([
       { kind: 'action', intent: 'maps', value: 'Seven Shores Cafe', when: '', location: '', confidence: 0.9, reason: 'place to look up', sourceContextId: 'o7' },
     ]);
 
     const onMaps: SuggestRequest = { ...discord, page: { host: 'www.google.com', title: 'Google Maps', path: '/maps' } };
-    expect(await provider(fetchImpl).suggest(onMaps, { signal: new AbortController().signal })).toEqual([]);
+    expect(await at(fetchImpl, 'conservative').suggest(onMaps, { signal: new AbortController().signal })).toEqual([]);
   });
 
   it('keeps an interaction on a described element with a fitting verb, and drops the rest', async () => {
@@ -240,19 +287,21 @@ describe('OpenAICompatProvider', () => {
         }),
       ),
     );
-    const out = await provider(fetchImpl).suggest(calendar, { signal: new AbortController().signal });
+    const out = await at(fetchImpl, 'conservative').suggest(calendar, { signal: new AbortController().signal });
     expect(out).toEqual([
       { kind: 'interact', elementId: 'e0', verb: 'click', value: 'Save', confidence: 0.85, reason: 'commits the fills', sourceContextId: 'c1' },
     ]);
 
     // Without a fill behind it, a button click is not the model's to propose.
     const { filled: _f, ...unfilled } = calendar;
-    expect(await provider(fetchImpl).suggest(unfilled, { signal: new AbortController().signal })).toEqual([]);
+    expect(await at(fetchImpl, 'conservative').suggest(unfilled, { signal: new AbortController().signal })).toEqual([]);
   });
 
-  it('never turns text from the page itself into a fill', async () => {
-    const fetchImpl = vi.fn(async () => completion(JSON.stringify({ suggestions: [{ ...good, sourceContextId: 'o7' }] })));
-    expect(await provider(fetchImpl).suggest(discord, { signal: new AbortController().signal })).toEqual([]);
+  it('never turns text from the page itself into a fill, at any level', async () => {
+    for (const level of EAGERNESS_LEVELS) {
+      const fetchImpl = vi.fn(async () => completion(JSON.stringify({ suggestions: [{ ...good, sourceContextId: 'o7' }] })));
+      expect(await at(fetchImpl, level).suggest(discord, { signal: new AbortController().signal }), level).toEqual([]);
+    }
   });
 
   it('keeps suggest text-only: every message content is a string', async () => {

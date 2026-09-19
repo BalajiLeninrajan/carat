@@ -5,10 +5,21 @@ import { createProvider, createSmartProvider } from '../src/provider';
 import { OpenAICompatProvider } from '../src/openai-compat';
 import { FastThenSmartProvider } from '../src/fast-then-smart';
 import { JevProvider } from '../src/jev';
+import { LocalProvider } from '../src/local';
 
 const cf = { cfAccountId: 'acct', cfApiToken: 'tok' };
 
 describe('createProvider', () => {
+  it('hands the eagerness setting to whichever provider it builds', () => {
+    expect((createProvider({ ...DEFAULT_SETTINGS, provider: 'local', eagerness: 'balanced' }) as LocalProvider).eagerness).toBe('balanced');
+    expect((createProvider({ ...DEFAULT_SETTINGS, apiKey: '' }) as LocalProvider).eagerness).toBe('eager');
+    expect((createProvider({ ...DEFAULT_SETTINGS, apiKey: 'sk-x', eagerness: 'conservative' }) as OpenAICompatProvider).options.eagerness).toBe('conservative');
+    const both = createProvider({ ...DEFAULT_SETTINGS, provider: 'cloudflare', ...cf, apiKey: 'sk-x', eagerness: 'balanced' }) as FastThenSmartProvider;
+    expect((both.fast as JevProvider).options.eagerness).toBe('balanced');
+    expect((both.smart as OpenAICompatProvider).options.eagerness).toBe('balanced');
+    expect((createSmartProvider({ ...DEFAULT_SETTINGS, apiKey: 'sk-x', eagerness: 'conservative' }) as OpenAICompatProvider).options.eagerness).toBe('conservative');
+  });
+
   it('falls back to local when there is no key', () => {
     expect(createProvider({ ...DEFAULT_SETTINGS, apiKey: '' }).id).toBe('local');
   });

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { FIXTURES_DIR, judge, loadFixtures, type Fixture } from '../eval/fixtures';
 
-const FIXTURE_COUNT = 18;
+const FIXTURE_COUNT = 21;
 const cleanup: string[] = [];
 afterAll(() => Promise.all(cleanup.map((d) => rm(d, { recursive: true, force: true }))));
 
@@ -51,6 +51,26 @@ describe('judge', () => {
     expect(judge(wantClick, [{ ...click, elementId: 'e1' }]).detail).toContain('wanted e0.click~"Save"');
     expect(judge(wantClick, [hit]).pass).toBe(false);
     expect(judge(negative, [click]).pass).toBe(false);
+  });
+
+  it('swaps in a level\'s own expectations, and tolerates a weak chip on a negative only where the fixture says so', () => {
+    const eagerOnly: Fixture = { ...negative, expectAt: { eager: [{ fieldId: 'f0', valueIncludes: 'Seven Shores' }] } };
+    expect(judge(eagerOnly, [hit], 'eager').pass).toBe(true);
+    expect(judge(eagerOnly, [], 'eager').pass).toBe(false);
+    expect(judge(eagerOnly, [], 'balanced').pass).toBe(true);
+    expect(judge(eagerOnly, [hit], 'balanced').pass).toBe(false);
+
+    const tolerant: Fixture = { ...negative, weakOkAt: ['eager'] };
+    const weak = { ...hit, confidence: 0.45 };
+    expect(judge(tolerant, [weak], 'eager')).toMatchObject({ pass: true, weak: true });
+    expect(judge(tolerant, [weak], 'eager').detail).toContain('weak chip tolerated at eager');
+    // 0.75 would have shown at balanced too, so it is a real false positive, not a weak one.
+    expect(judge(tolerant, [hit], 'eager').pass).toBe(false);
+    expect(judge(tolerant, [weak, hit], 'eager').pass).toBe(false);
+    expect(judge(tolerant, [weak], 'balanced').pass).toBe(false);
+    expect(judge(negative, [weak], 'eager').pass).toBe(false);
+    // The default level is the product default.
+    expect(judge(tolerant, [weak]).pass).toBe(true);
   });
 
   it('matches an action on intent, value and the start of when', () => {

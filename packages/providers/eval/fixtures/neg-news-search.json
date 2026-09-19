@@ -18,5 +18,6 @@
     "now": "2026-09-16T12:30:00-04:00",
     "locale": "en-CA"
   },
-  "expect": []
+  "expect": [],
+  "weakOkAt": ["eager"]
 }
