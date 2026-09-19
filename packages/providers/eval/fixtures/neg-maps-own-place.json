@@ -1,0 +1,23 @@
+{
+  "name": "neg-maps-own-place",
+  "request": {
+    "page": { "host": "www.google.com", "title": "Google Maps", "path": "/maps" },
+    "fields": [
+      { "i": "f0", "t": "input:text", "nm": "searchboxinput", "ph": "Search Google Maps", "al": "Search Google Maps", "f": 1, "w": "l" }
+    ],
+    "context": [],
+    "own": [
+      {
+        "id": "o1",
+        "origin": "https://www.google.com",
+        "title": "Google Maps",
+        "kind": "selection",
+        "text": "dinner at Seven Shores Cafe? sounds good, see you there",
+        "capturedAt": 1758046800000
+      }
+    ],
+    "now": "2026-09-16T14:04:00-04:00",
+    "locale": "en-CA"
+  },
+  "expect": []
+}

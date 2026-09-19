@@ -1,5 +1,5 @@
 import type { ChatMessage, SuggestRequest, Suggestion } from '@carat/shared';
-import { LIMITS, SUGGESTION_RESPONSE_FORMAT, SuggestionListSchema, buildMessages } from '@carat/shared';
+import { LIMITS, SUGGESTION_RESPONSE_FORMAT, SuggestionListSchema, buildMessages, isIntentDestination } from '@carat/shared';
 import type { Provider } from './provider';
 import { sameSite } from './same-site';
 
@@ -110,14 +110,20 @@ function withParseError(messages: ChatMessage[], error: string): ChatMessage[] {
 
 function finalize(suggestions: Suggestion[], req: SuggestRequest): Suggestion[] {
   const fillable = new Set(req.fields.filter((f) => !f.v).map((f) => f.i));
-  // Real context ids are never the few-shots' c1/c2, so an unknown source means
-  // the model echoed an example; a same-site source breaks prompt rule 7.
-  const sources = new Set(req.context.filter((c) => !sameSite(c.origin, req.page.host)).map((c) => c.id));
+  // Real context ids are never the few-shots' c1/c2/o1, so an unknown source
+  // means the model echoed an example; a same-site fill source breaks rule 7.
+  const fillSources = new Set(req.context.filter((c) => !sameSite(c.origin, req.page.host)).map((c) => c.id));
+  const actionSources = new Set((req.own ?? []).map((c) => c.id));
+  const here = `https://${req.page.host}${req.page.path}`;
+  // One winner per field and per intent.
   const best = new Map<string, Suggestion>();
   for (const s of suggestions) {
-    if (s.confidence < LIMITS.minConfidence || !fillable.has(s.fieldId) || !sources.has(s.sourceContextId)) continue;
-    const prev = best.get(s.fieldId);
-    if (!prev || s.confidence > prev.confidence) best.set(s.fieldId, { ...s, value: s.value.trim() });
+    if (s.confidence < LIMITS.minConfidence) continue;
+    if (s.kind === 'fill' && (!fillable.has(s.fieldId) || !fillSources.has(s.sourceContextId))) continue;
+    if (s.kind === 'action' && (!actionSources.has(s.sourceContextId) || isIntentDestination(s.intent, here))) continue;
+    const key = s.kind === 'fill' ? `f:${s.fieldId}` : `a:${s.intent}`;
+    const prev = best.get(key);
+    if (!prev || s.confidence > prev.confidence) best.set(key, { ...s, value: s.value.trim() });
   }
   return [...best.values()]
     .filter((s) => s.value !== '')

@@ -1,0 +1,24 @@
+{
+  "name": "slack-compose-gmail",
+  "request": {
+    "page": { "host": "app.slack.com", "title": "#design - Northbrook - Slack", "path": "/client/T01/C02" },
+    "fields": [
+      { "i": "f0", "t": "textbox", "al": "Message to design", "f": 1, "w": "l" },
+      { "i": "f1", "t": "input:search", "al": "Search Northbrook", "ph": "Search Northbrook", "w": "m" }
+    ],
+    "context": [],
+    "own": [
+      {
+        "id": "o1",
+        "origin": "https://app.slack.com",
+        "title": "#design - Northbrook - Slack",
+        "kind": "page",
+        "text": "#design - Northbrook - Slack app.slack.com #design jordan 1:12 PM the contractor wants the final measurements before thursday jordan 1:13 PM can you email them over? her address is maya.chen@northbrookstudio.com you 1:14 PM on it jordan 1:14 PM thanks, cc me if you can Message to design",
+        "capturedAt": 1758046800000
+      }
+    ],
+    "now": "2026-09-16T13:15:00-04:00",
+    "locale": "en-CA"
+  },
+  "expect": [{ "intent": "gmail", "valueIncludes": "maya.chen@northbrookstudio.com" }]
+}

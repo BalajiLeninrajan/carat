@@ -32,17 +32,71 @@ export interface PageMeta {
   h1?: string;
 }
 
+export type RequestContext = Array<Pick<ContextItem, 'id' | 'origin' | 'title' | 'kind' | 'text' | 'capturedAt'>>;
+
 export interface SuggestRequest {
   page: PageMeta;
   fields: FieldDescriptor[];
-  context: Array<Pick<ContextItem, 'id' | 'origin' | 'title' | 'kind' | 'text' | 'capturedAt'>>;
+  /** Text from other tabs: the only source for field fills. */
+  context: RequestContext;
+  /** Text captured from the requesting tab itself: a source for actions, never for fills. Omitted when empty. */
+  own?: RequestContext;
   now: string; // ISO
   locale?: string;
 }
 
-export interface Suggestion {
+/** Destinations carat knows how to build a URL for. The model names one; it never writes the URL. */
+export const INTENTS = ['maps', 'calendar', 'gmail'] as const;
+export type IntentName = (typeof INTENTS)[number];
+
+export function isIntentName(v: unknown): v is IntentName {
+  return typeof v === 'string' && (INTENTS as readonly string[]).includes(v);
+}
+
+/** A value for one field on the current page. */
+export interface FillSuggestion {
+  kind: 'fill';
   fieldId: string;
   value: string;
+  confidence: number;
+  reason: string;
+  sourceContextId: string;
+}
+
+/**
+ * Something the user may want to do next on another site, extracted from what
+ * they are reading. `value` is the entity (place, event title, email address);
+ * `when` is an ISO 8601 start with offset or ''; `location` is an address or
+ * place name for calendar, else ''.
+ */
+export interface ActionSuggestion {
+  kind: 'action';
+  intent: IntentName;
+  value: string;
+  when: string;
+  location: string;
+  confidence: number;
+  reason: string;
+  sourceContextId: string;
+}
+
+/** What a provider returns. */
+export type Suggestion = FillSuggestion | ActionSuggestion;
+
+/**
+ * An action resolved against the registry and the user's open tabs. `open`
+ * creates a tab at `url`; `focus` navigates the existing tab `tabId` there and
+ * brings it forward. Nothing happens until the user presses Tab on the chip.
+ */
+export interface NavSuggestion {
+  kind: 'open' | 'focus';
+  intent: IntentName;
+  label: string; // "Open in Google Maps"
+  value: string;
+  when: string;
+  location: string;
+  url: string;
+  tabId?: number;
   confidence: number;
   reason: string;
   sourceContextId: string;
@@ -72,5 +126,6 @@ export const LIMITS = {
   selectionTextChars: 1000,
   minConfidence: 0.7,
   maxSuggestions: 2,
+  maxNavigations: 2,
   providerTimeoutMs: 6000,
 } as const;

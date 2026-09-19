@@ -4,13 +4,14 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { FIXTURES_DIR, judge, loadFixtures, type Fixture } from '../eval/fixtures';
 
+const FIXTURE_COUNT = 13;
 const cleanup: string[] = [];
 afterAll(() => Promise.all(cleanup.map((d) => rm(d, { recursive: true, force: true }))));
 
 describe('loadFixtures', () => {
   it('loads every fixture in name order', async () => {
     const names = (await loadFixtures()).map((f) => f.name);
-    expect(names.length).toBe(9);
+    expect(names.length).toBe(FIXTURE_COUNT);
     expect(names).toEqual([...names].sort());
   });
 
@@ -19,14 +20,16 @@ describe('loadFixtures', () => {
     cleanup.push(base);
     const dir = join(base, 'fix tures #1');
     await cp(FIXTURES_DIR, dir, { recursive: true });
-    expect((await loadFixtures(dir)).length).toBe(9);
+    expect((await loadFixtures(dir)).length).toBe(FIXTURE_COUNT);
   });
 });
 
 describe('judge', () => {
-  const positive: Fixture = { name: 'p', request: { page: { host: 'x', title: '', path: '/' }, fields: [], context: [], now: '' }, expect: [{ fieldId: 'f0', valueIncludes: 'Seven Shores' }] };
+  const request = { page: { host: 'x', title: '', path: '/' }, fields: [], context: [], now: '' };
+  const positive: Fixture = { name: 'p', request, expect: [{ fieldId: 'f0', valueIncludes: 'Seven Shores' }] };
   const negative: Fixture = { ...positive, name: 'n', expect: [] };
-  const hit = { fieldId: 'f0', value: 'Seven Shores Cafe', confidence: 0.75, reason: '', sourceContextId: 'c1' };
+  const hit = { kind: 'fill' as const, fieldId: 'f0', value: 'Seven Shores Cafe', confidence: 0.75, reason: '', sourceContextId: 'c1' };
+  const nav = { kind: 'action' as const, intent: 'maps' as const, value: 'Seven Shores Cafe', when: '', location: '', confidence: 0.75, reason: '', sourceContextId: 'o1' };
 
   it('fails a positive on [] or the wrong field, passes on a substring match', () => {
     expect(judge(positive, []).pass).toBe(false);
@@ -34,8 +37,21 @@ describe('judge', () => {
     expect(judge(positive, [hit]).pass).toBe(true);
   });
 
-  it('fails a negative on any suggestion', () => {
+  it('fails a negative on any suggestion, fill or action', () => {
     expect(judge(negative, [])).toEqual({ pass: true, detail: '[]' });
     expect(judge(negative, [hit]).pass).toBe(false);
+    expect(judge(negative, [nav]).pass).toBe(false);
+  });
+
+  it('matches an action on intent, value and the start of when', () => {
+    const wantMaps: Fixture = { ...positive, expect: [{ intent: 'maps', valueIncludes: 'Seven Shores' }] };
+    expect(judge(wantMaps, [nav]).pass).toBe(true);
+    expect(judge(wantMaps, [hit]).pass).toBe(false);
+    expect(judge(wantMaps, [{ ...nav, intent: 'calendar' }]).pass).toBe(false);
+
+    const wantWhen: Fixture = { ...positive, expect: [{ intent: 'calendar', valueIncludes: 'Dinner', whenStartsWith: '2026-09-18T18' }] };
+    const cal = { ...nav, intent: 'calendar' as const, value: 'Dinner at Seven Shores Cafe', when: '2026-09-18T18:00:00-04:00' };
+    expect(judge(wantWhen, [cal])).toEqual({ pass: true, detail: 'calendar="Dinner at Seven Shores Cafe"@2026-09-18T18:00:00-04:00' });
+    expect(judge(wantWhen, [{ ...cal, when: '2026-09-19T18:00:00-04:00' }]).detail).toContain('wanted calendar~"Dinner"@2026-09-18T18');
   });
 });
