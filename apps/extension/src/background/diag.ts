@@ -92,15 +92,16 @@ export interface SuggestDiag {
 }
 
 /**
- * One thing carat performed on a tab that is worth remembering: a money
- * control accepted with Enter (always logged, with the button's name), or a
- * fill that stopped short of the pick that should have followed it. The
- * later goal layer reads these to know where a flow stands.
+ * One thing carat performed on a tab that is worth remembering: an
+ * irreversible control the user armed and then acted on with a second Tab
+ * (always logged, with the button's name), or a fill that stopped short of
+ * the pick that should have followed it. The later goal layer reads these to
+ * know where a flow stands.
  */
 export interface PerformDiag {
   at: number;
   host: string;
-  kind: 'money' | 'fill';
+  kind: 'armed' | 'fill';
   /** The button's accessible name, or the field id for a partial fill. */
   name: string;
   outcome: 'done' | 'partial';

@@ -1,12 +1,13 @@
 import type { NextAction } from '@carat/shared';
 import type { Chip } from '../chip';
+import { QUIET_HINT } from '../chip';
 import { performFill } from '../fill';
 import type { FrameHub, KnownFrame } from '../frames';
 import { createFrameHub } from '../frames';
 import { performInteraction, roleOf, stillFits } from '../interact';
 import type { OutlineTarget } from '../outline';
 import { assembleEvidence } from '../outline';
-import { inViewport, scrollPageDown, scrollToTarget } from '../scroll';
+import { caratScrollEnd, caratScrolling, inViewport, scrollPageDown, scrollToTarget, viewportsOf } from '../scroll';
 import type { ScriptContext } from './context';
 import type { PageState } from './page-state';
 import { send } from './send';
@@ -18,18 +19,39 @@ export const SNAPSHOT_TIMING = {
   mutationQuietMs: 400,
   /** How long after carat acted, or after the user did, the page counts as settled. */
   settleMs: 500,
+  /**
+   * After carat performed an action the question does not wait for the page
+   * to settle: it goes out on the next frame, and this is the guard behind
+   * that frame for the paint the change lands in.
+   */
+  afterPerformMs: 60,
   /** No two requests closer together than this, whatever asked for them. */
   minGapMs: 500,
   /** The same outline, with nothing new in the timeline, is not asked about again inside this window. */
   identicalMs: 60_000,
+  /**
+   * Esc means "not that". The question goes back out after the first wait
+   * with the dismissal in the timeline, then after the second if that answer
+   * is refused too, and from the third on at the last wait, for as long as
+   * the page is open; the model is never left with nothing to try.
+   */
+  escRetryMs: [3000, 6000, 10_000],
+  /** Refusals in a row before the chip starts saying how to shut carat up. */
+  snoozeAfterEscapes: 5,
+  /** Shift+Tab: how long this tab hears nothing at all. */
+  snoozeMs: 60_000,
 } as const;
 
 /**
- * Why a request is going out. They differ in what may stop them: `quiet`
- * needs the outline to have changed, `force` skips every gate, and the rest
- * go through the memo.
+ * Why a request is going out. They differ in what may stop them: `quiet` and
+ * `settled` need the outline to have changed, `force` skips every gate,
+ * `performed` skips the memo and the gap both, `retry` follows an Esc, and
+ * the rest go through the memo.
  */
-type Trigger = 'first' | 'quiet' | 'evidence' | 'focus' | 'performed' | 'user' | 'force';
+type Trigger = 'first' | 'quiet' | 'evidence' | 'focus' | 'performed' | 'settled' | 'user' | 'retry' | 'lost' | 'force';
+
+/** Why an ask did not go out. `snoozed` is the one the user chose. */
+type Refusal = 'gone' | 'snoozed' | 'performing' | 'awaiting' | 'queued';
 
 export interface ActionsHandle {
   /** The page's own text changed; ask again unless a chip is already up. */
@@ -46,6 +68,8 @@ const NO_HANDLE: ActionsHandle = { refresh: () => undefined, force: () => undefi
 export interface RequestObserver {
   onRequest?(): void;
   onAnswer?(): void;
+  /** A snooze started and will be over at this time, or ended, which is `null`. */
+  onQuiet?(until: number | null): void;
 }
 
 export interface ActionOptions extends RequestObserver {
@@ -96,10 +120,20 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
   let nextTrigger: Trigger | null = null;
   let gapTimer: number | null = null;
   let lastSentAt = 0;
-  /** Esc means wait: the next question goes out when the user does something, not before. */
+  /** Esc means wait: the next question goes out on the retry timer, or when the user does something. */
   let awaitingUser = false;
+  /** How many times Esc has been pressed since the user last did anything; it indexes the backoff. */
+  let escapes = 0;
+  let retryTimer: number | null = null;
+  /** The last dismissal on its way to the timeline; the retry waits for it. */
+  let reported: Promise<unknown> = Promise.resolve();
   /** Carat is in the middle of an action; the next question waits for the accept to be reported. */
   let performing = false;
+  /** One re-ask per lost ticket, so a worker that keeps dying costs one extra request, not a loop. */
+  let lostRetry = false;
+  /** Shift+Tab: when carat may speak on this tab again, or 0 when it may now. */
+  let quietUntil = 0;
+  let quietTimer: number | null = null;
 
   const hub: FrameHub =
     opts.hub ??
@@ -128,7 +162,8 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
 
   const afterUser = settleTimer(SNAPSHOT_TIMING.settleMs, () => ask('user'));
   const afterCapture = settleTimer(SNAPSHOT_TIMING.mutationQuietMs, () => ask('evidence'));
-  const afterPerform = settleTimer(SNAPSHOT_TIMING.settleMs, () => ask('performed'));
+  // Behind the fast lane, not in front of it: the page that keeps loading after a click.
+  const afterPerform = settleTimer(SNAPSHOT_TIMING.settleMs, () => ask('settled'));
   const afterMutation = settleTimer(SNAPSHOT_TIMING.mutationQuietMs, () => ask('quiet'));
 
   /** A request the model may still improve on has closed; the chip is final. */
@@ -144,29 +179,36 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
    * time, no closer together than the gap, and the last trigger to arrive
    * while waiting is the one that goes.
    */
-  function ask(trigger: Trigger): void {
-    if (!ctx.isValid) return;
+  function ask(trigger: Trigger): Refusal | undefined {
+    if (!ctx.isValid) return 'gone';
+    // Shift+Tab bought a minute of silence, and nothing buys its way past that:
+    // the shortcut ends the snooze itself before it asks.
+    if (quietUntil !== 0) return 'snoozed';
     // The focus moving because carat filled a field is not the user moving it.
-    if (performing && trigger !== 'force') return;
-    // After Esc, only the user gets carat talking again.
-    if (awaitingUser && trigger !== 'force' && trigger !== 'user' && trigger !== 'focus') return;
+    if (performing && trigger !== 'force') return 'performing';
+    // After Esc, only the user and the retry timer get carat talking again.
+    if (awaitingUser && trigger !== 'force' && trigger !== 'user' && trigger !== 'focus' && trigger !== 'retry') return 'awaiting';
     const force = nextTrigger === 'force' || trigger === 'force';
     nextTrigger = force ? 'force' : trigger;
-    // The shortcut waits for nothing, not even the gap a queued trigger is sitting out.
-    if (force && gapTimer !== null) {
+    // The shortcut waits for nothing, and neither does the question after
+    // carat acted: repeated Tab is the whole point of that one, so the gap
+    // the other triggers sit out does not apply to it.
+    const immediate = nextTrigger === 'force' || nextTrigger === 'performed';
+    if (immediate && gapTimer !== null) {
       clearTimeout(gapTimer);
       gapTimer = null;
     }
-    if (gapTimer !== null || inFlight) return;
-    const wait = force ? 0 : SNAPSHOT_TIMING.minGapMs - (Date.now() - lastSentAt);
+    if (gapTimer !== null || inFlight) return 'queued';
+    const wait = immediate ? 0 : SNAPSHOT_TIMING.minGapMs - (Date.now() - lastSentAt);
     if (wait > 0) {
       gapTimer = ctx.setTimeout(() => {
         gapTimer = null;
         run();
       }, wait);
-      return;
+      return 'queued';
     }
     run();
+    return undefined;
   }
 
   function run(): void {
@@ -204,9 +246,14 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
       }
       const now = Date.now();
       const fresh = hash !== lastHash;
-      if (!force) {
+      // Two questions the memo must not answer: a lost ticket, whose whole
+      // point is that the last answer never arrived, and the one after carat
+      // acted, which the timeline has a new line for whatever the outline did.
+      // The settle behind that one is not the same question: it is only worth
+      // asking if the page moved after the immediate one went out.
+      if (!force && trigger !== 'lost' && trigger !== 'performed') {
         // A page that settled without changing has nothing new to say.
-        if (trigger === 'quiet' && !fresh) return;
+        if ((trigger === 'quiet' || trigger === 'settled') && !fresh) return;
         if (!fresh && events === lastEvents && now - lastAt < SNAPSHOT_TIMING.identicalMs) return;
       }
       lastHash = hash;
@@ -235,6 +282,17 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     for (;;) {
       const update = await send('nextActionRefine', { ticket });
       if (!update || mine !== seq || !ctx.isValid) break;
+      // The service worker went down holding this ticket, so what is on the
+      // chip is all the placeholder ever had. Ask once more rather than let
+      // it stand as the model's answer.
+      if (update.lost) {
+        settle(mine);
+        if (!lostRetry) {
+          lostRetry = true;
+          ask('lost');
+        }
+        return;
+      }
       // The number lands long before the words do; the ring goes up on it now.
       if (update.target !== undefined) {
         const target = registry.get(update.target)?.el;
@@ -243,6 +301,7 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
       if (update.action !== undefined) present(update.action);
       if (!update.more) break;
     }
+    lostRetry = false;
     settle(mine);
   }
 
@@ -251,7 +310,9 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
       if (!chip.visible) chip.hide();
       return;
     }
-    const key = actionKey(action);
+    // Taken here, where the offer is made: a scroll's key holds the position
+    // it was offered from, not the one the page has moved on to.
+    const key = actionKey(action, win, doc);
     if (done.has(key) || dismissed.has(key)) return;
     const target = action.target === null ? undefined : registry.get(action.target);
     if (['fill', 'click', 'select'].includes(action.kind) && !target?.el.isConnected) return;
@@ -261,12 +322,14 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     const shared = {
       label: action.label,
       reason: action.reason,
+      // Said no this often and the user wants the key, not another answer.
+      ...(escapes >= SNAPSHOT_TIMING.snoozeAfterEscapes ? { detail: QUIET_HINT } : {}),
       pending,
       irreversible: action.irreversible,
       // The field carat just filled still holds the focus; Tab there is for this chip.
       interceptFrom: lastActed && lastActed !== el ? lastActed : null,
-      onAccept: () => void accept(action, target),
-      onDismiss: (why: string) => onDismiss(why, action, target),
+      onAccept: () => void accept(action, target, key),
+      onDismiss: (why: string) => onDismiss(why, action, target, key),
     };
     // A control the user can see gets the chip on it; everything else is the banner.
     if (el && inViewport(el, win)) {
@@ -280,25 +343,99 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
   /**
    * The chip went away. The user getting on with the page says nothing about
    * the offer, so nothing is reported and nothing is suppressed; Esc and
-   * typing over the value do say something, and stop carat until the user
-   * moves again.
+   * typing over the value do say something. They are a "not that", not a
+   * "stop": the question goes back out on the retry timer with the dismissal
+   * behind it, and the refused action is never offered again on this page.
    */
-  function onDismiss(why: string, action: NextAction, target: OutlineTarget | undefined): void {
+  function onDismiss(why: string, action: NextAction, target: OutlineTarget | undefined, key: string): void {
+    // Shift+Tab says nothing about this offer, so nothing is reported and
+    // nothing is suppressed; it asks for a minute without any offer at all.
+    if (why === 'snoozed') {
+      snooze();
+      return;
+    }
     if (why === 'acted' || why === 'scrolled') {
       // Scrolling by hand is the step the scroll banner offered: count it done.
-      if (why === 'scrolled' && action.kind === 'scroll') done.add(actionKey(action));
+      if (why === 'scrolled' && action.kind === 'scroll') done.add(key);
       userActed();
       afterUser.soon();
       return;
     }
     if (why !== 'escape' && why !== 'typed') return;
-    dismissed.add(actionKey(action));
+    dismissed.add(key);
     awaitingUser = true;
-    void send('feedback', { kind: action.kind, name: nameOf(action, target), label: action.label, host: doc.location.host, accepted: false });
+    // The dismissal is a line in the timeline, so the memo must not swallow what follows it.
+    events++;
+    reported = send('feedback', { kind: action.kind, name: nameOf(action, target), label: action.label, host: doc.location.host, accepted: false });
+    retryAfterDismissal();
   }
 
-  async function accept(action: NextAction, target: OutlineTarget | undefined): Promise<void> {
-    done.add(actionKey(action));
+  /**
+   * Ask again, once the dismissal has reached the timeline, so the model
+   * reads it and picks something else. Each refusal buys a longer wait up to
+   * the last one, which then repeats: carat keeps trying, just not eagerly.
+   */
+  function retryAfterDismissal(): void {
+    cancelRetry();
+    const waits = SNAPSHOT_TIMING.escRetryMs;
+    const wait = waits[Math.min(escapes, waits.length - 1)]!;
+    escapes++;
+    retryTimer = ctx.setTimeout(() => {
+      retryTimer = null;
+      void reported.then(() => ask('retry'));
+    }, wait);
+  }
+
+  function cancelRetry(): void {
+    if (retryTimer !== null) clearTimeout(retryTimer);
+    retryTimer = null;
+  }
+
+  /**
+   * Shift+Tab. Carat goes quiet on this tab for a minute: every timer that
+   * could ask is dropped, the Esc chain with them, and `ask` refuses whatever
+   * arrives in the meantime. The minute is the only thing still running.
+   */
+  function snooze(): void {
+    quietUntil = Date.now() + SNAPSHOT_TIMING.snoozeMs;
+    nextTrigger = null;
+    if (gapTimer !== null) clearTimeout(gapTimer);
+    gapTimer = null;
+    afterUser.cancel();
+    afterCapture.cancel();
+    afterPerform.cancel();
+    afterMutation.cancel();
+    cancelRetry();
+    awaitingUser = false;
+    if (quietTimer !== null) clearTimeout(quietTimer);
+    quietTimer = ctx.setTimeout(wake, SNAPSHOT_TIMING.snoozeMs);
+    observer.onQuiet?.(quietUntil);
+    // The model reads this next time: the user wanted silence here, not a better answer.
+    events++;
+    void send('history', { entries: [{ t: Date.now(), kind: 'snoozed' }] });
+  }
+
+  /**
+   * The minute is up. The refusals that led here are forgotten, so the hint
+   * comes off the next chip, and nothing goes out until something asks for
+   * it: the user moving is what starts carat off again, not the clock.
+   */
+  function wake(): void {
+    endSnooze();
+    escapes = 0;
+  }
+
+  /** The shortcut and a context clear are the two things that cut a snooze short. */
+  function endSnooze(): void {
+    if (quietTimer !== null) clearTimeout(quietTimer);
+    quietTimer = null;
+    if (quietUntil === 0) return;
+    quietUntil = 0;
+    observer.onQuiet?.(null);
+  }
+
+  async function accept(action: NextAction, target: OutlineTarget | undefined, key: string): Promise<void> {
+    done.add(key);
     lastActed = target?.el ?? null;
     performing = true;
     try {
@@ -317,14 +454,49 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
       performing = false;
     }
     userActed();
-    // Whatever just happened is the newest thing in the timeline; ask once the page has taken it in.
+    // Whatever just happened is the newest thing in the timeline. Ask as soon
+    // as the DOM carries it, and leave the settle watcher behind that for a
+    // page that goes on loading once the immediate question has gone out.
+    askPerformed();
     afterPerform.soon();
   }
 
-  /** Something new for the timeline, and carat is free to talk again. */
+  /**
+   * The fast lane. The page has what carat just did by the next frame, so the
+   * question goes out then, with the short guard behind it for the paint. A
+   * scroll is the exception: the page is still moving under carat's own
+   * scroll, and the outline read before it stops is the one already asked
+   * about, so that one waits for the mark to come off instead.
+   */
+  function askPerformed(): void {
+    const g = gen;
+    const go = (): void => {
+      if (ctx.isValid && g === gen) ask('performed');
+    };
+    if (caratScrolling()) {
+      void caratScrollEnd().then(go);
+      return;
+    }
+    onFrame(() => ctx.setTimeout(go, SNAPSHOT_TIMING.afterPerformMs));
+  }
+
+  /** The next frame, or the next task where there are no frames to wait for. */
+  function onFrame(fn: () => void): void {
+    if (typeof win.requestAnimationFrame === 'function') win.requestAnimationFrame(() => fn());
+    else ctx.setTimeout(fn, 0);
+  }
+
+  /**
+   * Something new for the timeline, and carat is free to talk again. The
+   * retry timer is the user's to interrupt: they are about to bring a
+   * question of their own, so the one Esc queued is dropped and the backoff
+   * starts over.
+   */
   function userActed(): void {
     events++;
     awaitingUser = false;
+    escapes = 0;
+    cancelRetry();
   }
 
   /** Carry the action out. Returns 'partial' when a fill went in but the pick after it did not. */
@@ -382,6 +554,9 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     afterPerform.cancel();
     afterMutation.cancel();
     afterCapture.cancel();
+    cancelRetry();
+    endSnooze();
+    escapes = 0;
     pending = false;
     chip.hide();
     done.clear();
@@ -394,6 +569,7 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     events = 0;
     awaitingUser = false;
     performing = false;
+    lostRetry = false;
     // Nothing is asked for on the spot; the next ordinary trigger does that.
   }
 
@@ -403,7 +579,12 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
   };
   // A click, a keystroke or a scroll of the user's own: ask again once they pause.
   for (const type of ['click', 'input'] as const) ctx.addEventListener(doc, type, onUser);
-  ctx.addEventListener(win, 'scroll', onUser, { passive: true } as AddEventListenerOptions);
+  // Carat's own smooth scroll fires these too; that one is not the user moving.
+  const onScrolled = (): void => {
+    if (caratScrolling()) return;
+    onUser();
+  };
+  ctx.addEventListener(win, 'scroll', onScrolled, { passive: true } as AddEventListenerOptions);
   // The focus moving is the strongest signal there is; that one does not wait.
   ctx.addEventListener(doc, 'focusin', () => {
     userActed();
@@ -434,14 +615,25 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
       lastHash = '';
       dismissed.clear();
       awaitingUser = false;
+      escapes = 0;
+      cancelRetry();
+      // The user asking by hand outranks the quiet they asked for a moment ago.
+      endSnooze();
       ask('force');
     },
     clear,
   };
 }
 
-/** What counts as the same offer: the kind, the control and the value. */
-function actionKey(action: NextAction): string {
+/**
+ * What counts as the same offer: the kind, the control and the value. A
+ * scroll has neither of the last two, so what tells one from the next is
+ * where the page was when it was offered. Without that every scroll after the
+ * first would read as the one already taken, and the page would go quiet
+ * after a single Tab.
+ */
+function actionKey(action: NextAction, win: Window, doc: Document): string {
+  if (action.kind === 'scroll') return `scroll|${viewportsOf(win, doc).y}`;
   return `${action.kind}|${action.target ?? ''}|${action.value}`;
 }
 

@@ -84,7 +84,7 @@ describe('one action per page', () => {
   });
 
   it('answers with the placeholder at once and replaces it through the ticket', async () => {
-    const refine = new RefineQueue(() => undefined);
+    const refine = new RefineQueue({ setTimer: () => undefined });
     const placeholder = action({ kind: 'fill', target: 1, value: 'Seven Shores Cafe', confidence: 0.5, label: 'Fill Search with "Seven Shores Cafe"' });
     const model = action({ confidence: 0.8 });
     const res = await nextAction(snapshot(), { tabId: 1, origin: 'x' }, {
@@ -101,7 +101,7 @@ describe('one action per page', () => {
   });
 
   it('keeps a surer context-backed fill over the model', async () => {
-    const refine = new RefineQueue(() => undefined);
+    const refine = new RefineQueue({ setTimer: () => undefined });
     const placeholder = action({ kind: 'fill', target: 1, value: 'Seven Shores Cafe', confidence: 0.9 });
     const res = await nextAction(snapshot(), { tabId: 1, origin: 'x' }, {
       settings: async () => settings(),
@@ -157,7 +157,7 @@ describe('validation is safety only', () => {
     expect(validate(action({ target: 4 }), request({ controls: disabled }), s)).toBeNull();
   });
 
-  it('flags a money control instead of refusing it', () => {
+  it('flags a control that takes money like any other irreversible one, and refuses nothing', () => {
     const pay = action({ target: 3, label: 'Click "Pay $312.40"' });
     const checked = validate(pay, request(), s);
     expect(checked).not.toBeNull();
@@ -182,6 +182,16 @@ describe('validation is safety only', () => {
     expect(validate(scroll, request(), s)).toBeNull();
     const more = request({ page: { ...request().page, scroll: { y: 0.4, pages: 3, more: true } } });
     expect(validate(scroll, more, s)?.kind).toBe('scroll');
+  });
+
+  it('calls the scroll after the first one "Scroll more", and leaves the model’s own words alone', () => {
+    const bare = action({ kind: 'scroll', target: null, label: '' });
+    const top = request({ page: { ...request().page, scroll: { y: 0, pages: 3, more: true } } });
+    const partway = request({ page: { ...request().page, scroll: { y: 1, pages: 3, more: true } } });
+    expect(validate(bare, top, s)?.label).toBe('Scroll down');
+    expect(validate(bare, partway, s)?.label).toBe('Scroll more');
+    // The model said what it wanted said; the fallback is only for an empty label.
+    expect(validate(action({ kind: 'scroll', target: null, label: 'Read the rest of the review' }), partway, s)?.label).toBe('Read the rest of the review');
   });
 
   it('opens only what the intent registry can build, never a URL the model wrote', () => {
@@ -242,7 +252,7 @@ describe('how fast the chip goes up', () => {
     // Only the timers the fake model and the ticket use; the clock stays real so the 50 ms means something.
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
-      const refine = new RefineQueue(() => undefined);
+      const refine = new RefineQueue({ setTimer: () => undefined });
       const placeholder = action({ kind: 'fill', target: 1, value: 'Seven Shores Cafe', confidence: 0.5, label: 'Fill Search with "Seven Shores Cafe"' });
       const diags: SuggestDiag[] = [];
       const started = Date.now();

@@ -7,6 +7,56 @@ export const SCROLL_MAX_MS = 1000;
 
 const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
 
+/** Scrolls carat started that have not stopped yet. */
+let running = 0;
+/** The tail after the last of them: frames still landing once the settle has resolved. */
+let tail: number | null = null;
+/** Waiting for the mark to come off, so the page is read after it has stopped moving. */
+let waiting: Array<() => void> = [];
+
+/**
+ * Whether the page is moving because carat moved it. A smooth scroll of one
+ * viewport takes longer than the window it is measured with, so the mark
+ * stands from the first pixel to a settle window past the last. A scroll
+ * event while it stands is not the user reading on: it neither dismisses the
+ * chip nor counts as the user acting.
+ */
+export function caratScrolling(): boolean {
+  return running > 0 || tail !== null;
+}
+
+/**
+ * Resolves the moment the mark comes off, or at once when it is not on. The
+ * question after a scroll carat performed waits on this rather than on a
+ * timer: the outline read while the page is still moving is the old one.
+ */
+export function caratScrollEnd(): Promise<void> {
+  if (!caratScrolling()) return Promise.resolve();
+  return new Promise((resolve) => {
+    waiting.push(resolve);
+  });
+}
+
+/** Run a scroll of carat's own under that mark. */
+function own(win: Window, start: () => void): Promise<void> {
+  running++;
+  if (tail !== null) {
+    win.clearTimeout(tail);
+    tail = null;
+  }
+  start();
+  return settled(win).then(() => {
+    running--;
+    if (running > 0) return;
+    tail = win.setTimeout(() => {
+      tail = null;
+      const woken = waiting;
+      waiting = [];
+      for (const resolve of woken) resolve();
+    }, SCROLL_SETTLE_MS);
+  });
+}
+
 /**
  * The element's box in `win`'s viewport coordinates. For an element inside a
  * same-origin child frame, each frame element's box on the way up is added,
@@ -54,10 +104,11 @@ export function inViewport(el: Element, win: Window): boolean {
  */
 export function scrollToTarget(el: Element, win: Window): Promise<void> {
   const reduced = typeof win.matchMedia === 'function' && win.matchMedia(REDUCED_MOTION).matches;
-  if (typeof el.scrollIntoView === 'function') {
-    el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: reduced ? 'instant' : 'smooth' });
-  }
-  return settled(win);
+  return own(win, () => {
+    if (typeof el.scrollIntoView === 'function') {
+      el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: reduced ? 'instant' : 'smooth' });
+    }
+  });
 }
 
 /**
@@ -67,10 +118,11 @@ export function scrollToTarget(el: Element, win: Window): Promise<void> {
  */
 export function scrollPageDown(win: Window): Promise<void> {
   const reduced = typeof win.matchMedia === 'function' && win.matchMedia(REDUCED_MOTION).matches;
-  if (typeof win.scrollBy === 'function') {
-    win.scrollBy({ top: win.innerHeight, left: 0, behavior: reduced ? 'instant' : 'smooth' });
-  }
-  return settled(win);
+  return own(win, () => {
+    if (typeof win.scrollBy === 'function') {
+      win.scrollBy({ top: win.innerHeight, left: 0, behavior: reduced ? 'instant' : 'smooth' });
+    }
+  });
 }
 
 /** The scrollable height of the document, never less than one viewport. */

@@ -60,10 +60,17 @@ describe('buildNextActionMessages', () => {
     expect(turn).toContain('<tabs>\n(none)\n</tabs>');
   });
 
-  it('carries the scroll position and the open tabs the model may switch to', () => {
+  it('leaves where the page is scrolled to the outline, which measures what it described', () => {
     const turn = renderRequest({ ...req, page: { ...req.page, scroll: { y: 1.4, pages: 3.2, more: true } } });
-    expect(turn).toContain('scroll="1.4 of 3.2 viewports, more below"');
-    expect(turn).toContain('- [tab 8] discord.com — Discord');
+    expect(turn).not.toContain('scroll=');
+    expect(turn).toContain('<page host="www.google.com" path="/maps">');
+    // The few-shot the model learns the shape from carries the outline's own lines instead.
+    expect(FEW_SHOTS[0]!.content).toContain('(0.8 screens above)');
+    expect(FEW_SHOTS[0]!.content).toContain('more screens below;');
+  });
+
+  it('carries the open tabs the model may switch to', () => {
+    expect(renderRequest(req)).toContain('- [tab 8] discord.com — Discord');
   });
 
   it('keeps the clock out of the prefix, so a second on the clock cannot miss the cache', () => {

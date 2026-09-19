@@ -35,11 +35,14 @@ export interface NextActionResponse {
  * A later word on the same request. `target` alone moves the ring before the
  * model has finished writing; `action` replaces what the chip shows. `more`
  * says the ticket is still open and the content script should poll again.
+ * `lost` says the service worker restarted while this ticket was open, so the
+ * answer is never coming and the page should ask again rather than settle.
  */
 export interface ActionUpdate {
   target?: number;
   action?: NextAction | null;
   more?: boolean;
+  lost?: boolean;
 }
 
 /** Tab or Esc on the chip, and how the action ended if it was performed. */

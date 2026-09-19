@@ -89,9 +89,9 @@ function describeAttempt(a: ProviderAttempt): string {
   return `${a.id} answered in ${a.ms} ms with ${a.kind}`;
 }
 
-/** One line: `pressed "Pay $312" on aircanada.com 12s ago (Enter)` or `filled f2 on aircanada.com 12s ago, pick left undone`. */
+/** One line: `pressed "Pay $312" on aircanada.com 12s ago (armed, second Tab)` or `filled f2 on aircanada.com 12s ago, pick left undone`. */
 export function describePerform(d: PerformDiag, now: number = Date.now()): string {
-  if (d.kind === 'money') return `pressed "${d.name}" on ${d.host} ${relativeAge(d.at, now)} (Enter)`;
+  if (d.kind === 'armed') return `pressed "${d.name}" on ${d.host} ${relativeAge(d.at, now)} (armed, second Tab)`;
   return `filled ${d.name} on ${d.host} ${relativeAge(d.at, now)}, pick left undone`;
 }
 

@@ -316,7 +316,7 @@ describe('downscale', () => {
 
 describe('RefineQueue', () => {
   it('hands each update to the tab it was issued to, and nothing to anyone else', async () => {
-    const queue = new RefineQueue(() => undefined);
+    const queue = new RefineQueue({ setTimer: () => undefined });
     const ticket = queue.open(4);
     ticket.push({ target: 3 });
     ticket.close();
@@ -328,7 +328,7 @@ describe('RefineQueue', () => {
 
   it('marks more while the ticket is open, and forgets an unclaimed one after the grace period', async () => {
     const timers: Array<() => void> = [];
-    const queue = new RefineQueue((fn) => timers.push(fn));
+    const queue = new RefineQueue({ setTimer: (fn) => timers.push(fn) });
     const ticket = queue.open(1);
     ticket.push({ target: 2 });
     ticket.push({ action: null });
@@ -343,7 +343,7 @@ describe('RefineQueue', () => {
   });
 
   it('waits for the next update rather than answering nothing while the ticket is open', async () => {
-    const queue = new RefineQueue(() => undefined);
+    const queue = new RefineQueue({ setTimer: () => undefined });
     const ticket = queue.open(2);
     const pending = queue.claim(ticket.id, 2);
     ticket.push({ target: 7 });

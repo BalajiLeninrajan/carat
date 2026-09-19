@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { NextAction } from '@carat/shared';
-import { CHIP_SETTLE_MS, createChip } from '../src/chip';
+import type { NextAction, PageScroll } from '@carat/shared';
+import { scrollLabel } from '@carat/shared';
+import { CHIP_SETTLE_MS, QUIET_HINT, createChip } from '../src/chip';
 import type { ScriptContext } from '../src/content';
 import { SNAPSHOT_TIMING, startActions } from '../src/content/action-scheduler';
 import type { FrameHub } from '../src/frames';
 import { safeSendMessage } from '../src/messaging';
+import { SCROLL_MAX_MS, SCROLL_SETTLE_MS, caratScrolling, scrollPageDown } from '../src/scroll';
 
 vi.mock('../src/messaging', () => ({ safeSendMessage: vi.fn(async () => undefined) }));
 
@@ -96,6 +98,8 @@ const tick = (ms = 0) => vi.advanceTimersByTimeAsync(ms);
 const firstAsk = () => tick(0);
 /** Long enough for the settle timer and the gap in front of it. */
 const settled = () => tick(SNAPSHOT_TIMING.settleMs + SNAPSHOT_TIMING.minGapMs);
+/** The fast lane: the frame after carat acted, plus the guard behind it. Well short of a settle. */
+const performed = () => tick(SNAPSHOT_TIMING.afterPerformMs + 40);
 
 const tab = (): void => {
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
@@ -259,19 +263,35 @@ describe('when it asks', () => {
     chip.destroy();
   });
 
-  it('asks again once a scroll of the user’s own settles', async () => {
-    // The outline now stops at the fold, so a scroll changes what the model would see.
-    document.body.innerHTML = '<main><button>Save</button></main>';
-    layAll();
+  it('asks again once a scroll of the user’s own settles, against the page the scroll uncovered', async () => {
+    // The outline stops at the fold, so the second screen is not in the first question.
+    const vh = window.innerHeight;
+    document.body.innerHTML = '<main><button>Save</button><a href="https://example.com/more">Read more</a></main>';
+    Object.defineProperty(document.documentElement, 'scrollHeight', { value: vh * 2, configurable: true });
+    let scrolled = 0;
+    const place = (el: Element, top: number): void => {
+      el.getBoundingClientRect = () => new DOMRect(0, top - scrolled, 300, 40);
+    };
+    place(document.querySelector('button')!, 10);
+    place(document.querySelector('a')!, vh * 1.5);
     answer(null);
     const chip = createChip(document);
     startActions(fakeCtx(), chip, document, { hub: noFrames });
     await firstAsk();
     expect(asks()).toHaveLength(1);
+    const first = (asks()[0] as { outline: string }).outline;
+    expect(first).not.toContain('Read more');
 
+    scrolled = vh;
+    Object.defineProperty(window, 'scrollY', { value: vh, configurable: true });
     window.dispatchEvent(new Event('scroll'));
     await settled();
     expect(asks()).toHaveLength(2);
+    // The hash moved with the visible set, so this is a new question, not the memo's.
+    const second = (asks()[1] as { outline: string }).outline;
+    expect(second).toContain('Read more');
+    expect(second).not.toBe(first);
+    Object.defineProperty(window, 'scrollY', { value: 0, configurable: true });
     chip.destroy();
   });
 
@@ -311,7 +331,7 @@ describe('keeping going', () => {
     expect(chip.text).toBe('Fill Title with "Dinner"');
 
     tab();
-    await settled();
+    await performed();
     // Nobody asked for this one: accepting the fill is what brought it.
     expect(chip.visible).toBe(true);
     expect(chip.text).toBe('Fill Notes with "Seven Shores"');
@@ -320,7 +340,7 @@ describe('keeping going', () => {
     expect(order.indexOf('feedback')).toBeLessThan(order.lastIndexOf('nextAction'));
 
     tab();
-    await settled();
+    await performed();
     expect(chip.text).toBe('Click "Save"');
     chip.destroy();
   });
@@ -336,14 +356,14 @@ describe('keeping going', () => {
     expect(chip.visible).toBe(true);
 
     tab();
-    await settled();
+    await performed();
     // The background offered the same fill again; it is already done here.
     expect(asks().length).toBeGreaterThan(1);
     expect(chip.visible).toBe(false);
     chip.destroy();
   });
 
-  it('says nothing more after Esc until the user does something', async () => {
+  it('says nothing more after Esc until the retry comes due, or the user moves first', async () => {
     document.body.innerHTML = '<main><input aria-label="Title"><button>Save</button></main>';
     layAll();
     answerEach([action({ target: 2, label: 'Click "Save"' }), action({ kind: 'fill', target: 1, value: 'Dinner', label: 'Fill Title with "Dinner"' })]);
@@ -361,11 +381,14 @@ describe('keeping going', () => {
     await settled();
     expect(asks()).toHaveLength(1);
 
-    // Now they click, and the next question goes out once they pause.
+    // They click before the retry timer is up, so that is the question that goes.
     document.querySelector('button')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settled();
     expect(asks()).toHaveLength(2);
     expect(chip.text).toBe('Fill Title with "Dinner"');
+    // The retry the Esc queued was called off by the click, not merely delayed.
+    await tick(SNAPSHOT_TIMING.escRetryMs[0]);
+    expect(asks()).toHaveLength(2);
     chip.destroy();
   });
 
@@ -384,6 +407,329 @@ describe('keeping going', () => {
     expect(asks()).toHaveLength(1);
     await tick(SNAPSHOT_TIMING.minGapMs);
     expect(asks()).toHaveLength(2);
+    chip.destroy();
+  });
+});
+
+describe('the fast lane after carat acts', () => {
+  it('asks inside a frame and a guard of the fill, with the chip up long before the settle', async () => {
+    document.body.innerHTML = '<main><input aria-label="Title"><input aria-label="Notes"><button>Save</button></main>';
+    layAll();
+    answerEach([
+      action({ kind: 'fill', target: 1, value: 'Dinner', label: 'Fill Title with "Dinner"' }),
+      action({ kind: 'fill', target: 2, value: 'Seven Shores', label: 'Fill Notes with "Seven Shores"' }),
+    ]);
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+
+    tab();
+    // The fill is in and reported, but the frame it lands in has not come round yet.
+    await tick(0);
+    expect(asks()).toHaveLength(1);
+
+    await performed();
+    expect(asks()).toHaveLength(2);
+    expect(chip.text).toBe('Fill Notes with "Seven Shores"');
+    // Under a fifth of what the old settle cost, and the gap is no part of it either.
+    expect(SNAPSHOT_TIMING.afterPerformMs + 40).toBeLessThan(SNAPSHOT_TIMING.settleMs);
+    chip.destroy();
+  });
+
+  it('asks once more, and only once, when the page goes on loading behind the immediate question', async () => {
+    document.body.innerHTML = '<main><input aria-label="Title"><button>Save</button></main>';
+    layAll();
+    // The click lands on a page that has nothing to offer yet; the form arrives after it.
+    answerEach([action({ kind: 'fill', target: 1, value: 'Dinner', label: 'Fill Title with "Dinner"' }), null, action({ target: 2, label: 'Click "Save"' })]);
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+
+    tab();
+    await performed();
+    expect(asks()).toHaveLength(2);
+    expect(chip.visible).toBe(false);
+    const immediate = (asks()[1] as { outline: string }).outline;
+
+    // The rest of the page arrives. The settle watcher is still behind the immediate ask.
+    const late = document.createElement('p');
+    late.textContent = 'the rest of the page arrived';
+    document.querySelector('main')!.append(late);
+    await settled();
+    expect(asks()).toHaveLength(3);
+    expect((asks()[2] as { outline: string }).outline).not.toBe(immediate);
+    expect(chip.text).toBe('Click "Save"');
+
+    // Both watchers wanted that question; only one went out, and nothing follows it.
+    await tick(SNAPSHOT_TIMING.settleMs * 4);
+    expect(asks()).toHaveLength(3);
+    chip.destroy();
+  });
+
+  it('holds the settle re-ask when the outline did not move', async () => {
+    document.body.innerHTML = '<main><input aria-label="Title"><button>Save</button></main>';
+    layAll();
+    answerEach([action({ kind: 'fill', target: 1, value: 'Dinner', label: 'Fill Title with "Dinner"' }), null]);
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+
+    tab();
+    await performed();
+    expect(asks()).toHaveLength(2);
+
+    // Nothing changed after the immediate question, so there is nothing to ask again about.
+    await tick(SNAPSHOT_TIMING.settleMs * 4);
+    expect(asks()).toHaveLength(2);
+    chip.destroy();
+  });
+
+  it('leaves the user\u2019s own click waiting out the settle', async () => {
+    document.body.innerHTML = '<main><input aria-label="Title"><button>Save</button></main>';
+    layAll();
+    answer(null);
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    // Past the gap, so the settle is the only thing left in the way.
+    await tick(SNAPSHOT_TIMING.minGapMs);
+
+    document.querySelector('button')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await tick(SNAPSHOT_TIMING.settleMs - 1);
+    expect(asks()).toHaveLength(1);
+    await tick(1);
+    expect(asks()).toHaveLength(2);
+    chip.destroy();
+  });
+});
+
+describe('Esc means "not that"', () => {
+  const esc = (): void => {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  };
+  const [FIRST_WAIT, SECOND_WAIT, LAST_WAIT] = SNAPSHOT_TIMING.escRetryMs;
+
+  it('asks again after the first wait, with the dismissal already reported', async () => {
+    document.body.innerHTML = '<main><input aria-label="Title"><button>Save</button></main>';
+    layAll();
+    answerEach([action({ target: 2, label: 'Click "Save"' }), action({ kind: 'fill', target: 1, value: 'Dinner', label: 'Fill Title with "Dinner"' })]);
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    esc();
+    expect(chip.visible).toBe(false);
+
+    await tick(FIRST_WAIT - 1);
+    expect(asks()).toHaveLength(1);
+    await tick(1);
+    expect(asks()).toHaveLength(2);
+    // The dismissal reaches the background before the question that has to read it.
+    const order = sent.mock.calls.map((c) => c[0]);
+    expect(order.indexOf('feedback')).toBeLessThan(order.lastIndexOf('nextAction'));
+    expect(feedbacks()[0]).toMatchObject({ accepted: false, kind: 'click' });
+    // And the model picked something else, which is what the chip now offers.
+    expect(chip.text).toBe('Fill Title with "Dinner"');
+    chip.destroy();
+  });
+
+  it('backs off to the second wait, then keeps asking at the last wait', async () => {
+    document.body.innerHTML = '<main><input aria-label="Title"><input aria-label="Notes"><input aria-label="Where"><button>Save</button></main>';
+    layAll();
+    answerEach([
+      action({ target: 4, label: 'Click "Save"' }),
+      action({ kind: 'fill', target: 1, value: 'Dinner', label: 'Fill Title with "Dinner"' }),
+      action({ kind: 'fill', target: 2, value: 'Seven Shores', label: 'Fill Notes with "Seven Shores"' }),
+      action({ kind: 'fill', target: 3, value: 'Waterloo', label: 'Fill Where with "Waterloo"' }),
+    ]);
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+
+    esc();
+    await tick(FIRST_WAIT);
+    expect(asks()).toHaveLength(2);
+
+    // The second refusal buys a longer wait, not the same one.
+    esc();
+    await tick(FIRST_WAIT);
+    expect(asks()).toHaveLength(2);
+    await tick(SECOND_WAIT - FIRST_WAIT);
+    expect(asks()).toHaveLength(3);
+
+    // The third buys the last wait, and so does every refusal after it: carat never goes quiet on its own.
+    esc();
+    await tick(LAST_WAIT - 1);
+    expect(asks()).toHaveLength(3);
+    await tick(1);
+    expect(asks()).toHaveLength(4);
+    esc();
+    await tick(LAST_WAIT);
+    expect(asks()).toHaveLength(5);
+    chip.destroy();
+  });
+
+  it('never offers an action it was refused, however often it asks', async () => {
+    document.body.innerHTML = '<main><input aria-label="Title"><button>Save</button></main>';
+    layAll();
+    answer(action({ target: 2, label: 'Click "Save"' }));
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    expect(chip.text).toBe('Click "Save"');
+
+    esc();
+    await tick(FIRST_WAIT);
+    // It asked again and the background offered the same thing; the chip stays down.
+    expect(asks()).toHaveLength(2);
+    expect(chip.visible).toBe(false);
+
+    document.querySelector('button')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await settled();
+    expect(asks().length).toBeGreaterThan(2);
+    expect(chip.visible).toBe(false);
+    chip.destroy();
+  });
+});
+
+describe('Shift+Tab: quiet for a minute', () => {
+  const esc = (): void => {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  };
+  const shiftTab = (): KeyboardEvent => {
+    const e = new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true });
+    document.dispatchEvent(e);
+    return e;
+  };
+  const LAST_WAIT = SNAPSHOT_TIMING.escRetryMs[SNAPSHOT_TIMING.escRetryMs.length - 1]!;
+  const histories = (): string[] =>
+    sent.mock.calls
+      .filter((c) => c[0] === 'history')
+      .flatMap((c) => (c[1] as { entries: Array<{ kind: string }> }).entries.map((e) => e.kind));
+
+  /** A page of fields, and one fill for each, so every retry has something new to offer. */
+  function fields(n: number): { chip: ReturnType<typeof createChip>; handle: ReturnType<typeof startActions> } {
+    document.body.innerHTML = `<main>${Array.from({ length: n }, (_, i) => `<input aria-label="F${i + 1}">`).join('')}</main>`;
+    layAll();
+    answerEach(
+      Array.from({ length: n }, (_, i) =>
+        action({ kind: 'fill', target: i + 1, value: `v${i + 1}`, label: `Fill F${i + 1} with "v${i + 1}"` }),
+      ),
+    );
+    const chip = createChip(document);
+    const handle = startActions(fakeCtx(), chip, document, { hub: noFrames });
+    return { chip, handle };
+  }
+
+  /** Refuse the chip that is up, and wait for the one the retry brings. */
+  async function refuse(): Promise<void> {
+    esc();
+    await tick(LAST_WAIT);
+  }
+
+  it('offers the key on the chip once Esc has come five times, and not before', async () => {
+    const { chip } = fields(SNAPSHOT_TIMING.snoozeAfterEscapes + 1);
+    await firstAsk();
+
+    for (let i = 1; i < SNAPSHOT_TIMING.snoozeAfterEscapes; i++) await refuse();
+    // The fifth chip: four refusals behind it, and no advice yet.
+    expect(chip.visible).toBe(true);
+    expect(chip.detail).toBe('');
+
+    await refuse();
+    expect(chip.visible).toBe(true);
+    expect(chip.detail).toBe(QUIET_HINT);
+    chip.destroy();
+  });
+
+  it('takes the chip down and lets nothing out for the minute', async () => {
+    const { chip } = fields(3);
+    await firstAsk();
+    // A refusal first, so the retry chain is live when the snooze lands on it.
+    esc();
+    await tick(LAST_WAIT);
+    expect(asks()).toHaveLength(2);
+
+    const e = shiftTab();
+    expect(e.defaultPrevented).toBe(true);
+    expect(chip.visible).toBe(false);
+    // Nothing was refused here, so nothing is reported against the offer that was up.
+    expect(feedbacks()).toHaveLength(1);
+    expect(histories()).toEqual(['snoozed']);
+
+    // The user carries on with the page and it carries on rewriting itself; carat says nothing.
+    document.querySelector<HTMLInputElement>('[aria-label="F2"]')!.focus();
+    document.querySelector('main')!.append(document.createElement('p'));
+    document.querySelector('[aria-label="F1"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await tick(SNAPSHOT_TIMING.snoozeMs - 1);
+    expect(asks()).toHaveLength(2);
+    expect(chip.visible).toBe(false);
+    chip.destroy();
+  });
+
+  it('leaves Shift+Tab to the page when there is no chip to silence', async () => {
+    document.body.innerHTML = '<main><input aria-label="Title"><button>Save</button></main>';
+    layAll();
+    answer(null);
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    expect(chip.visible).toBe(false);
+    expect(shiftTab().defaultPrevented).toBe(false);
+    expect(asks()).toHaveLength(1);
+    chip.destroy();
+  });
+
+  it('disarms an irreversible chip rather than acting on it', async () => {
+    document.body.innerHTML = '<main><button>Send</button></main>';
+    layAll();
+    answer(action({ target: 1, label: 'Click "Send"', irreversible: true }));
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    tab();
+    expect(chip.armed).toBe(true);
+
+    shiftTab();
+    expect(chip.armed).toBe(false);
+    expect(chip.visible).toBe(false);
+    expect(feedbacks()).toHaveLength(0);
+    expect(histories()).toEqual(['snoozed']);
+    chip.destroy();
+  });
+
+  it('ends the snooze on the shortcut and asks at once', async () => {
+    const { chip, handle } = fields(3);
+    await firstAsk();
+    shiftTab();
+    await tick(SNAPSHOT_TIMING.minGapMs);
+    expect(asks()).toHaveLength(1);
+
+    handle.force();
+    await tick(0);
+    expect(asks()).toHaveLength(2);
+    chip.destroy();
+  });
+
+  it('starts the refusals over when the minute is up, and waits for a trigger to ask', async () => {
+    const { chip } = fields(SNAPSHOT_TIMING.snoozeAfterEscapes + 1);
+    await firstAsk();
+    for (let i = 0; i < SNAPSHOT_TIMING.snoozeAfterEscapes; i++) await refuse();
+    expect(chip.detail).toBe(QUIET_HINT);
+    const before = asks().length;
+
+    shiftTab();
+    await tick(SNAPSHOT_TIMING.snoozeMs);
+    // The clock running out is not a reason to ask; it only lifts the silence.
+    expect(asks()).toHaveLength(before);
+    expect(chip.visible).toBe(false);
+
+    // The page moves, which is an ordinary trigger, and the counter it asks with has started over.
+    document.querySelector('main')!.append(document.createElement('input'));
+    layAll();
+    await tick(SNAPSHOT_TIMING.mutationQuietMs + SNAPSHOT_TIMING.minGapMs);
+    expect(asks()).toHaveLength(before + 1);
+    expect(chip.visible).toBe(true);
+    expect(chip.detail).toBe('');
     chip.destroy();
   });
 });
@@ -479,6 +825,130 @@ describe('getting out of the way', () => {
   });
 });
 
+describe('scroll, then scroll again', () => {
+  /**
+   * A page three viewports tall that really moves: carat's scroll arrives
+   * over several frames, as a smooth one does, and every frame is a scroll
+   * event the page can hear.
+   */
+  function threeScreens(): void {
+    const vh = window.innerHeight;
+    document.body.innerHTML = '<main><p>screen one</p><p>screen two</p><p>screen three</p><button>Save</button></main>';
+    let y = 0;
+    Object.defineProperty(window, 'scrollY', { get: () => y, configurable: true });
+    Object.defineProperty(document.documentElement, 'scrollHeight', { value: vh * 3, configurable: true });
+    [...document.querySelectorAll('p')].forEach((el, i) => {
+      el.getBoundingClientRect = () => new DOMRect(0, vh * i - y, 300, 40);
+    });
+    document.querySelector('button')!.getBoundingClientRect = () => new DOMRect(0, 100 - y, 100, 30);
+    window.scrollBy = ((opts: ScrollToOptions) => {
+      const from = y;
+      const to = Math.min(y + (opts.top ?? 0), vh * 2);
+      // Four frames, the last of them well past the settle window.
+      for (let step = 1; step <= 4; step++) {
+        window.setTimeout(() => {
+          y = from + ((to - from) * step) / 4;
+          window.dispatchEvent(new Event('scroll'));
+        }, step * 40);
+      }
+    }) as typeof window.scrollBy;
+  }
+
+  /** The background as the engine answers it: a scroll only while there is page below, labelled from where the page is. */
+  function answerScrolls(): void {
+    sent.mockImplementation((async (type: string, msg: unknown) => {
+      if (type === 'nextAction') {
+        const { scroll } = (msg as { page: { scroll: PageScroll } }).page;
+        if (!scroll.more) return { action: null };
+        return { action: action({ kind: 'scroll', target: null, value: '', label: scrollLabel(scroll) }) };
+      }
+      if (type === 'nextActionRefine') return {};
+      return undefined;
+    }) as unknown as typeof safeSendMessage);
+  }
+
+  /** Carat's scroll runs, the mark comes off, and the question goes out on it. */
+  const scrolledAndSettled = async (): Promise<void> => {
+    await tick(SCROLL_MAX_MS + SCROLL_SETTLE_MS);
+  };
+
+  afterEach(() => {
+    Object.defineProperty(window, 'scrollY', { value: 0, configurable: true });
+  });
+
+  it('offers the next scroll once the page has moved, and stops at the bottom', async () => {
+    threeScreens();
+    answerScrolls();
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    expect(chip.text).toBe('Scroll down');
+
+    // One Tab, and nothing else: no click, no keystroke, no scroll of the user's own.
+    tab();
+    await scrolledAndSettled();
+    expect(window.scrollY).toBe(window.innerHeight);
+    expect(chip.visible).toBe(true);
+    expect(chip.text).toBe('Scroll more');
+    // The accept is in the timeline before the question that reads it.
+    const order = sent.mock.calls.map((c) => c[0]);
+    expect(order.indexOf('feedback')).toBeLessThan(order.lastIndexOf('nextAction'));
+    expect(feedbacks()[0]).toMatchObject({ accepted: true, kind: 'scroll' });
+
+    // The second Tab lands on the last screen, where there is nothing below to offer.
+    tab();
+    await scrolledAndSettled();
+    expect(window.scrollY).toBe(window.innerHeight * 2);
+    expect(asks().length).toBeGreaterThan(2);
+    expect(chip.visible).toBe(false);
+    chip.destroy();
+  });
+
+  it('waits for carat\u2019s own scrolling to stop, and asks the moment it does', async () => {
+    threeScreens();
+    answerScrolls();
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    expect(asks()).toHaveLength(1);
+
+    tab();
+    // The page is still under carat's mark; the outline it would read now is the one already asked about.
+    await tick(300);
+    expect(caratScrolling()).toBe(true);
+    expect(asks()).toHaveLength(1);
+
+    // The mark comes off and the question goes out on it, well short of the settle.
+    await tick(SCROLL_SETTLE_MS + 20);
+    expect(caratScrolling()).toBe(false);
+    expect(asks()).toHaveLength(2);
+    expect(chip.text).toBe('Scroll more');
+    chip.destroy();
+  });
+
+  it('keeps the chip up while carat is the one scrolling', async () => {
+    threeScreens();
+    answer(action({ target: 1, label: 'Click "Save"' }));
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    expect(chip.visible).toBe(true);
+    // Past the window the chip grants its own arrival, so only the mark can save it.
+    await tick(CHIP_SETTLE_MS);
+
+    void scrollPageDown(window);
+    await tick(200);
+    expect(window.scrollY).toBeGreaterThan(0);
+    expect(chip.visible).toBe(true);
+
+    // Once carat's scroll has stopped, a scroll is the user reading on again.
+    await tick(SCROLL_MAX_MS + SCROLL_SETTLE_MS);
+    window.dispatchEvent(new Event('scroll'));
+    expect(chip.visible).toBe(false);
+    chip.destroy();
+  });
+});
+
 describe('the early ring', () => {
   it('rings the control the model named before the words arrive', async () => {
     document.body.innerHTML = '<main><input aria-label="Title"><button>Save</button></main>';
@@ -512,6 +982,36 @@ describe('the early ring', () => {
   });
 });
 
+describe('a ticket the service worker lost', () => {
+  it('asks again rather than settling for the placeholder, and only once', async () => {
+    document.body.innerHTML = '<main><input aria-label="Title"><button>Save</button></main>';
+    layAll();
+    const save = action({ target: 2, label: 'Click "Save"' });
+    let asked = 0;
+    sent.mockImplementation((async (type: string) => {
+      // The first request gets a ticket the restarted worker knows nothing about.
+      if (type === 'nextAction') return asked++ === 0 ? { action: null, ticket: 't1' } : { action: save };
+      if (type === 'nextActionRefine') return { lost: true };
+      return undefined;
+    }) as unknown as typeof safeSendMessage);
+
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    expect(asks()).toHaveLength(1);
+
+    // Nothing waited for: the re-ask only sits out the gap in front of it.
+    await tick(SNAPSHOT_TIMING.minGapMs);
+    expect(asks()).toHaveLength(2);
+    expect(chip.text).toBe('Click "Save"');
+
+    // A worker that keeps dying costs one extra request, not a loop.
+    await tick(SNAPSHOT_TIMING.identicalMs);
+    expect(asks()).toHaveLength(2);
+    chip.destroy();
+  });
+});
+
 describe('a context clear', () => {
   it('drops the chip, the memo and what this page load had answered', async () => {
     document.body.innerHTML = '<main><input aria-label="Title"><button>Save</button></main>';
@@ -522,7 +1022,7 @@ describe('a context clear', () => {
     const handle = startActions(fakeCtx(), chip, document, { hub: noFrames });
     await firstAsk();
     tab();
-    await settled();
+    await performed();
     // Accepted once, so it will not be offered again.
     expect(chip.visible).toBe(false);
 

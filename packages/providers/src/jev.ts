@@ -1,5 +1,5 @@
 import type { NextAction, NextActionRequest, OutlineControl } from '@carat/shared';
-import { EAGERNESS } from '@carat/shared';
+import { EAGERNESS, scrollLabel } from '@carat/shared';
 import type { NextOptions, Provider } from './provider';
 import { buildJevRequest, NEXT_QUESTION, NONE, SCROLL, type JevRequest } from './jev/request';
 import { choice, parseJevResponse, type Answers } from './jev/response';
@@ -78,7 +78,15 @@ export function decide(built: JevRequest, answers: Answers, req: NextActionReque
 
   if (answer.choice === SCROLL) {
     if (!req.page.scroll.more) return null;
-    return { kind: 'scroll', target: null, value: '', label: 'Scroll down', irreversible: false, confidence, reason: 'more of the page below' };
+    return {
+      kind: 'scroll',
+      target: null,
+      value: '',
+      label: scrollLabel(req.page.scroll),
+      irreversible: false,
+      confidence,
+      reason: 'more of the page below',
+    };
   }
   const option = built.options.find((o) => o.key === answer.choice);
   if (!option) return null;

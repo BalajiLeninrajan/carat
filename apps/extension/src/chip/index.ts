@@ -1,4 +1,4 @@
-import { SCROLL_SETTLE_MS } from '../scroll';
+import { SCROLL_SETTLE_MS, caratScrolling } from '../scroll';
 import { deepActiveElement, shouldInterceptTab } from './keys';
 import { placeChip } from './position';
 import { CHIP_CSS } from './styles';
@@ -6,9 +6,10 @@ import { CHIP_CSS } from './styles';
 /**
  * Why the chip went away. `escape` and `typed` are the user saying no to the
  * offer and are reported as such; `acted` and `scrolled` are the user getting
- * on with the page, which says nothing about it.
+ * on with the page, which says nothing about it. `snoozed` is Shift+Tab: it
+ * says nothing about this offer either, it asks for a minute without any.
  */
-export type DismissReason = 'escape' | 'timeout' | 'typed' | 'detached' | 'acted' | 'scrolled';
+export type DismissReason = 'escape' | 'timeout' | 'typed' | 'detached' | 'acted' | 'scrolled' | 'snoozed';
 
 /** Tab accepts everything now; an irreversible action simply wants it twice. */
 export type AcceptKey = 'Tab';
@@ -73,6 +74,8 @@ export interface Chip {
   readonly visible: boolean;
   /** The words on the chip; the shadow root is closed, so tests read it here. */
   readonly text: string;
+  /** The second line, when there is one; the shadow root is closed, so tests read it here. */
+  readonly detail: string;
   /** Whether the indicator is up; the shadow root is closed, so tests read it here. */
   readonly pending: boolean;
   /** Whether the first Tab of an irreversible action has landed. */
@@ -85,6 +88,8 @@ export const CORNER_INSET_PX = 24;
 export const ARM_MS = 4000;
 /** Appended to the chip's reason while a better answer may still land. */
 export const PENDING_HINT = 'checking with the model…';
+/** The second line a chip carries once the user has said no often enough to want the key. */
+export const QUIET_HINT = 'Shift+Tab: quiet for a minute';
 /**
  * A chip ignores scrolling for this long after it goes up: that tail belongs
  * to the scroll carat itself did to bring the target into view. Per chip, not
@@ -172,6 +177,16 @@ export function createChip(doc: Document = document): Chip {
       dismiss('escape');
       return;
     }
+    // Shift+Tab is only carat's while there is something on screen to silence;
+    // with no chip up the listener is not even bound, so the page keeps the key.
+    if (e.key === 'Tab' && e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      // An armed chip stands down first: the minute must not start with a live second Tab.
+      disarm();
+      dismiss('snoozed');
+      return;
+    }
     const bare = !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey;
     // A banner has no control of its own to defer to; Tab is its whole interface.
     const deferred = session.target !== null && !shouldInterceptTab(deepActiveElement(doc), session.target, session.interceptFrom);
@@ -219,12 +234,13 @@ export function createChip(doc: Document = document): Chip {
   };
 
   /**
-   * A wheel, a drag or a scroll: the user is reading on, not answering. The
-   * first settle window of the chip's life is the exception, because that is
-   * the tail of the scroll carat did to bring this very target into view.
+   * A wheel, a drag or a scroll: the user is reading on, not answering. Two
+   * exceptions, both of them carat's own doing: a scroll it started and has
+   * not seen stop, and the first settle window of the chip's life, which is
+   * the tail of whatever brought this target into view.
    */
   const onUserScroll = (): void => {
-    if (!session || Date.now() - session.shownAt < CHIP_SETTLE_MS) return;
+    if (!session || caratScrolling() || Date.now() - session.shownAt < CHIP_SETTLE_MS) return;
     dismiss('scrolled');
   };
 
@@ -514,6 +530,9 @@ export function createChip(doc: Document = document): Chip {
     },
     get text() {
       return label.textContent ?? '';
+    },
+    get detail() {
+      return sub.hidden ? '' : (sub.textContent ?? '');
     },
     get pending() {
       return pending;

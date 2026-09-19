@@ -6,10 +6,13 @@ import {
   isIrreversibleLabel,
   normalizeWhitespace,
   resolveIntentValue,
+  scrollLabel,
 } from '@carat/shared';
 import type { Provider } from '@carat/providers';
 import { LocalProvider, RaceProvider, createProvider } from '@carat/providers';
+import type { StorageArea } from '../store';
 import type { NextActionResponse, PageSnapshot } from '../messaging';
+import { AnswerCache, CACHE_MS } from './answer-cache';
 import type { AnswerOrigin, SuggestDiag } from './diag';
 import { explainGate } from './gate';
 import type { HistoryStore } from './history';
@@ -37,15 +40,19 @@ export interface NextActionDeps {
   onDiag?: (diag: SuggestDiag) => void;
 }
 
-/** How long an answer stands for a page whose outline and history have not moved. */
-export const CACHE_MS = 60_000;
+export { CACHE_MS };
 
-interface CacheEntry {
-  at: number;
-  action: NextAction | null;
+/**
+ * One cache for the worker, mirrored into `chrome.storage.session` once the
+ * worker attaches an area to it, so an answer already paid for outlives the
+ * worker that asked for it.
+ */
+const cache = new AnswerCache();
+
+/** Called once at worker start; without it the cache is memory only. */
+export function useAnswerStorage(area: StorageArea): void {
+  cache.attach(area);
 }
-
-const cache = new Map<string, CacheEntry>();
 
 /**
  * One action per page: what the user is most likely to do next, and nothing
@@ -91,7 +98,7 @@ export async function nextAction(input: PageSnapshot, requester: Requester, deps
   };
 
   const key = cacheKeyFor(req);
-  const hit = input.force ? undefined : cache.get(key);
+  const hit = input.force ? undefined : await cache.get(key);
   if (hit && started - hit.at < CACHE_MS) {
     diag.source = 'cache';
     diag.ms = now() - started;
@@ -120,7 +127,7 @@ export async function nextAction(input: PageSnapshot, requester: Requester, deps
     diag.source = chosen === placeholder && placeholder !== null ? 'placeholder' : 'model';
     diag.ms = now() - started;
     if (provider instanceof RaceProvider) diag.attempts = [...provider.attempts];
-    cache.set(key, { at: started, action: chosen });
+    void cache.set(key, { at: started, action: chosen });
     report(diag, chosen);
     deps.onDiag?.(diag);
     return { action: chosen };
@@ -147,7 +154,7 @@ export async function nextAction(input: PageSnapshot, requester: Requester, deps
       );
       diag.finalMs = now() - started;
       const chosen = pick(placeholder, model);
-      cache.set(key, { at: now(), action: chosen });
+      void cache.set(key, { at: now(), action: chosen });
       if (provider instanceof RaceProvider) diag.attempts = [...provider.attempts];
       if (chosen !== placeholder) {
         diag.replaced = true;
@@ -169,6 +176,11 @@ export async function nextAction(input: PageSnapshot, requester: Requester, deps
 /** Forget every cached answer: the shortcut, a settings change, a clear. */
 export function clearActionCache(): void {
   cache.clear();
+}
+
+/** Resolves once the cache's writes have reached storage; for the tests. */
+export function answerCacheFlushed(): Promise<void> {
+  return cache.flush();
 }
 
 /** A page is the same question while its outline and the length of its history hold still. */
@@ -246,7 +258,7 @@ export function validate(action: NextAction | null, req: NextActionRequest, sett
     case 'click':
       break;
   }
-  return { ...action, target: control?.n ?? null, irreversible, label: action.label || fallbackLabel(action, control) };
+  return { ...action, target: control?.n ?? null, irreversible, label: action.label || fallbackLabel(action, control, req) };
 }
 
 function echoes(value: string, control: OutlineControl): boolean {
@@ -254,8 +266,8 @@ function echoes(value: string, control: OutlineControl): boolean {
   return [control.name, control.value].some((t) => t && normalizeWhitespace(t).toLowerCase() === v);
 }
 
-function fallbackLabel(action: NextAction, control: OutlineControl | undefined): string {
-  if (action.kind === 'scroll') return 'Scroll down';
+function fallbackLabel(action: NextAction, control: OutlineControl | undefined, req: NextActionRequest): string {
+  if (action.kind === 'scroll') return scrollLabel(req.page.scroll);
   if (!control) return 'Go';
   if (action.kind === 'fill') return `Fill ${control.name} with "${action.value}"`;
   if (action.kind === 'select') return `Set ${control.name} to "${action.value}"`;
