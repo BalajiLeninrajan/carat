@@ -1,94 +1,68 @@
 import { describe, expect, it } from 'vitest';
-import { SuggestionListSchema } from '../src/schema';
-import { FEW_SHOTS, SYSTEM_PROMPT, buildMessages, systemPrompt } from '../src/prompt';
+import { FEW_SHOTS, actionInstructions, buildNextActionMessages, renderRequest } from '../src/prompt';
 import { EAGERNESS_LEVELS } from '../src/eagerness';
-import type { SuggestRequest } from '../src/types';
+import type { NextActionRequest } from '../src/next-action';
 
-const req: SuggestRequest = {
-  page: { host: 'www.google.com', title: 'Google Maps', path: '/maps' },
-  fields: [{ i: 'f0', t: 'input:text', al: 'Search Google Maps', f: 1 }],
-  context: [
-    {
-      id: 'c9',
-      origin: 'https://discord.com',
-      title: 'Discord',
-      kind: 'page',
-      text: 'dinner at Seven Shores Cafe, Friday at 6?',
-      capturedAt: 1,
-    },
-  ],
+const req: NextActionRequest = {
+  page: { host: 'www.google.com', title: 'Google Maps', path: '/maps', scroll: { y: 0, pages: 1, more: false } },
+  outline: 'search:\n  >> FOCUSED [1] searchbox "Search Google Maps"',
+  controls: [{ n: 1, role: 'searchbox', name: 'Search Google Maps' }],
+  focused: 1,
+  history: ['2m ago: read discord.com/channels/1/2'],
+  notes: ['Alex asked about dinner at Seven Shores Cafe on Friday at 6.'],
+  tabs: [{ id: 8, host: 'discord.com', title: 'Discord' }],
   now: '2026-09-16T14:04:00-04:00',
+  eagerness: 'eager',
+  allowPayments: false,
 };
 
-describe('buildMessages', () => {
-  it('is deterministic for the same request', () => {
-    const a = buildMessages(req);
-    const b = buildMessages(req);
-    expect(a).toEqual(b);
-    expect(JSON.stringify(a)).toBe(JSON.stringify(b));
+describe('buildNextActionMessages', () => {
+  it('is byte-stable for the same request', () => {
+    expect(JSON.stringify(buildNextActionMessages(req))).toBe(JSON.stringify(buildNextActionMessages(req)));
   });
 
-  it('starts with the shared system prompt and ends with the request', () => {
-    const msgs = buildMessages(req);
-    expect(msgs[0]).toEqual({ role: 'system', content: SYSTEM_PROMPT });
+  it('puts the static instructions and the few-shots before anything from the page', () => {
+    const msgs = buildNextActionMessages(req);
+    expect(msgs[0]).toEqual({ role: 'system', content: actionInstructions('eager') });
     expect(msgs.slice(1, -1)).toEqual(FEW_SHOTS);
-    const last = msgs[msgs.length - 1]!;
-    expect(last.role).toBe('user');
-    expect(JSON.parse(last.content)).toEqual(req);
+    expect(msgs[msgs.length - 1]!.role).toBe('user');
   });
 
-  it('keeps the system prompt identical across different requests', () => {
-    const other = buildMessages({ ...req, now: '2027-01-01T00:00:00Z', context: [] });
-    expect(other[0]!.content).toBe(buildMessages(req)[0]!.content);
+  it('keeps the instructions identical across requests at the same level', () => {
+    const other = buildNextActionMessages({ ...req, now: '2027-01-01T00:00:00Z', notes: [], outline: 'main:' });
+    expect(other[0]!.content).toBe(buildNextActionMessages(req)[0]!.content);
   });
 
-  it('changes only the last rule with the level, and keeps each level byte-identical across requests', () => {
-    const prompts = EAGERNESS_LEVELS.map((l) => systemPrompt(l));
-    expect(new Set(prompts).size).toBe(3);
-    const head = (p: string) => p.slice(0, p.lastIndexOf('\n13. '));
-    expect(new Set(prompts.map(head)).size).toBe(1);
-    expect(head(prompts[0]!)).toContain('10. A context item with `kind` "vision"');
-    expect(head(prompts[0]!)).toContain('11. Propose `scroll` only');
-    expect(head(prompts[0]!)).toContain("12. The one exception to rule 9's fill requirement: a real link");
-    for (const l of EAGERNESS_LEVELS) {
-      expect(buildMessages(req, l)[0]!.content).toBe(systemPrompt(l));
-      expect(buildMessages({ ...req, context: [] }, l)[0]!.content).toBe(systemPrompt(l));
-      expect(buildMessages(req, l).slice(1, -1)).toEqual(FEW_SHOTS);
-    }
-    expect(SYSTEM_PROMPT).toBe(systemPrompt('eager'));
+  it('changes only the last paragraph with the level', () => {
+    const heads = EAGERNESS_LEVELS.map((level) => actionInstructions(level).split('\n\n').slice(0, -1).join('\n\n'));
+    expect(new Set(heads).size).toBe(1);
+    const tails = EAGERNESS_LEVELS.map((level) => actionInstructions(level).split('\n\n').at(-1));
+    expect(new Set(tails).size).toBe(EAGERNESS_LEVELS.length);
   });
 
-  it('tells the conservative model to stay quiet and the eager one to propose, with the invariant rules in both', () => {
-    expect(systemPrompt('conservative')).toMatch(/13\. When unsure, return an empty list\. No suggestion beats a wrong one\./);
-    expect(systemPrompt('eager')).toMatch(/13\. Lean toward proposing/);
-    expect(systemPrompt('eager')).toMatch(/Return an empty list only when nothing in the context relates/);
-    expect(systemPrompt('balanced')).toMatch(/propose the likelier one/);
-    for (const l of EAGERNESS_LEVELS) {
-      const p = systemPrompt(l);
-      expect(p).toContain('5. An address belongs in a location field.');
-      expect(p).toContain("7. Text from `own` may fill a field on that page, but the page's own furniture may not");
-      expect(p).toContain('never propose a field\'s own label, placeholder, aria-label or current value');
-      expect(p).toContain('Never propose generic words.');
-    }
+  it('forbids "none" at eager and allows it at the quieter levels', () => {
+    expect(actionInstructions('eager')).toContain('always suggest an action');
+    expect(actionInstructions('balanced')).toContain('"none"');
+    expect(actionInstructions('conservative')).toContain('"none"');
   });
 
-  it('ships few-shot answers that satisfy the output schema', () => {
-    for (const m of FEW_SHOTS.filter((m) => m.role === 'assistant')) {
-      expect(SuggestionListSchema.safeParse(JSON.parse(m.content)).success).toBe(true);
-    }
+  it('ends the user turn with the outline, after the notes, history and tabs', () => {
+    const turn = renderRequest(req);
+    expect(turn.indexOf('<notes>')).toBeLessThan(turn.indexOf('<history>'));
+    expect(turn.indexOf('<history>')).toBeLessThan(turn.indexOf('<tabs>'));
+    expect(turn.indexOf('<tabs>')).toBeLessThan(turn.indexOf('<page '));
+    expect(turn.trimEnd().endsWith(`${req.outline}\n</page>`)).toBe(true);
   });
 
-  it('describes the page state and the next-step priors, and shows the results page as a few-shot with no context', () => {
-    const p = systemPrompt('balanced');
-    expect(p).toContain('`state` (the page as a whole');
-    expect(p).toContain('Next step. Text from other tabs is one input, not a precondition');
-    expect(p).toContain('- serp: `click` the result link whose host or title matches `q`');
-    expect(p).toContain('`elementId` "" move the page one viewport down');
-    const serp = FEW_SHOTS.findIndex((m) => m.role === 'user' && JSON.parse(m.content).state?.kind === 'serp');
-    expect(serp).toBeGreaterThan(0);
-    expect(JSON.parse(FEW_SHOTS[serp]!.content).context).toEqual([]);
-    expect(JSON.parse(FEW_SHOTS[serp + 1]!.content).suggestions).toEqual([
-      expect.objectContaining({ kind: 'interact', elementId: 'e1', verb: 'click', sourceContextId: 'page' }),
-    ]);
+  it('says so when a block is empty, rather than leaving it out', () => {
+    const turn = renderRequest({ ...req, notes: [], history: [], tabs: [] });
+    expect(turn).toContain('<notes>\n(none)\n</notes>');
+    expect(turn).toContain('<tabs>\n(none)\n</tabs>');
+  });
+
+  it('carries the scroll position and the open tabs the model may switch to', () => {
+    const turn = renderRequest({ ...req, page: { ...req.page, scroll: { y: 1.4, pages: 3.2, more: true } } });
+    expect(turn).toContain('scroll="1.4 of 3.2 viewports, more below"');
+    expect(turn).toContain('- [tab 8] discord.com — Discord');
   });
 });

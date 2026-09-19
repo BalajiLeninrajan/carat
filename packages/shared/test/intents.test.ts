@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { INTENT_REGISTRY, buildIntentUrl, calendarDates, intentLabel, isIntentDestination } from '../src/intents';
-import { INTENTS } from '../src/types';
+import { INTENTS, INTENT_REGISTRY, buildIntentUrl, calendarDates, intentLabel, isIntentDestination, resolveIntentValue } from '../src/intents';
 
 const entity = (over: Partial<{ value: string; when: string; location: string }> = {}) => ({
   value: '',
@@ -90,5 +89,30 @@ describe('intentLabel', () => {
       expect(intentLabel(intent, 'focus')).toContain('Switch to');
     }
     expect(intentLabel('maps', 'open')).toBe('Open in Google Maps');
+  });
+});
+
+describe('resolveIntentValue', () => {
+  it('turns the name the model wrote into a URL from the registry', () => {
+    const resolved = resolveIntentValue('maps:Seven Shores Cafe');
+    expect(resolved?.intent).toBe('maps');
+    expect(resolved?.url).toBe('https://www.google.com/maps/search/?api=1&query=Seven+Shores+Cafe');
+  });
+
+  it('takes a time and a place after the title for a calendar event', () => {
+    const resolved = resolveIntentValue('calendar:Dinner at Seven Shores Cafe|2026-09-18T18:00|Seven Shores Cafe');
+    expect(resolved?.entity).toEqual({
+      value: 'Dinner at Seven Shores Cafe',
+      when: '2026-09-18T18:00',
+      location: 'Seven Shores Cafe',
+    });
+    expect(new URL(resolved!.url).searchParams.get('dates')).toBe('20260918T180000/20260918T190000');
+  });
+
+  it('refuses a URL the model wrote itself, an unknown destination and an entity it cannot use', () => {
+    expect(resolveIntentValue('https://evil.test/')).toBeNull();
+    expect(resolveIntentValue('slack:#general')).toBeNull();
+    expect(resolveIntentValue('maps:')).toBeNull();
+    expect(resolveIntentValue('gmail:not an address')).toBeNull();
   });
 });

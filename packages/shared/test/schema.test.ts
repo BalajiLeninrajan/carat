@@ -1,139 +1,92 @@
 import { describe, expect, it } from 'vitest';
-import { SUGGESTION_JSON_SCHEMA, SuggestionListSchema } from '../src/schema';
+import {
+  NEXT_ACTION_JSON_SCHEMA,
+  isIrreversibleLabel,
+  isMoneyLabel,
+  parseNextAction,
+  partialTarget,
+  salvageNextAction,
+} from '../src/schema';
 
-const fill = {
-  kind: 'fill',
-  fieldId: 'f0',
-  value: 'Seven Shores Cafe',
-  confidence: 0.92,
-  reason: 'place name from Discord',
-  sourceContextId: 'c1',
-  intent: '',
-  when: '',
-  location: '',
-  elementId: '',
-  verb: '',
-};
-
-const action = {
-  kind: 'action',
-  fieldId: '',
-  value: 'Dinner at Seven Shores Cafe',
-  confidence: 0.8,
-  reason: 'invitation with a time',
-  sourceContextId: 'o1',
-  intent: 'calendar',
-  when: '2026-09-18T18:00:00-04:00',
-  location: 'Seven Shores Cafe',
-  elementId: '',
-  verb: '',
-};
-
-const interact = {
-  kind: 'interact',
-  fieldId: '',
-  value: 'Save',
-  confidence: 0.85,
-  reason: 'commits the fills',
-  sourceContextId: 'c1',
-  intent: '',
-  when: '',
-  location: '',
-  elementId: 'e0',
-  verb: 'click',
-};
-
-describe('SuggestionListSchema', () => {
-  it('turns the flat wire shape into a fill, an action or an interaction', () => {
-    expect(SuggestionListSchema.parse({ suggestions: [fill, action, interact] })).toEqual({
-      suggestions: [
-        { kind: 'fill', fieldId: 'f0', value: 'Seven Shores Cafe', confidence: 0.92, reason: 'place name from Discord', sourceContextId: 'c1' },
-        {
-          kind: 'action',
-          intent: 'calendar',
-          value: 'Dinner at Seven Shores Cafe',
-          when: '2026-09-18T18:00:00-04:00',
-          location: 'Seven Shores Cafe',
-          confidence: 0.8,
-          reason: 'invitation with a time',
-          sourceContextId: 'o1',
-        },
-        { kind: 'interact', elementId: 'e0', verb: 'click', value: 'Save', confidence: 0.85, reason: 'commits the fills', sourceContextId: 'c1' },
-      ],
-    });
-    expect(SuggestionListSchema.parse({ suggestions: [] })).toEqual({ suggestions: [] });
-  });
-
-  it('reads the pre-kind shape as a fill', () => {
-    const { kind: _k, intent: _i, when: _w, location: _l, elementId: _e, verb: _v, ...legacy } = fill;
-    expect(SuggestionListSchema.parse({ suggestions: [legacy] })).toEqual({ suggestions: [{ kind: 'fill', ...legacy }] });
-  });
-
-  it('rejects missing fields, a fill without a fieldId and an action with an unknown intent', () => {
-    const { sourceContextId: _drop, ...partial } = fill;
-    expect(SuggestionListSchema.safeParse({ suggestions: [partial] }).success).toBe(false);
-    expect(SuggestionListSchema.safeParse({ suggestions: [{ ...fill, fieldId: '' }] }).success).toBe(false);
-    const res = SuggestionListSchema.safeParse({ suggestions: [{ ...action, intent: 'uber' }] });
-    expect(res.success).toBe(false);
-    if (!res.success) expect(res.error.issues[0]?.path).toEqual(['suggestions', 0, 'intent']);
-  });
-
-  it('rejects an interaction without an elementId or with an unknown verb', () => {
-    expect(SuggestionListSchema.safeParse({ suggestions: [{ ...interact, elementId: '' }] }).success).toBe(false);
-    const res = SuggestionListSchema.safeParse({ suggestions: [{ ...interact, verb: 'toggle' }] });
-    expect(res.success).toBe(false);
-    if (!res.success) expect(res.error.issues[0]?.path).toEqual(['suggestions', 0, 'verb']);
-  });
-
-  it('accepts a bare scroll and rejects one that carries a value', () => {
-    const scroll = { ...interact, verb: 'scroll', value: '' };
-    expect(SuggestionListSchema.parse({ suggestions: [scroll] })).toEqual({
-      suggestions: [{ kind: 'interact', elementId: 'e0', verb: 'scroll', value: '', confidence: 0.85, reason: 'commits the fills', sourceContextId: 'c1' }],
-    });
-    const res = SuggestionListSchema.safeParse({ suggestions: [{ ...scroll, value: 'Save' }] });
-    expect(res.success).toBe(false);
-    if (!res.success) expect(res.error.issues[0]?.path).toEqual(['suggestions', 0, 'value']);
-    // Every other kind still needs one.
-    expect(SuggestionListSchema.safeParse({ suggestions: [{ ...fill, value: '' }] }).success).toBe(false);
-    expect(SuggestionListSchema.safeParse({ suggestions: [{ ...interact, value: '' }] }).success).toBe(false);
-  });
-
-  it('accepts a scroll with no element as the page scroll, and no other verb without one', () => {
-    const page = { ...interact, verb: 'scroll', value: '', elementId: '', sourceContextId: 'page' };
-    expect(SuggestionListSchema.parse({ suggestions: [page] }).suggestions[0]).toMatchObject({ kind: 'interact', elementId: '', verb: 'scroll', value: '' });
-    expect(SuggestionListSchema.safeParse({ suggestions: [{ ...page, verb: 'click', value: 'x' }] }).success).toBe(false);
-  });
-
-  it('rejects out-of-range confidence and wrong types', () => {
-    const bad = { ...fill, confidence: 1.4 };
-    expect(SuggestionListSchema.safeParse({ suggestions: [bad] }).success).toBe(false);
-    const str = { ...fill, confidence: '0.9' };
-    expect(SuggestionListSchema.safeParse({ suggestions: [str] }).success).toBe(false);
-  });
-
-  it('rejects extra keys and non-object roots', () => {
-    const extra = { ...fill, extra: true };
-    expect(SuggestionListSchema.safeParse({ suggestions: [extra] }).success).toBe(false);
-    expect(SuggestionListSchema.safeParse([fill]).success).toBe(false);
-    expect(SuggestionListSchema.safeParse({ suggestions: [], other: 1 }).success).toBe(false);
-  });
+const whole = JSON.stringify({
+  target: 3,
+  kind: 'click',
+  value: '',
+  label: 'Click "Order online"',
+  irreversible: false,
+  confidence: 0.64,
+  reason: 'the first result answers the query',
 });
 
-describe('SUGGESTION_JSON_SCHEMA', () => {
-  it('is flat and strict-mode compatible', () => {
-    const text = JSON.stringify(SUGGESTION_JSON_SCHEMA);
-    expect(text).not.toContain('$ref');
-    expect(text).not.toContain('enum');
-    expect(text).not.toContain('anyOf');
-    expect(SUGGESTION_JSON_SCHEMA.additionalProperties).toBe(false);
-    const item = SUGGESTION_JSON_SCHEMA.properties.suggestions.items;
-    expect(item.additionalProperties).toBe(false);
-    expect([...item.required].sort()).toEqual(Object.keys(item.properties).sort());
-    expect([...SUGGESTION_JSON_SCHEMA.required]).toEqual(Object.keys(SUGGESTION_JSON_SCHEMA.properties));
+describe('the next-action schema', () => {
+  it('lists target first, so the chip can move before the label arrives', () => {
+    expect(Object.keys(NEXT_ACTION_JSON_SCHEMA.properties)[0]).toBe('target');
+    expect(NEXT_ACTION_JSON_SCHEMA.additionalProperties).toBe(false);
+    expect(NEXT_ACTION_JSON_SCHEMA.required).toEqual(Object.keys(NEXT_ACTION_JSON_SCHEMA.properties));
   });
 
-  it('lists exactly the keys the wire shape carries', () => {
-    const item = SUGGESTION_JSON_SCHEMA.properties.suggestions.items;
-    expect(Object.keys(item.properties).sort()).toEqual(Object.keys(action).sort());
+  it('parses a whole answer', () => {
+    const parsed = parseNextAction(whole);
+    expect(parsed.ok && parsed.action.kind).toBe('click');
+    expect(parsed.ok && parsed.action.target).toBe(3);
+  });
+
+  it('parses an answer in a fenced block, and fills in what a loose model left out', () => {
+    const parsed = parseNextAction('```json\n{"kind":"scroll","target":null}\n```');
+    expect(parsed.ok && parsed.action).toEqual({
+      kind: 'scroll',
+      target: null,
+      value: '',
+      label: '',
+      irreversible: false,
+      confidence: 0.5,
+      reason: '',
+    });
+  });
+
+  it('refuses an unknown kind', () => {
+    expect(parseNextAction('{"kind":"teleport","target":1}').ok).toBe(false);
+  });
+
+  it('reads the target out of a partial body as soon as the integer is closed', () => {
+    expect(partialTarget('{"target":')).toBeNull();
+    expect(partialTarget('{"target":12')).toBeNull();
+    expect(partialTarget('{"target":12,')).toBe(12);
+    expect(partialTarget('{"target":null,')).toBeNull();
+  });
+
+  it('salvages a body cut off inside a long value, trimming to the last whole sentence', () => {
+    const cut = '{"target":2,"kind":"fill","value":"Thanks for confirming. Since all three are on 3.2.0.47';
+    const action = salvageNextAction(cut);
+    expect(action).not.toBeNull();
+    expect(action!.kind).toBe('fill');
+    expect(action!.target).toBe(2);
+    expect(action!.value).toBe('Thanks for confirming.');
+  });
+
+  it('salvages a body cut off after the value, keeping the label it did get', () => {
+    const cut = '{"target":5,"kind":"click","value":"","label":"Checkout","irreversible":true,"confi';
+    const action = salvageNextAction(cut)!;
+    expect(action.label).toBe('Checkout');
+    expect(action.irreversible).toBe(true);
+    expect(action.confidence).toBe(0.5);
+  });
+
+  it('gives up when even the kind never arrived', () => {
+    expect(salvageNextAction('{"target":1,"ki')).toBeNull();
+  });
+
+  it('parseNextAction falls back to the salvage reader on truncated JSON', () => {
+    const parsed = parseNextAction('{"target":5,"kind":"click","value":"","label":"Chec');
+    expect(parsed.ok && parsed.action.target).toBe(5);
+  });
+
+  it('knows the labels that cannot be undone and the ones that move money', () => {
+    expect(isIrreversibleLabel('Send reply')).toBe(true);
+    expect(isIrreversibleLabel('Place order')).toBe(true);
+    expect(isIrreversibleLabel('Open "Seven Shores Cafe menu"')).toBe(false);
+    expect(isMoneyLabel('Pay $312.40')).toBe(true);
+    expect(isMoneyLabel('Book now')).toBe(true);
+    expect(isMoneyLabel('Save')).toBe(false);
   });
 });
