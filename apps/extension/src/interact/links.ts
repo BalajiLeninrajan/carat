@@ -11,6 +11,10 @@ export const LINK_WINDOW_BELOW = 1;
 export const MAX_LINKS = 8;
 
 const NAME_MAX = 60;
+/** "Go", "›" and single letters name nothing a chip could read out. */
+const NAME_MIN = 3;
+/** A link whose name carries a price is a buy button wearing a link's clothes. */
+const MONEY = /[$£€¥]\s?\d|\b\d+(?:[.,]\d{2})?\s?(?:usd|cad|eur|gbp)\b/i;
 // GET links that do something: never offered, whatever they are called.
 const ACTION_PATH = /(?:^|[/_.-])(?:logout|log-out|signout|sign-out|unsubscribe|delete|remove|cancel|checkout|pay|payment|withdraw|transfer|deactivate)(?=$|[/_.?-])/i;
 // Page chrome and cookie banners: not what anyone searched for.
@@ -26,6 +30,12 @@ const OUTSIDE_CONTENT = [
   '[aria-label*="cookie" i]',
   '[id*="consent" i]',
   '[class*="consent" i]',
+  'aside',
+  '[role="complementary"]',
+  '[role="menu"]',
+  '[role="menubar"]',
+  '[role="tablist"]',
+  '[role="search"]',
 ].join(',');
 const INNER_TITLE = 'h1,h2,h3,h4';
 
@@ -53,9 +63,12 @@ export interface LinkEntry {
  * DuckDuckGo, Bing) picks the result titles; anywhere else every `a[href]`
  * with visible text is a candidate. Out, before anything is described: links
  * to `mailto:`, `tel:` and `javascript:`, links on nav, header, footer or a
- * cookie banner, links to denylisted hosts or to a path that acts (logout,
- * unsubscribe, checkout), downloads, and short links with a destructive name
- * ("Sign out"; a page title that happens to say "order now" orders nothing).
+ * cookie banner, links in an aside, a menu, a tab strip or a search landmark,
+ * links to denylisted hosts or to a path that acts (logout, unsubscribe,
+ * checkout), downloads, links with a price in their name, and short links
+ * with a destructive name ("Sign out"; a page title that happens to say
+ * "order now" orders nothing). Two links to the same page (a result's image
+ * and its title) are one candidate: the first one wins.
  */
 export function enumerateLinks(doc: Document, win: Window, site: Site): LinkEntry[] {
   if (!pageQuery(doc)) return [];
@@ -63,6 +76,7 @@ export function enumerateLinks(doc: Document, win: Window, site: Site): LinkEntr
   const found = picked ? picked(doc) : genericLinks(doc);
   const vh = win.innerHeight;
   const out: LinkEntry[] = [];
+  const seen = new Set<string>();
   found.forEach(({ el, name, at }, order) => {
     if (out.length >= MAX_LINKS) return;
     const target = destination(el, doc);
@@ -72,10 +86,24 @@ export function enumerateLinks(doc: Document, win: Window, site: Site): LinkEntr
     if (rect.bottom <= 0 || rect.top >= (1 + LINK_WINDOW_BELOW) * vh) return;
     if (!isVisible(el, win) || el.getAttribute('aria-disabled') === 'true' || el.closest('[aria-hidden="true"],[inert]')) return;
     const title = truncate(name, NAME_MAX);
-    if (!title || isDestructiveElement({ r: 'link', nm: title, h: target })) return;
+    if (title.length < NAME_MIN || MONEY.test(title) || isDestructiveElement({ r: 'link', nm: title, h: target })) return;
+    // Sites link the same result from its image and its title; the first one wins.
+    const key = pageOf(el, doc);
+    if (key === null || seen.has(key)) return;
+    seen.add(key);
     out.push({ el, name: title, at, site: target, inViewport: inViewport(at, win), rect, order });
   });
   return out;
+}
+
+/** Host and path of the link's destination, for collapsing two links to the same page. */
+function pageOf(el: HTMLAnchorElement, doc: Document): string | null {
+  try {
+    const url = new URL(el.getAttribute('href') ?? '', doc.baseURI);
+    return `${url.host}${url.pathname}`;
+  } catch {
+    return null;
+  }
 }
 
 /** The registrable domain the link goes to, or null when it is not an http(s) page carat may offer. */

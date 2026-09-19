@@ -3,6 +3,7 @@ import {
   DEFAULT_EAGERNESS,
   EAGERNESS,
   LIMITS,
+  PAGE_SOURCE,
   SUGGESTION_RESPONSE_FORMAT,
   SuggestionListSchema,
   TRANSCRIBE_PROMPT,
@@ -10,9 +11,13 @@ import {
   clickAllowed,
   isDestructiveName,
   isIntentDestination,
+  isPageScroll,
   normalizeWhitespace,
+  pageJustifies,
+  refusesFill,
   truncate,
   verbFits,
+  weakBelow,
 } from '@carat/shared';
 import type { SuggestOptions, VisionProvider } from './provider';
 import { sameSite } from './same-site';
@@ -190,54 +195,69 @@ function finalize(suggestions: Suggestion[], req: SuggestRequest, eagerness: Eag
   // means the model echoed an example. The orchestrator never lists the
   // requesting tab's own text under `context`, so a same-site source here is
   // another tab on the site: shut out below eager, allowed at eager.
-  const fillSources = new Set(
+  const foreign = new Set(
     req.context.filter((c) => knobs.sameOriginContext || !sameSite(c.origin, req.page.host)).map((c) => c.id),
   );
+  // The page the user is looking at is a fill source too, guarded by `refusesFill` below.
   const actionSources = new Set((req.own ?? []).map((c) => c.id));
+  const fillSources = new Set([...foreign, ...actionSources]);
   const filled = req.filled ?? [];
   const interactSources = new Set([...fillSources, ...filled]);
+  const fields = new Map(req.fields.map((f) => [f.i, f] as const));
   const elements = new Map((req.elements ?? []).map((e) => [e.i, e] as const));
   const here = `https://${req.page.host}${req.page.path}`;
   const gate: ClickGate = { filled: filled.length > 0, flow: req.flow === true, eagerness, fillable: fillable.size > 0 };
   // One winner per field, per element and per intent.
   const best = new Map<string, Suggestion>();
   for (const s of suggestions) {
-    if (s.kind === 'fill' && (!fillable.has(s.fieldId) || !fillSources.has(s.sourceContextId))) continue;
+    if (s.kind === 'fill') {
+      if (!fillable.has(s.fieldId) || !fillSources.has(s.sourceContextId)) continue;
+      if (refusesFill(s.value, fields.get(s.fieldId) ?? {}, req.page, actionSources.has(s.sourceContextId))) continue;
+    }
     if (s.kind === 'action' && (!actionSources.has(s.sourceContextId) || isIntentDestination(s.intent, here))) continue;
-    if (s.kind === 'interact' && !interactionAllowed(s, elements.get(s.elementId), interactSources, gate)) continue;
+    if (s.kind === 'interact' && !interactionAllowed(s, elements.get(s.elementId), interactSources, gate, req)) continue;
     // Checked last, so what is counted here would have shown at a looser level.
     if (s.confidence < knobs.minConfidence) {
       onUnderFloor?.(s);
       continue;
     }
-    const key = s.kind === 'fill' ? `f:${s.fieldId}` : s.kind === 'interact' ? `e:${s.elementId}` : `a:${s.intent}`;
+    const key = s.kind === 'fill' ? `f:${s.fieldId}` : s.kind === 'interact' ? `e:${s.elementId || 'page'}` : `a:${s.intent}`;
     const prev = best.get(key);
     if (!prev || s.confidence > prev.confidence) best.set(key, { ...s, value: s.value.trim() });
   }
-  // Every suggestion carries a value except a bare scroll.
-  return [...best.values()]
-    .filter((s) => s.value !== '' || (s.kind === 'interact' && s.verb === 'scroll'))
-    .sort((a, b) => b.confidence - a.confidence);
+  // Every suggestion carries a value except a bare scroll. A page scroll yields to any surer fill or click on offer.
+  const kept = [...best.values()].filter((s) => s.value !== '' || (s.kind === 'interact' && s.verb === 'scroll'));
+  const better = kept.some((s) => !(s.kind === 'interact' && isPageScroll(s)) && s.kind !== 'action' && s.confidence >= weakBelow(eagerness));
+  return kept.filter((s) => !(s.kind === 'interact' && isPageScroll(s)) || !better).sort((a, b) => b.confidence - a.confidence);
 }
 
 /**
  * An interaction names a described element, a verb that fits its role and
  * state, and a source the user read. A click on a button or link only stands
- * once carat filled something on the page, or when it is the primary action
- * and a flow or the level lets that through (`clickAllowed`); the model does
- * not get to press other buttons on a page it merely looked at. Destructive
- * names never pass, even if the content script somehow described one. The
- * service worker applies the money rule; the provider has no settings.
+ * once carat filled something on the page, when it is the primary action and
+ * a flow or the level lets that through (`clickAllowed`), or when the page
+ * state itself justifies it (a results page's link, a filled-in checkout's
+ * Continue); the model does not get to press other buttons on a page it
+ * merely looked at. A `page`-sourced suggestion has to pass that same test,
+ * whatever it is. Destructive names never pass, even if the content script
+ * somehow described one. A page scroll names no element and stands only while
+ * the page has more below and was not just scrolled. The service worker
+ * applies the money rule; the provider has no settings.
  */
 function interactionAllowed(
   s: InteractSuggestion,
   element: ElementDescriptor | undefined,
   sources: Set<string>,
   gate: ClickGate,
+  req: SuggestRequest,
 ): boolean {
-  if (!element || !sources.has(s.sourceContextId)) return false;
+  if (isPageScroll(s)) return pageJustifies('scroll', undefined, req.state, req.fields);
+  if (!element) return false;
   if (isDestructiveName(element.nm)) return false;
   if (!verbFits(element, s.verb, s.value.trim())) return false;
-  if (s.verb === 'click' && !clickAllowed(element, gate)) return false;
+  if (s.sourceContextId === PAGE_SOURCE) return pageJustifies(s.verb, element, req.state, req.fields);
+  if (!sources.has(s.sourceContextId)) return false;
+  // Not cited to the page, so the ordinary click gate decides; the page state is the last word either way.
+  if (s.verb === 'click' && !clickAllowed(element, gate)) return pageJustifies('click', element, req.state, req.fields);
   return true;
 }

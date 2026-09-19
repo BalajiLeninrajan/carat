@@ -155,9 +155,10 @@ describe('buildJevRequest', () => {
     expect(vegetarian.interactOptions.map((o) => [o.key, o.verb, o.sourceContextId])).toEqual([['e0', 'check', 'c1']]);
   });
 
-  it('asks about a real link only while the page has a query it relates to, and tells Jev the destination site', () => {
+  it('asks about a real link in one question only: the next-step one when the page sent a state, the interact one when it did not', () => {
     const serp: SuggestRequest = {
-      page: { host: 'www.google.com', title: 'food delivery near me - Google Search', path: '/search', query: 'food delivery near me' },
+      page: { host: 'www.google.com', title: 'food delivery near me - Google Search', path: '/search' },
+      state: { kind: 'serp', q: 'food delivery near me', y: 0, pages: 3, more: true },
       fields: [],
       elements: [
         { i: 'e0', r: 'button', nm: 'Search', p: 1 },
@@ -168,14 +169,28 @@ describe('buildJevRequest', () => {
       context: [],
       now: calendar.now,
     };
+    // With a page state the next-step question covers the link; asking the interact one too would offer it twice.
     const b = buildJevRequest(serp, [])!;
-    expect(b.interactOptions.map((o) => [o.key, o.verb, o.sourceContextId])).toEqual([['e1', 'click', 'page']]);
-    expect((b.questions.interact!.criteria as Record<string, unknown>).e1).toMatchObject({ action: 'click "Order Now | Quick and Easy Food Delivery"', site: 'doordash.com' });
+    expect(Object.keys(b.questions)).toEqual(['next']);
+    expect(b.interactOptions).toEqual([]);
+    expect(b.nextOptions.map((o) => [o.key, o.suggestion.kind])).toEqual([['n0', 'interact']]);
+    expect((b.questions.next!.criteria as Record<string, unknown>).n0).toMatchObject({
+      action: 'click "Order Now | Quick and Easy Food Delivery" (doordash.com)',
+    });
 
-    // No query on the page: a real link is no one's to follow, however much carat filled. The Search button still is.
-    const { query: _q, ...page } = serp.page;
-    expect(buildJevRequest({ ...serp, page }, [])).toBeNull();
-    expect(buildJevRequest({ ...serp, page, filled: ['c1'] }, [])!.interactOptions.map((o) => o.key)).toEqual(['e0']);
+    // An older content script sends no state; the interact question reads the query off the fields instead.
+    const { state: _s, ...bare } = serp;
+    const searched = { ...bare, fields: [{ i: 'f0', t: 'input:search', al: 'Search', v: 'food delivery near me' }] };
+    const old = buildJevRequest(searched, [])!;
+    expect(old.interactOptions.map((o) => [o.key, o.verb, o.sourceContextId])).toEqual([['e1', 'click', 'page']]);
+    expect((old.questions.interact!.criteria as Record<string, unknown>).e1).toMatchObject({
+      action: 'click "Order Now | Quick and Easy Food Delivery"',
+      site: 'doordash.com',
+    });
+
+    // No query anywhere: a real link is no one's to follow, however much carat filled. The Search button still is.
+    expect(buildJevRequest(bare, [])).toBeNull();
+    expect(buildJevRequest({ ...bare, filled: ['c1'] }, [])!.interactOptions.map((o) => o.key)).toEqual(['e0']);
   });
 });
 
@@ -397,6 +412,42 @@ describe('JevProvider', () => {
     // The same 0.69 click clears the eager floor.
     const eager = vi.fn(async () => envelope({ interact: pick('e0', 0.69, ['e0', 'e2', 'e5', 'none']) }));
     expect(interactions(await provider(eager, 'eager').suggest(afterFills, { signal: signal() })).map((s) => s.confidence)).toEqual([0.69]);
+  });
+
+  it('asks one choice over the next-step candidates when the page has a state, and returns the pick at Jev\'s probability', async () => {
+    const serp: SuggestRequest = {
+      page: { host: 'www.google.com', title: 'doordash - Google Search', path: '/search' },
+      state: { kind: 'serp', q: 'doordash', y: 0, pages: 3, more: true },
+      fields: [],
+      elements: [
+        { i: 'e0', r: 'link', nm: 'DoorDash - Wikipedia', h: 'wikipedia.org' },
+        { i: 'e1', r: 'link', nm: 'DoorDash Food Delivery', h: 'doordash.com' },
+      ],
+      context: [],
+      now: calendar.now,
+    };
+    const b = buildJevRequest(serp, [])!;
+    expect(Object.keys(b.questions)).toEqual(['next']);
+    expect(b.state.state).toEqual(serp.state);
+    expect(b.nextOptions.map((o) => [o.key, o.suggestion.kind])).toEqual([['n0', 'interact']]);
+    const criteria = b.questions.next!.criteria as Record<string, unknown>;
+    expect(criteria.n0).toEqual({ action: 'click "DoorDash - Wikipedia" (wikipedia.org)', because: "first result matches query 'doordash'" });
+    expect(criteria).toHaveProperty('none');
+
+    const fetchImpl = vi.fn(async () => envelope({ next: pick('n0', 0.77, ['n0', 'none']) }));
+    expect(await provider(fetchImpl).suggest(serp, { signal: signal() })).toEqual([
+      { kind: 'interact', elementId: 'e0', verb: 'click', value: 'DoorDash - Wikipedia', confidence: 0.77, reason: "first result matches query 'doordash'", sourceContextId: 'page' },
+    ]);
+    // `none`, an unknown key, or a pick under the level's floor gives nothing; the drop is reported.
+    for (const answer of [pick('none', 0.9, ['n0', 'none']), pick('n7', 0.9, ['n7']), pick('n0', 0.5, ['n0', 'none'])]) {
+      const dropped: Suggestion[] = [];
+      const f = vi.fn(async () => envelope({ next: answer }));
+      expect(await provider(f, 'balanced').suggest(serp, { signal: signal(), onUnderFloor: (s) => void dropped.push(s) })).toEqual([]);
+      if (answer.choice === 'n0') expect(dropped.map((s) => s.confidence)).toEqual([0.5]);
+    }
+    // Without a state there is no next-step question, so a page with only links is not worth a call.
+    const { state: _s, ...bare } = serp;
+    expect(buildJevRequest(bare, [])).toBeNull();
   });
 
   it('answers fills and the interaction from one call, each gated on its own', async () => {

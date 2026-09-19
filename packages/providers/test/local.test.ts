@@ -64,8 +64,9 @@ describe('LocalProvider', () => {
       if (verdict.weak) weak.push(f.name);
       for (const s of out) expect(s.confidence, f.name).toBeLessThan(0.55);
     }
-    // The documented cost of eager on this fixture set: two bare names from prose, one Esc each.
-    expect(weak).toEqual(['neg-news-search', 'neg-recipe-comment']);
+    // The documented cost of eager on this fixture set: a bare name from prose, one Esc. (The recipe page's
+    // bare name still shows at eager too, but that fixture now expects the scroll there, so it is judged above.)
+    expect(weak).toEqual(['neg-news-search']);
   });
 
   it('passes every positive fixture at every level, the eager-only ones at eager alone', async () => {
@@ -81,8 +82,20 @@ describe('LocalProvider', () => {
       'eager-discord-bare-name-search',
       'eager-selection-single-name-maps',
       'eager-slack-quoted-issue-title',
+      'neg-news-own',
+      'neg-recipe-comment',
       'neg-same-tab',
+      'own-reddit-thread-search',
     ]);
+  });
+
+  it('shows the recipe page its weak bare name and the scroll at eager, the scroll alone at balanced, nothing below', async () => {
+    const req = fixture('neg-recipe-comment').request;
+    const eager = await at('eager').suggest(req, { signal });
+    // Best first: the scroll (0.6) outranks the bare name (0.45).
+    expect(eager.map((s) => (s.kind === 'fill' ? `fill:${s.confidence}` : `${s.kind}:${s.kind === 'interact' ? s.verb : ''}`))).toEqual(['interact:scroll', 'fill:0.45']);
+    expect((await at('balanced').suggest(req, { signal })).map((s) => s.kind === 'interact' && s.verb)).toEqual(['scroll']);
+    expect(await at('conservative').suggest(req, { signal })).toEqual([]);
   });
 
   it('marks an eager-only value with a confidence under the balanced floor and a reason that says why', async () => {
@@ -219,9 +232,32 @@ describe('LocalProvider interactions', () => {
     expect(await out(withText('the vegetarianism debate', [{ i: 'e0', r: 'checkbox', nm: 'Vegetarian', st: 'off' }]))).toEqual([]);
   });
 
-  it('takes interactions only from other tabs, never from the page itself', async () => {
+  it('takes an interaction from the page\'s own text as readily as from another tab', async () => {
     const req = fixture('form-vegetarian-checkbox').request;
-    expect(await local.suggest({ ...req, context: [], own: req.context }, { signal })).toEqual([]);
+    const fromHere = await local.suggest({ ...req, context: [], own: req.context }, { signal });
+    expect(fromHere).toEqual(await local.suggest(req, { signal }));
+    expect(fromHere[0]).toMatchObject({ kind: 'interact', verb: 'check', value: 'Vegetarian' });
+  });
+
+  it('prefers the page\'s own text to another tab\'s for the same field, and never fills a field with the page\'s furniture', async () => {
+    const page = { host: 'www.google.com', title: 'Google Maps', path: '/maps' };
+    const field = { i: 'f0', t: 'input:text', nm: 'searchboxinput', ph: 'Search Google Maps', al: 'Search Google Maps' };
+    const from = (id: string, origin: string, text: string, capturedAt: number) => ({ id, origin, title: 'Chat', kind: 'page' as const, text, capturedAt });
+    const both = {
+      page,
+      fields: [field],
+      // The other tab's item is the fresher one, and it is still the page in front of the user that wins.
+      context: [from('c1', 'https://discord.com', 'dinner at Lazeez Shawarma?', 2)],
+      own: [from('o1', 'https://www.google.com', 'dinner at Seven Shores Cafe?', 1)],
+      now: '2026-09-16T14:04:00-04:00',
+    };
+    expect(await local.suggest(both, { signal })).toEqual([
+      expect.objectContaining({ kind: 'fill', fieldId: 'f0', value: 'Seven Shores Cafe', sourceContextId: 'o1' }),
+    ]);
+
+    // The page's own name for itself is furniture, not an answer, however the extractor found it.
+    const chrome = { ...both, context: [], own: [from('o1', 'https://www.google.com', 'dinner at Google Maps?', 1)] };
+    expect(await local.suggest(chrome, { signal })).toEqual([]);
   });
 });
 
@@ -244,19 +280,16 @@ describe('LocalProvider page query links', () => {
     for (const level of EAGERNESS_LEVELS) expect((await at(level).suggest(serp(), { signal })).map((s) => s.confidence)).toEqual([0.8]);
   });
 
-  it('reads the query off a filled search field when the page carries none', async () => {
-    const req = serp();
-    const { query: _q, ...page } = req.page;
-    const out = await local.suggest({ ...req, page }, { signal });
+  it('reads the query off a filled search field when no page state carries one', async () => {
+    const out = await local.suggest(serp(), { signal });
     expect(out.map((s) => s.kind === 'interact' && s.elementId)).toEqual(['e1']);
   });
 
   it('offers nothing for a query no link answers, for a link with no destination, or with no query at all', async () => {
     const req = serp();
-    const { query: _q, ...page } = req.page;
     expect(await local.suggest(fixture('neg-serp-weather').request, { signal })).toEqual([]);
     expect(await local.suggest({ ...req, elements: req.elements!.map(({ h: _h, ...e }) => e) }, { signal })).toEqual([]);
-    expect(await local.suggest({ ...req, page, fields: [{ i: 'f0', t: 'input:text', al: 'Add title', v: 'doordash' }] }, { signal })).toEqual([]);
+    expect(await local.suggest({ ...req, fields: [{ i: 'f0', t: 'input:text', al: 'Add title', v: 'doordash' }] }, { signal })).toEqual([]);
   });
 
   it('never follows a short link named like an action, even when the query names it', async () => {

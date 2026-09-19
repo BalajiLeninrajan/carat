@@ -47,6 +47,7 @@ describe('enumerateElements', () => {
     const { descriptors, registry } = enumerateElements(document);
     const by = (nm: string) => descriptors.find((d) => d.nm === nm)!;
 
+    // Real links are described only on a page with a query (see links.test.ts), so this one is not counted.
     expect(descriptors.length).toBe(15);
     expect(named(descriptors)).not.toContain('Real link');
     expect(named(descriptors)).not.toContain('Standard'); // a checked radio cannot be chosen again
@@ -380,6 +381,22 @@ describe('enumerateLinks', () => {
     // The javascript: anchor is still a button-like element, as before.
     expect(descriptors.find((d) => d.nm === 'Do a thing')).toMatchObject({ r: 'link' });
     expect(descriptors.find((d) => d.nm === 'Do a thing')!.h).toBeUndefined();
+  });
+
+  it('leaves out a price, a name too short to read out, a second link to the same page, and an aside, a menu or a tab strip', () => {
+    withQuery();
+    document.body.innerHTML = `
+      <aside><a href="https://www.doordash.com/aside">In an aside</a></aside>
+      <div role="menu"><a href="https://www.doordash.com/menu">In a menu</a></div>
+      <div role="tablist"><a href="https://www.doordash.com/tab">In a tab strip</a></div>
+      <div role="search"><a href="https://www.doordash.com/search">In the search landmark</a></div>
+      <a href="https://www.doordash.com/deal">Buy now for $19.99</a>
+      <a href="https://www.doordash.com/go">Go</a>
+      <a href="https://www.doordash.com/order">DoorDash Food Delivery</a>
+      <a href="https://www.doordash.com/order">DoorDash Food Delivery image</a>
+    `;
+    layAll();
+    expect(links(enumerateElements(document).descriptors).map((d) => d.nm)).toEqual(['DoorDash Food Delivery']);
   });
 
   it('caps links at eight in page order, keeps controls ahead of them, and stays inside the element cap and byte budget', () => {

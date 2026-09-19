@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { FIXTURES_DIR, judge, loadFixtures, type Fixture } from '../eval/fixtures';
 
-const FIXTURE_COUNT = 25;
+const FIXTURE_COUNT = 29;
 const cleanup: string[] = [];
 afterAll(() => Promise.all(cleanup.map((d) => rm(d, { recursive: true, force: true }))));
 
@@ -71,6 +71,14 @@ describe('judge', () => {
     expect(judge(negative, [weak], 'eager').pass).toBe(false);
     // The default level is the product default.
     expect(judge(tolerant, [weak]).pass).toBe(true);
+  });
+
+  it('matches a page scroll on an empty elementId with no value, and prints it as page.scroll', () => {
+    const wantScroll: Fixture = { ...positive, expect: [{ elementId: '', verb: 'scroll', valueIncludes: '' }] };
+    const scroll = { ...click, elementId: '', verb: 'scroll' as const, value: '', sourceContextId: 'page' };
+    expect(judge(wantScroll, [scroll])).toEqual({ pass: true, detail: 'page.scroll("")' });
+    expect(judge(wantScroll, [click]).detail).toContain('wanted page.scroll~""');
+    expect(judge(negative, [scroll]).pass).toBe(false);
   });
 
   it('matches an action on intent, value and the start of when', () => {

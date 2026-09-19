@@ -215,7 +215,9 @@ export function createChip(doc: Document = document): Chip {
 
   function mount(verb: string, tail: string, opts: ChipText, fresh: boolean): SessionBase {
     hide();
-    label.replaceChildren(`${verb} `, valueNode(opts.value, fresh), `${tail}?`);
+    // A banner with nothing to quote says only its verb: `Scroll down?`.
+    if (opts.value === '') label.replaceChildren(`${verb}${tail}?`);
+    else label.replaceChildren(`${verb} `, valueNode(opts.value, fresh), `${tail}?`);
     sub.textContent = opts.detail ?? '';
     sub.hidden = !opts.detail;
     reason = opts.reason ?? '';

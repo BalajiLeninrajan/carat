@@ -36,6 +36,9 @@ export function frameElementOf(win: Window): HTMLElement | null {
   }
 }
 
+/** Pixels of slack before the page counts as having more below: a sticky footer is not new content. */
+export const MORE_SLACK_PX = 32;
+
 /** True when any part of the element's box is inside the viewport. The same test the enumerators mark `o` from. */
 export function inViewport(el: Element, win: Window): boolean {
   const rect = viewportRect(el, win);
@@ -55,6 +58,36 @@ export function scrollToTarget(el: Element, win: Window): Promise<void> {
     el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: reduced ? 'instant' : 'smooth' });
   }
   return settled(win);
+}
+
+/**
+ * Move the page one viewport down and resolve once it has stopped: the whole
+ * of the `Scroll down? Tab` offer. Smooth, or instant under
+ * prefers-reduced-motion. Focus stays where it was and nothing is clicked.
+ */
+export function scrollPageDown(win: Window): Promise<void> {
+  const reduced = typeof win.matchMedia === 'function' && win.matchMedia(REDUCED_MOTION).matches;
+  if (typeof win.scrollBy === 'function') {
+    win.scrollBy({ top: win.innerHeight, left: 0, behavior: reduced ? 'instant' : 'smooth' });
+  }
+  return settled(win);
+}
+
+/** The scrollable height of the document, never less than one viewport. */
+export function documentHeight(win: Window, doc: Document): number {
+  return Math.max(doc.documentElement?.scrollHeight ?? 0, doc.body?.scrollHeight ?? 0, win.innerHeight);
+}
+
+/** How far down the page the user is, and how tall it is, both in viewports to one decimal. */
+export function viewportsOf(win: Window, doc: Document): { y: number; pages: number } {
+  const vh = Math.max(1, win.innerHeight);
+  const round = (n: number): number => Math.round(n * 10) / 10;
+  return { y: round(win.scrollY / vh), pages: round(documentHeight(win, doc) / vh) };
+}
+
+/** Whether a viewport down would show anything that is not on screen now. */
+export function hasMoreBelow(win: Window, doc: Document): boolean {
+  return win.scrollY + win.innerHeight < documentHeight(win, doc) - MORE_SLACK_PX;
 }
 
 function settled(win: Window): Promise<void> {

@@ -1,7 +1,7 @@
-import { isMoneyName } from './destructive';
+import { isDestructiveName, isMoneyName } from './destructive';
 import type { Eagerness } from './eagerness';
 import { EAGERNESS } from './eagerness';
-import type { ElementDescriptor, ElementRole, InteractVerb } from './types';
+import type { ElementDescriptor, ElementRole, FieldDescriptor, InteractSuggestion, InteractVerb, PageState } from './types';
 
 /**
  * Verbs the content script can perform on each role, besides `scroll`, which
@@ -76,6 +76,74 @@ export function isOffScreen(d: { o?: 1 }): boolean {
   return d.o === 1;
 }
 
+/** A scroll of the page itself, one viewport down: `verb: 'scroll'` with no element. */
+export function isPageScroll(s: Pick<InteractSuggestion, 'verb' | 'elementId'>): boolean {
+  return s.verb === 'scroll' && s.elementId === '';
+}
+
+/** What a page scroll is reported and suppressed as: a pseudo-element with this role and name. */
+export const PAGE_SCROLL_ROLE = 'page';
+export const PAGE_SCROLL_NAME = 'scroll';
+/** The `done` entry a page scroll leaves in the page state until new content appears. */
+export const PAGE_SCROLL_DONE = 'scroll';
+
+/**
+ * Buttons that move a form or checkout on without committing money or a
+ * message. Anything that pays, orders or sends is on the destructive list and
+ * never enumerated in the first place; "Submit" and "Sign up" are left out
+ * here too, since they commit whatever the form holds.
+ */
+const CONTINUE_NAME = /^(?:continue|next|proceed|next step|continue to (?:shipping|payment|review|delivery|checkout)|review order|save|save and continue|done|apply)$/i;
+
+export function isContinueName(name: string): boolean {
+  return CONTINUE_NAME.test(name.replace(/\s+/g, ' ').trim());
+}
+
+const OPTIONAL = /\boptional\b/i;
+
+/** A field whose label, placeholder or nearby text says it is optional. */
+export function isOptionalField(f: Pick<FieldDescriptor, 'lb' | 'ph' | 'al' | 'nb'>): boolean {
+  return OPTIONAL.test([f.lb, f.ph, f.al, f.nb].filter(Boolean).join(' '));
+}
+
+/**
+ * Whether a form still has a field to fill before its Continue is the next
+ * step. `fields` only lists empty (or focused) fields, so when any of them is
+ * marked required only the required ones count; otherwise every empty one
+ * does, except those that call themselves optional.
+ */
+export function emptyFieldRemains(fields: ReadonlyArray<Pick<FieldDescriptor, 'v' | 'rq' | 'lb' | 'ph' | 'al' | 'nb'>>): boolean {
+  const empty = fields.filter((f) => !f.v);
+  const required = empty.filter((f) => f.rq === 1);
+  return (required.length > 0 ? required : empty.filter((f) => !isOptionalField(f))).length > 0;
+}
+
+/**
+ * Whether the page itself, with no text from another tab behind it, justifies
+ * an interaction: the one rule the providers, the service worker and the
+ * content script all check before a `page`-sourced suggestion gets a chip.
+ * A link click on a results page, or on any page whose own query the link
+ * could answer; a Continue-like button on a form or
+ * checkout once no empty field remains; a page scroll when there is more
+ * below and the last accepted action was not already a scroll. Nothing else:
+ * checks, sliders and selects need a stated preference, and a destructive
+ * name never passes.
+ */
+export function pageJustifies(
+  verb: InteractVerb,
+  el: ElementDescriptor | undefined,
+  state: PageState | undefined,
+  fields: ReadonlyArray<Pick<FieldDescriptor, 'v' | 'rq' | 'lb' | 'ph' | 'al' | 'nb'>>,
+): boolean {
+  if (!state) return false;
+  if (verb === 'scroll' && !el) return state.more && !(state.done ?? []).includes(PAGE_SCROLL_DONE);
+  if (!el || verb !== 'click' || isDestructiveName(el.nm)) return false;
+  if ((state.done ?? []).includes(elementKey(el.r, el.nm))) return false;
+  if (el.r === 'link') return state.kind === 'serp' || (state.q ?? '') !== '';
+  if (el.r === 'button') return (state.kind === 'checkout' || state.kind === 'form') && isContinueName(el.nm) && !emptyFieldRemains(fields);
+  return false;
+}
+
 /**
  * The verb a bare `scroll` stands in for once the element is on-screen: the
  * one thing a button, link, tab, menu item or disclosure does, or the state
@@ -140,7 +208,8 @@ export interface ChipText {
 
 /**
  * The words on the chip: `Click "Save"`, `Select "7:00 AM Air Canada"`, `Check "Vegetarian"`,
- * `Set "Volume" to 40`, `Choose "Canada"`, `Scroll to "Save"`; with a link's site, `Open "Order Now" on doordash.com`.
+ * `Set "Volume" to 40`, `Choose "Canada"`, `Scroll to "Save"`, `Scroll down` for the page
+ * itself; with a link's site, `Open "Order Now" on doordash.com`.
  */
 export function interactionChipText(verb: InteractVerb, name: string, value: string, role?: ElementRole, site?: string): ChipText {
   switch (verb) {
@@ -148,7 +217,7 @@ export function interactionChipText(verb: InteractVerb, name: string, value: str
       if (site) return { verb: 'Open', value: name, tail: ` on ${site}` };
       return { verb: role === 'option' ? 'Select' : 'Click', value: name, tail: '' };
     case 'scroll':
-      return { verb: 'Scroll to', value: name, tail: '' };
+      return name === '' ? { verb: 'Scroll down', value: '', tail: '' } : { verb: 'Scroll to', value: name, tail: '' };
     case 'check':
       return { verb: 'Check', value: name, tail: '' };
     case 'uncheck':

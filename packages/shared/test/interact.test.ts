@@ -1,6 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import { EAGERNESS_LEVELS } from '../src/eagerness';
-import { CONTROL_ROLES, ELEMENT_ROLES, VERBS_BY_ROLE, clickAllowed, elementKey, impliedVerb, interactionChipText, isElementRole, isInteractVerb, isOffScreen, isPrimaryActionName, verbFits } from '../src/interact';
+import {
+  CONTROL_ROLES,
+  ELEMENT_ROLES,
+  VERBS_BY_ROLE,
+  clickAllowed,
+  elementKey,
+  impliedVerb,
+  interactionChipText,
+  isContinueName,
+  isElementRole,
+  isInteractVerb,
+  isOffScreen,
+  isPageScroll,
+  isPrimaryActionName,
+  verbFits,
+} from '../src/interact';
 import type { ClickGate } from '../src/interact';
 import type { ElementDescriptor } from '../src/types';
 
@@ -143,6 +158,21 @@ describe('interactionChipText', () => {
     expect(interactionChipText('uncheck', 'All day', 'All day')).toEqual({ verb: 'Uncheck', value: 'All day', tail: '' });
     expect(interactionChipText('set', 'Volume', '40')).toEqual({ verb: 'Set', value: 'Volume', tail: ' to 40' });
     expect(interactionChipText('choose', 'Show as', 'Free')).toEqual({ verb: 'Choose', value: 'Free', tail: '' });
+    expect(interactionChipText('scroll', 'Save', '')).toEqual({ verb: 'Scroll to', value: 'Save', tail: '' });
+    expect(interactionChipText('scroll', '', '')).toEqual({ verb: 'Scroll down', value: '', tail: '' });
+  });
+});
+
+describe('page scroll and continue names', () => {
+  it('tells a page scroll from a scroll to an element', () => {
+    expect(isPageScroll({ verb: 'scroll', elementId: '' })).toBe(true);
+    expect(isPageScroll({ verb: 'scroll', elementId: 'e0' })).toBe(false);
+    expect(isPageScroll({ verb: 'click', elementId: '' })).toBe(false);
+  });
+
+  it('accepts buttons that move a form on and refuses ones that commit money or a message', () => {
+    for (const ok of ['Continue', 'Next', 'Continue to shipping', 'Review order', 'Save and continue', ' Next  step ']) expect(isContinueName(ok), ok).toBe(true);
+    for (const no of ['Submit', 'Sign up', 'Place order', 'Pay now', 'Continue shopping', 'Next page']) expect(isContinueName(no), no).toBe(false);
   });
 
   it('says Open and names the site for a real link', () => {

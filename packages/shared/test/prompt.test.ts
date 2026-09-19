@@ -49,7 +49,7 @@ describe('buildMessages', () => {
     expect(new Set(prompts.map(head)).size).toBe(1);
     expect(head(prompts[0]!)).toContain('10. A context item with `kind` "vision"');
     expect(head(prompts[0]!)).toContain('11. Propose `scroll` only');
-    expect(head(prompts[0]!)).toContain('12. The one exception to rule 9: a real link');
+    expect(head(prompts[0]!)).toContain("12. The one exception to rule 9's fill requirement: a real link");
     for (const l of EAGERNESS_LEVELS) {
       expect(buildMessages(req, l)[0]!.content).toBe(systemPrompt(l));
       expect(buildMessages({ ...req, context: [] }, l)[0]!.content).toBe(systemPrompt(l));
@@ -66,7 +66,8 @@ describe('buildMessages', () => {
     for (const l of EAGERNESS_LEVELS) {
       const p = systemPrompt(l);
       expect(p).toContain('5. An address belongs in a location field.');
-      expect(p).toContain('7. Fills and interactions never use `own`');
+      expect(p).toContain("7. Text from `own` may fill a field on that page, but the page's own furniture may not");
+      expect(p).toContain('never propose a field\'s own label, placeholder, aria-label or current value');
       expect(p).toContain('Never propose generic words.');
     }
   });
@@ -75,5 +76,19 @@ describe('buildMessages', () => {
     for (const m of FEW_SHOTS.filter((m) => m.role === 'assistant')) {
       expect(SuggestionListSchema.safeParse(JSON.parse(m.content)).success).toBe(true);
     }
+  });
+
+  it('describes the page state and the next-step priors, and shows the results page as a few-shot with no context', () => {
+    const p = systemPrompt('balanced');
+    expect(p).toContain('`state` (the page as a whole');
+    expect(p).toContain('Next step. Text from other tabs is one input, not a precondition');
+    expect(p).toContain('- serp: `click` the result link whose host or title matches `q`');
+    expect(p).toContain('`elementId` "" move the page one viewport down');
+    const serp = FEW_SHOTS.findIndex((m) => m.role === 'user' && JSON.parse(m.content).state?.kind === 'serp');
+    expect(serp).toBeGreaterThan(0);
+    expect(JSON.parse(FEW_SHOTS[serp]!.content).context).toEqual([]);
+    expect(JSON.parse(FEW_SHOTS[serp + 1]!.content).suggestions).toEqual([
+      expect.objectContaining({ kind: 'interact', elementId: 'e1', verb: 'click', sourceContextId: 'page' }),
+    ]);
   });
 });

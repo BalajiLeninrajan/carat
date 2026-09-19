@@ -237,14 +237,14 @@ describe('prewarm on navigation', () => {
     stale.nav.commit({ url: MAPS });
     await stale.prewarmer.settled();
     expect(stale.provider.calls).toBe(0);
-    expect(stale.diags.map(([, d]) => d.verdict)).toEqual(['stale-context']);
+    expect(stale.diags.map(([, d]) => d.verdict)).toEqual(['no-context']);
 
-    // The Discord text belongs to the tab that is navigating to Maps: a source for tab offers, never for fills.
+    // The Discord text belongs to the tab that is navigating to Maps; with no other tab's text there is nothing to warm from.
     const own = await setup();
     own.nav.commit({ url: MAPS, tabId: DISCORD_TAB });
     await own.prewarmer.settled();
     expect(own.provider.calls).toBe(0);
-    expect(own.diags.map(([, d]) => d.verdict)).toEqual(['own-context']);
+    expect(own.diags.map(([, d]) => d.verdict)).toEqual(['no-context']);
   });
 
   it('caches nothing when the provider fails, so the real request still asks', async () => {

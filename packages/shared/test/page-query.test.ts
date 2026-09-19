@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { ElementDescriptor } from '../src/types';
+import { PAGE_SOURCE } from '../src/types';
 import {
   PAGE_QUERY_CONFIDENCE,
-  PAGE_SOURCE,
   domainLabel,
   firstMatchingLink,
   isSiteLink,
@@ -15,16 +15,16 @@ import {
 import { EAGERNESS } from '../src/eagerness';
 import { isDestructiveElement, isMoneyName } from '../src/destructive';
 
-const serp = { host: 'www.google.com', title: 'doordash - Google Search', path: '/search' };
+const serp = { kind: 'serp' as const, y: 0, pages: 3, more: true };
 const doordash: ElementDescriptor = { i: 'e1', r: 'link', nm: 'Order Now | Quick and Easy Food Delivery', h: 'doordash.com' };
 const ubereats: ElementDescriptor = { i: 'e2', r: 'link', nm: 'Food Delivery Near Me - Order Online', h: 'ubereats.com' };
 const yelp: ElementDescriptor = { i: 'e3', r: 'link', nm: 'Best restaurants near you', h: 'yelp.com' };
-const intent = (query: string) => pageIntent({ ...serp, query })!;
+const intent = (q: string) => pageIntent({ ...serp, q })!;
 
 describe('pageIntent', () => {
-  it('reads the query the content script took off the URL', () => {
-    expect(pageIntent({ ...serp, query: 'doordash' })).toEqual({ query: 'doordash', tokens: ['doordash'] });
-    expect(pageIntent({ ...serp, query: '  Food delivery, near me!  ' })).toEqual({ query: 'Food delivery, near me!', tokens: ['food', 'delivery', 'near', 'me'] });
+  it('reads the query the page state carries', () => {
+    expect(pageIntent({ ...serp, q: 'doordash' })).toEqual({ query: 'doordash', tokens: ['doordash'] });
+    expect(pageIntent({ ...serp, q: '  Food delivery, near me!  ' })).toEqual({ query: 'Food delivery, near me!', tokens: ['food', 'delivery', 'near', 'me'] });
   });
 
   it('falls back to a described search field that has a value, and to nothing else', () => {
@@ -35,12 +35,13 @@ describe('pageIntent', () => {
     expect(pageIntent(serp, [{ i: 'f0', t: 'input:text', lb: 'Add title', v: 'doordash' }])).toBeNull();
     expect(pageIntent(serp, [{ ...q, v: undefined }])).toBeNull();
     expect(pageIntent(serp)).toBeNull();
-    expect(pageIntent({ ...serp, query: ' !!! ' })).toBeNull();
+    expect(pageIntent({ ...serp, q: ' !!! ' })).toBeNull();
+    expect(pageIntent(undefined, [{ i: 'f0', t: 'input:search', v: 'doordash' }])).toMatchObject({ tokens: ['doordash'] });
   });
 
-  it('prefers the URL over a field and clips a long query', () => {
-    expect(pageIntent({ ...serp, query: 'weather' }, [{ i: 'f0', t: 'input:search', v: 'doordash' }])!.query).toBe('weather');
-    expect(pageIntent({ ...serp, query: 'x'.repeat(200) })!.query).toHaveLength(80);
+  it('prefers the state over a field and clips a long query', () => {
+    expect(pageIntent({ ...serp, q: 'weather' }, [{ i: 'f0', t: 'input:search', v: 'doordash' }])!.query).toBe('weather');
+    expect(pageIntent({ ...serp, q: 'x'.repeat(200) })!.query).toHaveLength(80);
   });
 });
 

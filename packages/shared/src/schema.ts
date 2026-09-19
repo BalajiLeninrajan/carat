@@ -31,7 +31,8 @@ export const SuggestionSchema = WireSuggestionSchema.transform((w, ctx): Suggest
     return { kind: 'fill', fieldId: w.fieldId, ...base };
   }
   if (w.kind === 'interact') {
-    if (w.elementId === '') ctx.addIssue({ code: 'custom', path: ['elementId'], message: 'an interaction needs an elementId' });
+    // A scroll with no element is the page itself, one viewport down.
+    if (w.elementId === '' && !scroll) ctx.addIssue({ code: 'custom', path: ['elementId'], message: 'an interaction needs an elementId' });
     if (!isInteractVerb(w.verb)) {
       ctx.addIssue({ code: 'custom', path: ['verb'], message: `unknown verb "${w.verb}"` });
       return { kind: 'interact', elementId: w.elementId, verb: 'click', ...base };

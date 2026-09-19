@@ -31,6 +31,7 @@ export interface FieldDescriptor {
   w?: 's' | 'm' | 'l'; // width bucket
   o?: 1; // off-screen: outside the viewport when the snapshot was taken
   fr?: number; // inside a child frame: the top frame's number for it
+  rq?: 1; // required (the `required` attribute or aria-required)
 }
 
 /** Roles carat can act on. Derived from the tag, the input type or an explicit ARIA role; nothing else is described. */
@@ -57,7 +58,7 @@ export interface ElementDescriptor {
   r: ElementRole;
   nm: string; // accessible name, <= 60, never empty
   st?: 'on' | 'off' | 'open' | 'closed' | 'selected'; // checkbox/switch/radio/disclosure/tab state
-  v?: string; // current value, <= 40 (slider, select)
+  v?: string; // current value, <= 40 (slider, select); for a link, the host it goes to
   min?: number; // sliders
   max?: number;
   step?: number;
@@ -76,9 +77,45 @@ export interface PageMeta {
   title: string;
   path: string;
   h1?: string;
-  /** What the user searched for on this page: the URL's `q`, `query` or `search` param, else a search field's text. <= 80. */
-  query?: string;
 }
+
+/**
+ * What kind of page the content script thinks it is on, from URL patterns,
+ * landmarks, form density and text length. A next-step prior hangs off each:
+ * a results page wants its first result, an article wants a scroll, a form
+ * its first empty field, a checkout its Continue button, a search app a fill.
+ */
+export const PAGE_KINDS = ['serp', 'article', 'form', 'checkout', 'search-app', 'feed', 'unknown'] as const;
+export type PageKind = (typeof PAGE_KINDS)[number];
+
+export function isPageKind(v: unknown): v is PageKind {
+  return typeof v === 'string' && (PAGE_KINDS as readonly string[]).includes(v);
+}
+
+/**
+ * The page as a whole, as the next-step predictor needs it. Numbers are in
+ * viewports: `y` how far the user has scrolled, `pages` the document height.
+ */
+export interface PageState {
+  kind: PageKind;
+  /** The page's own query: a `q`-style URL parameter or the search field's value, <= 80. */
+  q?: string;
+  /** Viewports scrolled so far, one decimal. */
+  y: number;
+  /** Document height in viewports, one decimal. */
+  pages: number;
+  /** There is content below the fold. */
+  more: boolean;
+  /** Actions accepted on this page load (`role|name` element keys, or `scroll`), so nothing is offered twice. */
+  done?: string[];
+}
+
+/**
+ * The source id a suggestion cites when the page itself, not another tab's
+ * text, is the reason: the first result on a results page, the Continue
+ * button on a checkout, a scroll down an article. Never valid for a fill.
+ */
+export const PAGE_SOURCE = 'page';
 
 export type RequestContext = Array<Pick<ContextItem, 'id' | 'origin' | 'title' | 'kind' | 'text' | 'capturedAt'>>;
 
@@ -89,6 +126,8 @@ export interface SuggestRequest {
   elements?: ElementDescriptor[];
   /** Context ids behind fills carat performed on this tab in the last minute. A click on a Save-like button cites one of them. Omitted when empty. */
   filled?: string[];
+  /** The page's kind, query and scroll position. Omitted by older snapshots. */
+  state?: PageState;
   /** Text from other tabs: the only source for field fills. */
   context: RequestContext;
   /** Text captured from the requesting tab itself: a source for actions, never for fills. Omitted when empty. */
@@ -134,13 +173,14 @@ export interface ActionSuggestion {
   sourceContextId: string;
 }
 
-/** `scroll` brings an off-screen element into view and nothing more; it never carries a value. */
+/** `scroll` brings an off-screen element into view, or with no element moves the page one viewport down; it never carries a value. */
 export type InteractVerb = 'click' | 'check' | 'uncheck' | 'set' | 'choose' | 'scroll';
 
 /**
  * One interaction with one element on the current page. `value` is the target
  * for `set` (a number as text) and `choose` (an option label); for `click`,
  * `check` and `uncheck` it repeats the element's name; for `scroll` it is ''.
+ * A `scroll` with an empty `elementId` is the page itself: one viewport down.
  * The content script performs it, once, after a Tab on the chip.
  */
 export interface InteractSuggestion {

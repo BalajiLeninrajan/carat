@@ -161,7 +161,7 @@ describe('popup', () => {
         return {
           diag: {
             capture: { at: now - 12_000, host: 'calendar.google.com', kind: 'page', verdict: 'stored' },
-            suggest: { at: now - 15_000, host: 'calendar.google.com', fields: 3, gate: 'own-context' },
+            suggest: { at: now - 15_000, host: 'calendar.google.com', fields: 3, gate: 'no-snapshot' },
           },
         };
       }
@@ -171,7 +171,7 @@ describe('popup', () => {
     await flush();
     expect(document.getElementById('diag-capture')?.textContent).toBe('page from calendar.google.com 12s ago: stored');
     expect(document.getElementById('diag-suggest')?.textContent).toBe(
-      'checked 15s ago: no request, the only context is from another tab on this site',
+      'checked 15s ago: no request, nothing on the page to act on',
     );
   });
 

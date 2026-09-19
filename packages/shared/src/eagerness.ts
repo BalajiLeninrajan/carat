@@ -21,21 +21,30 @@ export interface EagernessKnobs {
   looseNames: boolean;
   /** The page's primary continue-style button may be offered with no prior fill, when there is no empty field to fill instead. */
   primaryWithoutFill: boolean;
+  /**
+   * The floor for a next-step prior: a chip the page itself justifies, with
+   * no text from another tab behind it. The first result on a results page
+   * comes at 0.8, Continue on a checkout at 0.7, a scroll down an article at
+   * 0.6. Above 1 means no prior ever shows, only context-backed fills. A
+   * prior at or over this floor also spares the model call when no other
+   * tab's text is in play.
+   */
+  priorMin: number;
 }
 
 export const EAGERNESS: Record<Eagerness, EagernessKnobs> = {
-  conservative: { minConfidence: 0.7, jevGateMin: 0.6, maxSuggestions: 2, sameOriginContext: false, looseNames: false, primaryWithoutFill: false },
-  balanced: { minConfidence: 0.55, jevGateMin: 0.5, maxSuggestions: 2, sameOriginContext: false, looseNames: false, primaryWithoutFill: false },
-  eager: { minConfidence: 0.35, jevGateMin: 0.25, maxSuggestions: 4, sameOriginContext: true, looseNames: true, primaryWithoutFill: true },
+  conservative: { minConfidence: 0.7, jevGateMin: 0.6, maxSuggestions: 2, sameOriginContext: false, looseNames: false, primaryWithoutFill: false, priorMin: 1.01 },
+  balanced: { minConfidence: 0.55, jevGateMin: 0.5, maxSuggestions: 2, sameOriginContext: false, looseNames: false, primaryWithoutFill: false, priorMin: 0.6 },
+  eager: { minConfidence: 0.35, jevGateMin: 0.25, maxSuggestions: 4, sameOriginContext: true, looseNames: true, primaryWithoutFill: true, priorMin: 0.5 },
 };
 
 export const DEFAULT_EAGERNESS: Eagerness = 'eager';
 
 /** One line per level, for the options page and anywhere else the choice is explained. */
 export const EAGERNESS_HELP: Record<Eagerness, string> = {
-  conservative: 'Only sure values, and only from other sites. No suggestion beats a wrong one.',
-  balanced: 'Likely values. Two chips per answer, nothing from another tab on the same site.',
-  eager: "Any plausible value, up to four chips per answer, other tabs on the same site included, and the page's Continue or Search button once there is nothing left to fill. A wrong chip costs one Esc.",
+  conservative: 'Only sure values, and only from other sites. No next-step guesses from the page itself. No suggestion beats a wrong one.',
+  balanced: 'Likely values, plus the first result on a results page, Continue on a checkout and a scroll down an article. Two chips per answer, nothing from another tab on the same site.',
+  eager: "Any plausible value and the obvious next step on the page, scrolling included. Up to four chips per answer, other tabs on the same site included, and the page's Continue or Search button once there is nothing left to fill. A wrong chip costs one Esc.",
 };
 
 export function isEagerness(v: unknown): v is Eagerness {

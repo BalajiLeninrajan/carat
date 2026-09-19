@@ -1,7 +1,7 @@
 {
   "name": "serp-doordash-link",
   "request": {
-    "page": { "host": "www.google.com", "title": "doordash - Google Search", "path": "/search", "query": "doordash" },
+    "page": { "host": "www.google.com", "title": "doordash - Google Search", "path": "/search" },
     "fields": [{ "i": "f0", "t": "textarea", "nm": "q", "al": "Search", "v": "doordash", "f": 1, "w": "l" }],
     "elements": [
       { "i": "e0", "r": "button", "nm": "Search", "p": 1 },

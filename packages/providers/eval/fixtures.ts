@@ -7,7 +7,9 @@ import { z } from 'zod';
 
 /**
  * A fill is expected by `fieldId`, an action by `intent`, an interaction by
- * `elementId` plus `verb`; `whenStartsWith` pins an action's start time.
+ * `elementId` plus `verb` (an empty `elementId` with `verb: "scroll"` is the
+ * page scroll); `whenStartsWith` pins an action's start time. `valueIncludes`
+ * may be left out for a scroll, which carries no value.
  */
 export interface Expectation {
   fieldId?: string;
@@ -36,16 +38,17 @@ const ExpectationSchema = z
   .object({
     fieldId: z.string().min(1).optional(),
     intent: z.string().min(1).optional(),
-    elementId: z.string().min(1).optional(),
+    elementId: z.string().optional(),
     verb: z.string().min(1).optional(),
-    valueIncludes: z.string().min(1),
+    valueIncludes: z.string().default(''),
     whenStartsWith: z.string().min(1).optional(),
   })
   .refine(
     (e) => [e.fieldId, e.intent, e.elementId].filter((v) => v !== undefined).length === 1,
     'an expectation names exactly one of fieldId, intent or elementId',
   )
-  .refine((e) => (e.verb === undefined) === (e.elementId === undefined), 'verb goes with elementId');
+  .refine((e) => (e.verb === undefined) === (e.elementId === undefined), 'verb goes with elementId')
+  .refine((e) => e.valueIncludes !== '' || e.verb === 'scroll', 'valueIncludes may only be empty for a scroll');
 
 const LevelSchema = z.enum(EAGERNESS_LEVELS);
 
@@ -85,7 +88,7 @@ export function expectationsAt(fixture: Fixture, eagerness: Eagerness): Expectat
 
 function describe(s: Suggestion): string {
   if (s.kind === 'fill') return `${s.fieldId}=${JSON.stringify(s.value)}`;
-  if (s.kind === 'interact') return `${s.elementId}.${s.verb}(${JSON.stringify(s.value)})`;
+  if (s.kind === 'interact') return `${s.elementId || 'page'}.${s.verb}(${JSON.stringify(s.value)})`;
   return `${s.intent}=${JSON.stringify(s.value)}${s.when ? `@${s.when}` : ''}`;
 }
 
@@ -117,7 +120,7 @@ export function judge(fixture: Fixture, got: Suggestion[], eagerness: Eagerness 
   const missing = expectations.filter((e) => !got.some((s) => meets(e, s)));
   if (missing.length === 0) return { pass: true, detail: summary };
   const want = missing
-    .map((e) => `${e.fieldId ?? e.intent ?? `${e.elementId}.${e.verb}`}~${JSON.stringify(e.valueIncludes)}${e.whenStartsWith ? `@${e.whenStartsWith}` : ''}`)
+    .map((e) => `${e.fieldId ?? e.intent ?? `${e.elementId || 'page'}.${e.verb}`}~${JSON.stringify(e.valueIncludes)}${e.whenStartsWith ? `@${e.whenStartsWith}` : ''}`)
     .join(' ');
   return { pass: false, detail: `wanted ${want} got ${summary}` };
 }

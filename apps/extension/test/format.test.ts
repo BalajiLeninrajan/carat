@@ -29,11 +29,16 @@ describe('describeSuggest', () => {
   const base = { at: NOW - 15_000, host: 'www.google.com', fields: 1 };
 
   it('explains a stopped request', () => {
-    expect(describeSuggest({ ...base, gate: 'own-context' }, NOW)).toBe(
-      'checked 15s ago: no request, the only context is from another tab on this site',
+    expect(describeSuggest({ ...base, gate: 'no-snapshot' }, NOW)).toBe('checked 15s ago: no request, nothing on the page to act on');
+    expect(describeSuggest({ ...base, gate: 'site-off' }, NOW)).toBe('checked 15s ago: no request, carat is off for this site');
+  });
+
+  it('names the page kind and the prior the local predictor found', () => {
+    expect(describeSuggest({ ...base, gate: 'ok', pageKind: 'serp', prior: "first result matches query 'doordash'", offered: 0, interactions: 1 }, NOW)).toBe(
+      "checked 15s ago on a serp (first result matches query 'doordash'): no provider ran, offered 0, 1 control",
     );
-    expect(describeSuggest({ ...base, gate: 'stale-context' }, NOW)).toBe(
-      'checked 15s ago: no request, all context is older than 30 min',
+    expect(describeSuggest({ ...base, gate: 'ok', pageKind: 'article', prior: 'scroll', cached: true }, NOW)).toBe(
+      'checked 15s ago on an article (scroll): answer from cache, offered 0',
     );
   });
 
@@ -152,8 +157,8 @@ describe('describePrewarm', () => {
     expect(describePrewarm({ at: NOW - 3_000, host: 'www.google.com', verdict: 'warmed', count: 1, attempts: [{ id: 'openai', ms: 640, count: 1 }] }, NOW)).toBe(
       'navigation to www.google.com just now: pre-warmed 1 fill (openai, 640 ms)',
     );
-    expect(describePrewarm({ at: NOW - 30_000, host: 'calendar.google.com', verdict: 'stale-context' }, NOW)).toBe(
-      'navigation to calendar.google.com 30s ago: nothing pre-warmed, all context is older than 30 min',
+    expect(describePrewarm({ at: NOW - 30_000, host: 'calendar.google.com', verdict: 'no-context' }, NOW)).toBe(
+      'navigation to calendar.google.com 30s ago: nothing pre-warmed, nothing read in another tab to answer from',
     );
     expect(describePrewarm({ at: NOW, host: 'mail.google.com', verdict: 'failed', attempts: [{ id: 'openai', ms: 6000, count: 0, error: 'timed out' }] }, NOW)).toBe(
       'navigation to mail.google.com just now: provider failed (timed out), nothing cached',

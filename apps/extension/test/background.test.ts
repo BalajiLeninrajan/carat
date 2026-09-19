@@ -72,64 +72,40 @@ const enabled: Settings = { ...DEFAULT_SETTINGS, apiKey: 'sk-test' };
 const careful: Settings = { ...enabled, eagerness: 'balanced' };
 
 describe('gate', () => {
-  it('passes with a fresh item from another tab and origin', () => {
-    expect(gate(maps, [item()], enabled, requester, NOW)).toBe(true);
+  const article = { kind: 'article' as const, y: 0, pages: 6, more: true };
+
+  it('passes on a snapshot alone: no text from another tab is required', () => {
+    expect(gate(maps, enabled)).toBe(true);
+    // No field, no element, nothing read anywhere: the page state is the whole request.
+    expect(gate({ page: maps.page, fields: [], state: article }, enabled)).toBe(true);
+    expect(gate({ page: maps.page, fields: [] }, enabled)).toBe(false);
   });
 
-  it('needs a different tab AND a different origin for fills below eager, or the requesting tab itself for actions', () => {
-    // Same origin from another tab is an echo of what the user is looking at, unless eager says otherwise.
-    expect(gate(maps, [item({ origin: 'https://www.google.com' })], careful, requester, NOW)).toBe(false);
-    expect(gate(maps, [item({ origin: 'https://www.google.com' })], { ...enabled, eagerness: 'conservative' }, requester, NOW)).toBe(false);
-    expect(gate(maps, [item({ origin: 'https://www.google.com' })], enabled, requester, NOW)).toBe(true);
-    // The requesting tab's own page is a source for navigation, so it clears the gate on its own.
-    expect(gate(maps, [item({ tabId: 2 })], enabled, requester, NOW)).toBe(true);
-    expect(gate(maps, [item({ tabId: 2, lastSeenAt: NOW - 31 * MIN })], enabled, requester, NOW)).toBe(false);
-  });
-
-  it('at eager, still refuses the requesting tab itself as a fill source and keeps the freshness window', () => {
-    const noOwnText = { ...maps, page: { ...maps.page, host: 'www.google.com' } };
-    // Only the requesting tab's own item, on a request that is not from a tab: no other tab to draw on.
-    expect(gate(noOwnText, [item({ tabId: 2, origin: 'https://www.google.com' })], enabled, { tabId: undefined, origin: 'https://www.google.com' }, NOW)).toBe(false);
-    expect(gate(maps, [item({ origin: 'https://www.google.com', lastSeenAt: NOW - 31 * MIN })], enabled, requester, NOW)).toBe(false);
-  });
-
-  it('ignores items older than the store TTL', () => {
-    expect(gate(maps, [item({ lastSeenAt: NOW - 31 * MIN })], enabled, requester, NOW)).toBe(false);
-    expect(gate(maps, [item({ lastSeenAt: NOW - 29 * MIN })], enabled, requester, NOW)).toBe(true);
-  });
-
-  it('refuses denylisted hosts, disabled, and no fields', () => {
+  it('refuses denylisted hosts, the global switch and a snapshot with nothing in it', () => {
     const bank = { ...maps, page: { ...maps.page, host: 'secure.chase.com' } };
-    expect(gate(bank, [item()], enabled, requester, NOW)).toBe(false);
-    expect(gate(maps, [item()], { ...enabled, enabled: false }, requester, NOW)).toBe(false);
-    expect(gate({ ...maps, fields: [] }, [item()], enabled, requester, NOW)).toBe(false);
+    expect(gate(bank, enabled)).toBe(false);
+    expect(gate({ ...bank, state: article }, enabled)).toBe(false);
+    expect(gate(maps, { ...enabled, enabled: false })).toBe(false);
+    expect(gate({ ...maps, fields: [] }, enabled)).toBe(false);
   });
 
   it('refuses a host the user switched off, and only that host', () => {
     const off = { ...enabled, disabledHosts: ['www.google.com'] };
-    expect(gate(maps, [item()], off, requester, NOW)).toBe(false);
+    expect(gate(maps, off)).toBe(false);
     const calendar = { ...maps, page: { ...maps.page, host: 'calendar.google.com' } };
-    expect(gate(calendar, [item()], off, requester, NOW)).toBe(true);
+    expect(gate(calendar, off)).toBe(true);
   });
 });
 
 describe('explainGate', () => {
   it('names the check that stopped the request', () => {
-    expect(explainGate(maps, [item()], enabled, requester, NOW)).toBe('ok');
-    expect(explainGate(maps, [item()], { ...enabled, enabled: false }, requester, NOW)).toBe('disabled');
-    expect(explainGate(maps, [item()], { ...enabled, disabledHosts: ['www.google.com'] }, requester, NOW)).toBe('site-off');
+    expect(explainGate(maps, enabled)).toBe('ok');
+    expect(explainGate(maps, { ...enabled, enabled: false })).toBe('disabled');
+    expect(explainGate(maps, { ...enabled, disabledHosts: ['www.google.com'] })).toBe('site-off');
     const bank = { ...maps, page: { ...maps.page, host: 'secure.chase.com' } };
-    expect(explainGate(bank, [item()], enabled, requester, NOW)).toBe('denylisted');
-    expect(explainGate({ ...maps, fields: [] }, [item()], enabled, requester, NOW)).toBe('no-fields');
-    expect(explainGate(maps, [], enabled, requester, NOW)).toBe('no-context');
-    // Another tab on the same site is an echo below eager; the requesting tab's own text is a source for actions.
-    expect(explainGate(maps, [item({ origin: 'https://www.google.com' })], careful, requester, NOW)).toBe('own-context');
-    expect(explainGate(maps, [item({ origin: 'https://www.google.com' })], enabled, requester, NOW)).toBe('ok');
-    expect(explainGate(maps, [item({ tabId: 2 })], enabled, requester, NOW)).toBe('ok');
-    expect(explainGate(maps, [item({ lastSeenAt: NOW - 31 * MIN })], enabled, requester, NOW)).toBe('stale-context');
-    expect(explainGate(maps, [item({ tabId: 2, lastSeenAt: NOW - 31 * MIN })], enabled, requester, NOW)).toBe('stale-context');
-    // A stale foreign item plus a fresh own one still passes: the own one can carry an action.
-    expect(explainGate(maps, [item({ lastSeenAt: NOW - 31 * MIN }), item({ tabId: 2 })], enabled, requester, NOW)).toBe('ok');
+    expect(explainGate(bank, enabled)).toBe('denylisted');
+    expect(explainGate({ ...maps, fields: [] }, enabled)).toBe('no-snapshot');
+    expect(explainGate({ ...maps, fields: [], state: { kind: 'serp', y: 0, pages: 2, more: true } }, enabled)).toBe('ok');
   });
 });
 
@@ -138,7 +114,7 @@ describe('DiagLog', () => {
     const area = new FakeArea();
     const log = new DiagLog(area);
     await log.recordCapture(1, { at: 1, host: 'discord.com', kind: 'page', verdict: 'stored' });
-    await log.recordSuggest(1, { at: 2, host: 'discord.com', fields: 1, gate: 'own-context' });
+    await log.recordSuggest(1, { at: 2, host: 'discord.com', fields: 1, gate: 'no-snapshot' });
     await log.recordSuggest(1, { at: 3, host: 'discord.com', fields: 2, gate: 'ok', cached: false, offered: 1 });
     await log.flush();
     const reloaded = new DiagLog(area);
@@ -524,9 +500,11 @@ describe('orchestrate', () => {
       now,
       onDiag: (d: SuggestDiag) => void reports.push(d),
     };
-    // A second Discord tab asking: the only context is the same site's, and not its own.
+    // A second Discord tab asking: the gate passes, but below eager the same site's text is not a source and
+    // this snapshot carries no page state, so there is nothing to answer from and no provider is called.
     await orchestrate(maps, { tabId: 3, origin: 'https://discord.com' }, deps);
-    expect(reports[0]).toMatchObject({ at: NOW, host: 'www.google.com', fields: 1, gate: 'own-context', eagerness: 'balanced' });
+    expect(reports[0]).toMatchObject({ at: NOW, host: 'www.google.com', fields: 1, gate: 'ok', eagerness: 'balanced' });
+    expect(reports[0]?.attempts).toBeUndefined();
 
     await orchestrate(maps, requester, deps);
     expect(reports[1]).toMatchObject({ gate: 'ok', cached: false, offered: 1 });
@@ -805,8 +783,9 @@ describe('orchestrate smart path', () => {
     expect((await orchestrate(fields('c'), requester, { ...base, createSmartProvider: () => undefined, settings: async () => smartOn })).ticket).toBeUndefined();
     // the smart path is not wired at all
     expect((await orchestrate(fields('d'), requester, { ...base, refine: undefined, settings: async () => smartOn })).ticket).toBeUndefined();
-    // no context and nothing on its way
-    expect(await orchestrate(fields('e'), { tabId: 1, origin: 'https://discord.com' }, { ...base, settings: async () => smartOn })).toEqual({
+    // nothing read anywhere and nothing on its way
+    const bare = new ContextStore(new FakeArea(), { now });
+    expect(await orchestrate(fields('e'), requester, { ...base, store: bare, settings: async () => smartOn })).toEqual({
       suggestions: [],
       navigation: [],
       interactions: [],
@@ -1007,7 +986,7 @@ describe('orchestrate smart path over the whole answer', () => {
     await store.upsertVision({ tabId: 1, url: 'https://discord.com/channels/1', title: 'Discord', text: 'Discord · discord.com alex: dinner at Seven Shores Cafe, Friday at 6?' });
     const items = await store.items();
     const vision = items.find((i) => i.kind === 'vision')!;
-    expect(gate(maps, [vision], enabled, requester, NOW)).toBe(true);
+    expect(gate(maps, enabled)).toBe(true);
     expect(scoreAndPickContext([vision], requester, NOW).map((c) => c.kind)).toEqual(['vision']);
     expect(ownContext([vision], { tabId: 1, origin: 'https://discord.com' }, NOW).map((c) => c.id)).toEqual([vision.id]);
 
@@ -1179,7 +1158,7 @@ describe('orchestrate navigation', () => {
     expect(tabs).toHaveBeenCalledTimes(1);
   });
 
-  it('drops an action the provider sourced from another tab and a fill sourced from the page itself', async () => {
+  it('drops an action the provider sourced from another tab, and keeps a fill the page itself named', async () => {
     const { store, ctxId, now } = await seeded();
     await store.upsertPage({ tabId: 3, url: 'https://app.slack.com/c/1', title: 'Slack', text: 'lunch at Vincenzos tomorrow at 12?' });
     const slackId = (await store.items()).find((i) => i.tabId === 3)!.id;
@@ -1189,7 +1168,8 @@ describe('orchestrate navigation', () => {
       suggestion({ sourceContextId: ctxId }),
     ]);
     const res = await orchestrate(input, onDiscord, { store, settings: async () => enabled, createProvider: () => remote, now });
-    expect(res.suggestions).toEqual([]);
+    // An action still needs the page's own text; a fill may now use it too.
+    expect(res.suggestions.map((s) => [s.value, s.source?.host])).toEqual([['Seven Shores Cafe', 'discord.com']]);
     expect(res.navigation.map((n) => n.intent)).toEqual(['calendar']);
   });
 
@@ -1257,25 +1237,19 @@ const elements: ElementDescriptor[] = [
 
 describe('hasWork and gate for elements', () => {
   const page = calendarPage;
-  it('counts a field, a control, or buttons after a fill; a lone button only when it is the primary action and the level or a flow allows it', () => {
+  it('counts a page state, a field or any element; an empty snapshot is not work', () => {
     expect(hasWork({ page, fields: [] })).toBe(false);
-    // The primary Save with nothing to fill: work at eager, not below, unless a flow is under way.
+    expect(hasWork({ page, fields: [], state: { kind: 'unknown', y: 0, pages: 1, more: false } })).toBe(true);
+    // A plain button is work now: the page kind, not another tab's text, decides whether it earns a chip.
     expect(hasWork({ page, fields: [], elements: [elements[0]!] })).toBe(true);
-    expect(hasWork({ page, fields: [], elements: [elements[0]!] }, 'balanced')).toBe(false);
-    expect(hasWork({ page, fields: [], elements: [elements[0]!], flow: true }, 'conservative')).toBe(true);
-    expect(hasWork({ page, fields: [], elements: [{ i: 'e0', r: 'button', nm: 'More options', p: 1 }] })).toBe(false);
-    expect(hasWork({ page, fields: [], elements: [{ i: 'e0', r: 'button', nm: 'Save' }] })).toBe(false);
-    expect(hasWork({ page, fields: [], elements: [{ i: 'e0', r: 'button', nm: 'Pay now', p: 1, m: 1 }] })).toBe(false);
     expect(hasWork({ page, fields: [], elements: [elements[0]!], filled: ['c1'] })).toBe(true);
     expect(hasWork({ page, fields: [], elements: [elements[1]!] })).toBe(true);
-    expect(hasWork({ page, fields: [], elements: [elements[2]!] })).toBe(true);
     expect(hasWork({ page, fields: [{ i: 'f0', t: 'input:text' }] })).toBe(true);
   });
 
-  it('still needs fresh text from somewhere', () => {
+  it('needs nothing read anywhere', () => {
     const input = { page, fields: [], elements: [elements[1]!] };
-    expect(gate(input, [item()], enabled, onCalendar, NOW)).toBe(true);
-    expect(gate(input, [item({ lastSeenAt: NOW - 31 * MIN })], enabled, onCalendar, NOW)).toBe(false);
+    expect(gate(input, enabled)).toBe(true);
   });
 });
 
@@ -1477,7 +1451,8 @@ describe('orchestrate interactions', () => {
 });
 
 describe('orchestrate page query', () => {
-  const serpPage = { host: 'www.google.com', title: 'doordash - Google Search', path: '/search', query: 'doordash' };
+  const serpPage = { host: 'www.google.com', title: 'doordash - Google Search', path: '/search' };
+  const searched = (q?: string) => (q === undefined ? undefined : { kind: 'serp' as const, q, y: 0, pages: 3, more: true });
   const links: ElementDescriptor[] = [
     { i: 'e0', r: 'button', nm: 'Search', p: 1 },
     { i: 'e1', r: 'link', nm: 'Order Now | Quick and Easy Food Delivery', h: 'doordash.com' },
@@ -1485,7 +1460,7 @@ describe('orchestrate page query', () => {
     { i: 'e3', r: 'link', nm: 'Best restaurants near you', h: 'yelp.com' },
     { i: 'e4', r: 'button', nm: 'Tools' },
   ];
-  const serp = { page: serpPage, fields: [], elements: links };
+  const serp = { page: serpPage, fields: [], elements: links, state: searched('doordash') };
   const onSerp = { tabId: 2, origin: 'https://www.google.com' };
   const empty = () => ({ store: new ContextStore(new FakeArea(), { now: () => NOW }), now: () => NOW });
   const pageClick = (over: Partial<InteractSuggestion> = {}): InteractSuggestion =>
@@ -1494,20 +1469,15 @@ describe('orchestrate page query', () => {
   it('counts a real link on a page with a query as work, and lets the request through with nothing read', () => {
     // The results without the page's own Search button, which the eager click rule counts on its own.
     const results = { ...serp, elements: [links[1]!, links[2]!, links[3]!, links[4]!] };
-    const noQuery = { ...results, page: { ...serpPage, query: undefined } };
+    const bare = { page: serpPage, fields: [] };
     expect(hasWork(serp)).toBe(true);
     expect(hasWork(results)).toBe(true);
-    expect(hasWork(noQuery)).toBe(false);
-    expect(hasWork({ ...results, elements: [links[4]!] })).toBe(false);
-    expect(hasWork({ page: serpPage, fields: [{ i: 'f0', t: 'textarea', nm: 'q', v: 'doordash', f: 1 }], elements: [links[1]!] })).toBe(true);
-    // A primary Search button is work at eager whether or not a link answers the query, and not below it.
-    const buttons = { ...serp, page: { ...serpPage, query: undefined }, elements: [links[0]!, links[4]!] };
-    expect(hasWork(buttons)).toBe(true);
-    expect(hasWork(buttons, 'balanced')).toBe(false);
-    expect(explainGate(serp, [], enabled, onSerp, NOW)).toBe('ok');
-    expect(explainGate(noQuery, [], enabled, onSerp, NOW)).toBe('no-fields');
-    expect(explainGate(noQuery, [item()], enabled, onSerp, NOW)).toBe('no-fields');
-    expect(explainGate(serp, [], { ...enabled, disabledHosts: ['www.google.com'] }, onSerp, NOW)).toBe('site-off');
+    // A page state is work on its own; an empty snapshot from an old content script is not.
+    expect(hasWork(bare)).toBe(false);
+    expect(hasWork({ ...results, state: undefined })).toBe(true);
+    expect(explainGate(serp, enabled)).toBe('ok');
+    expect(explainGate(bare, enabled)).toBe('no-snapshot');
+    expect(explainGate(serp, { ...enabled, disabledHosts: ['www.google.com'] })).toBe('site-off');
   });
 
   it('offers the first link the query names at once, without asking any provider, and caches it', async () => {
@@ -1544,15 +1514,15 @@ describe('orchestrate page query', () => {
     const deps = { store, settings: async () => ({ ...enabled, provider: 'local' as const, apiKey: '' }), now };
     const sponsoredFirst = { ...serp, elements: [links[0]!, { i: 'e9', r: 'link' as const, nm: 'DoorDash Promo Codes', h: 'coupons.example' }, ...links.slice(1)] };
     expect((await orchestrate(sponsoredFirst, onSerp, deps)).interactions.map((s) => s.elementId)).toEqual(['e9']);
-    const wiki = { ...serp, page: { ...serpPage, query: 'doordash wikipedia' } };
+    const wiki = { ...serp, state: searched('doordash wikipedia') };
     expect((await orchestrate(wiki, onSerp, deps)).interactions.map((s) => s.elementId)).toEqual(['e2']);
-    const uber = { ...serp, page: { ...serpPage, query: 'Food Delivery!' } };
+    const uber = { ...serp, state: searched('Food Delivery!') };
     expect((await orchestrate(uber, onSerp, deps)).interactions.map((s) => s.elementId)).toEqual(['e1']);
   });
 
   it('asks the provider when no link matches outright, keeps its pick only when the link relates to the query, and never a button or an unrelated link', async () => {
     const { store, now } = empty();
-    const fuzzy = { ...serp, page: { ...serpPage, query: 'food delivery near me' } };
+    const fuzzy = { ...serp, state: searched('food delivery near me') };
     let answer: Suggestion[] = [];
     const remote = fakeProvider('openai', async () => answer);
     const reports: SuggestDiag[] = [];
@@ -1572,12 +1542,12 @@ describe('orchestrate page query', () => {
 
     // "weather" relates to nothing here: even the model's pick is dropped.
     answer = [pageClick({ confidence: 0.95 })];
-    const weather = { ...serp, page: { ...serpPage, query: 'weather' }, force: true };
+    const weather = { ...serp, state: searched('weather'), force: true };
     expect((await orchestrate(weather, onSerp, deps)).interactions).toEqual([]);
 
     // Without a query the page is not a source at all, and a link click still needs a fill first.
     const { store: seededStore, ctxId } = await seeded();
-    const noQuery = { ...serp, page: { ...serpPage, query: undefined }, fields: [{ i: 'f0', t: 'input:search', al: 'Search' }] };
+    const noQuery = { ...serp, state: { kind: 'unknown' as const, y: 0, pages: 1, more: false }, fields: [{ i: 'f0', t: 'input:search', al: 'Search' }] };
     answer = [pageClick(), pageClick({ sourceContextId: ctxId })];
     expect((await orchestrate(noQuery, onSerp, { ...deps, store: seededStore })).interactions).toEqual([]);
     expect(remote.calls).toBe(3);
@@ -1600,7 +1570,7 @@ describe('orchestrate page query', () => {
     expect(remote.calls).toBe(0);
 
     // The same links under another query are a different question.
-    expect((await orchestrate({ ...serp, page: { ...serpPage, query: 'weather' } }, onSerp, deps)).interactions).toEqual([]);
+    expect((await orchestrate({ ...serp, state: searched('weather') }, onSerp, deps)).interactions).toEqual([]);
     expect(remote.calls).toBe(1);
   });
 
@@ -1608,7 +1578,7 @@ describe('orchestrate page query', () => {
     const { store, now } = empty();
     const remote = fakeProvider('openai', async () => [suggestion({ sourceContextId: 'page', fieldId: 'f0', value: 'doordash' })]);
     const deps = { store, settings: async () => enabled, createProvider: () => remote, now };
-    const withField = { ...serp, page: { ...serpPage, query: 'food delivery near me' }, fields: [{ i: 'f0', t: 'input:text', al: 'Add title' }] };
+    const withField = { ...serp, state: searched('food delivery near me'), fields: [{ i: 'f0', t: 'input:text', al: 'Add title' }] };
     const res = await orchestrate(withField, onSerp, deps);
     expect(remote.calls).toBe(1);
     expect(res.suggestions).toEqual([]);
@@ -1617,5 +1587,172 @@ describe('orchestrate page query', () => {
     const bank = { ...serp, page: { ...serpPage, host: 'www.chase.com' } };
     expect(await orchestrate(bank, { tabId: 2, origin: 'https://www.chase.com' }, deps)).toEqual({ suggestions: [], navigation: [], interactions: [] });
     expect(remote.calls).toBe(1);
+  });
+});
+
+describe('orchestrate predicts the next step from the page alone', () => {
+  const serpPage = { host: 'www.google.com', title: 'doordash - Google Search', path: '/search' };
+  const onSerp = { tabId: 2, origin: 'https://www.google.com' };
+  const results: ElementDescriptor[] = [
+    { i: 'e0', r: 'button', nm: 'Tools' },
+    { i: 'e1', r: 'link', nm: 'DoorDash Food Delivery & Takeout', h: 'doordash.com' },
+    { i: 'e2', r: 'link', nm: 'DoorDash - Wikipedia', h: 'wikipedia.org' },
+  ];
+  const serp = {
+    page: serpPage,
+    fields: [],
+    elements: results,
+    state: { kind: 'serp' as const, q: 'doordash', y: 0, pages: 3, more: true },
+  };
+  const local: Settings = { ...DEFAULT_SETTINGS, provider: 'local', apiKey: '' };
+
+  it('clicks the first matching result with nothing read in any other tab, and never asks the model for it', async () => {
+    const store = new ContextStore(new FakeArea(), { now: () => NOW });
+    const reports: SuggestDiag[] = [];
+    const model = fakeProvider('openai', async () => []);
+    const res = await orchestrate(serp, onSerp, {
+      store,
+      settings: async () => enabled,
+      createProvider: () => model,
+      now: () => NOW,
+      onDiag: (d: SuggestDiag) => void reports.push(d),
+    });
+    expect(res.interactions).toEqual([
+      expect.objectContaining({ kind: 'interact', elementId: 'e1', verb: 'click', value: 'DoorDash Food Delivery & Takeout', sourceContextId: 'page' }),
+    ]);
+    // The prior clears the eager floor on its own, so the network provider is never called.
+    expect(model.calls).toBe(0);
+    expect(reports[0]).toMatchObject({ gate: 'ok', pageKind: 'serp', prior: "first result matches query 'doordash'", interactions: 1 });
+  });
+
+  it('at conservative, still clicks the result that is what was searched for, but takes no prior and asks the model', async () => {
+    const careful: Settings = { ...enabled, eagerness: 'conservative' };
+    // The exact match is backed by the user's own typed query, so every level offers it, and no model is asked.
+    const exact = fakeProvider('openai', async () => []);
+    const hit = await orchestrate(serp, onSerp, { store: new ContextStore(new FakeArea(), { now: () => NOW }), settings: async () => careful, createProvider: () => exact, now: () => NOW });
+    expect(hit.interactions.map((s) => s.elementId)).toEqual(['e1']);
+    expect(exact.calls).toBe(0);
+
+    // A query nothing on the page relates to: the "first result" prior is an eager guess, so conservative asks the model instead.
+    const model = fakeProvider('openai', async () => []);
+    const vague = { ...serp, state: { ...serp.state, q: 'weather tomorrow' } };
+    const res = await orchestrate(vague, onSerp, { store: new ContextStore(new FakeArea(), { now: () => NOW }), settings: async () => careful, createProvider: () => model, now: () => NOW });
+    expect(res.interactions).toEqual([]);
+    expect(model.calls).toBe(1);
+  });
+
+  it('offers a page scroll on an article at eager and refuses one the page cannot justify', async () => {
+    const store = new ContextStore(new FakeArea(), { now: () => NOW });
+    const article = {
+      page: { host: 'www.theatlantic.com', title: 'Why We Stopped Walking', path: '/ideas/walking' },
+      fields: [],
+      elements: [{ i: 'e0', r: 'button' as const, nm: 'Share' }],
+      state: { kind: 'article' as const, y: 0.4, pages: 9, more: true },
+    };
+    const onArticle = { tabId: 2, origin: 'https://www.theatlantic.com' };
+    const deps = { store, settings: async () => local, now: () => NOW };
+    const res = await orchestrate(article, onArticle, deps);
+    expect(res.interactions).toEqual([
+      expect.objectContaining({ kind: 'interact', elementId: '', verb: 'scroll', value: '', sourceContextId: 'page' }),
+    ]);
+
+    // Nothing below the fold, or a scroll already accepted here: no offer, whatever a provider says.
+    const scroll = res.interactions[0] as InteractSuggestion;
+    const insists = fakeProvider('local', async () => [scroll]);
+    const forced = { ...deps, localProvider: insists, createProvider: () => insists };
+    expect((await orchestrate({ ...article, state: { ...article.state, more: false } }, onArticle, forced)).interactions).toEqual([]);
+    expect((await orchestrate({ ...article, state: { ...article.state, done: ['scroll'] } }, onArticle, forced)).interactions).toEqual([]);
+  });
+
+  it('refuses a page-sourced click the page kind does not justify, and a page-sourced fill always', async () => {
+    const store = new ContextStore(new FakeArea(), { now: () => NOW });
+    const base = { kind: 'interact' as const, value: 'Tools', confidence: 0.9, reason: '', sourceContextId: 'page' };
+    const greedy = fakeProvider('openai', async () => [
+      { ...base, elementId: 'e0', verb: 'click' }, // a button on a results page is not the next step
+      { ...base, elementId: 'e1', verb: 'click', value: 'DoorDash Food Delivery & Takeout' },
+      { kind: 'fill', fieldId: 'f0', value: 'doordash', confidence: 0.95, reason: '', sourceContextId: 'page' },
+    ]);
+    const withField = { ...serp, fields: [{ i: 'f0', t: 'input:search', nm: 'q' }] };
+    const res = await orchestrate(withField, onSerp, { store, settings: async () => enabled, createProvider: () => greedy, now: () => NOW });
+    expect(res.suggestions).toEqual([]);
+    expect(res.interactions.map((s) => s.elementId)).toEqual(['e1']);
+  });
+
+  it('keeps the page state in the cache key, so accepting one step asks afresh for the next', async () => {
+    const store = new ContextStore(new FakeArea(), { now: () => NOW });
+    const model = fakeProvider('openai', async () => []);
+    const deps = { store, settings: async () => enabled, createProvider: () => model, now: () => NOW };
+    const checkout = {
+      page: { host: 'shop.example.com', title: 'Checkout', path: '/checkout/shipping' },
+      fields: [],
+      elements: [{ i: 'e0', r: 'button' as const, nm: 'Continue to payment', p: 1 as const }],
+      state: { kind: 'checkout' as const, y: 0, pages: 2, more: false },
+    };
+    const onShop = { tabId: 2, origin: 'https://shop.example.com' };
+    expect((await orchestrate(checkout, onShop, deps)).interactions.map((s) => s.elementId)).toEqual(['e0']);
+    // Same snapshot, same answer, straight from the cache.
+    expect((await orchestrate(checkout, onShop, deps)).interactions.map((s) => s.elementId)).toEqual(['e0']);
+    // The Continue is done, so the state changed and the cached answer is not reused.
+    const after = { ...checkout, state: { ...checkout.state, done: ['button|continue to payment'] } };
+    expect((await orchestrate(after, onShop, deps)).interactions).toEqual([]);
+  });
+});
+
+describe('orchestrate fills from the page the user is on', () => {
+  const reddit = { host: 'www.reddit.com', title: 'Best pho in Waterloo? : r/waterloo', path: '/r/waterloo/comments/1a/best_pho' };
+  const onReddit = { tabId: 1, origin: 'https://www.reddit.com' };
+  const search = { i: 'f0', t: 'input:search', nm: 'q', ph: 'Search in r/waterloo', al: 'Search' };
+  const local: Settings = { ...DEFAULT_SETTINGS, provider: 'local', apiKey: '' };
+
+  async function thread() {
+    let clock = NOW;
+    const store = new ContextStore(new FakeArea(), { now: () => clock });
+    await store.upsertPage({
+      tabId: 1,
+      url: 'https://www.reddit.com/r/waterloo/comments/1a/best_pho',
+      title: 'Best pho in Waterloo? : r/waterloo',
+      text: 'Best pho in Waterloo? Moving here next month. top comment: honestly go to Pho Dau Bo, the broth is the real thing.',
+    });
+    return { store, now: () => clock, tick: (ms: number) => (clock += ms) };
+  }
+
+  it('offers the thread its own restaurant name at eager, and tags the chip as coming from this page', async () => {
+    const { store, now } = await thread();
+    const res = await orchestrate({ page: reddit, fields: [search] }, onReddit, { store, settings: async () => local, now });
+    expect(res.suggestions).toEqual([
+      expect.objectContaining({ kind: 'fill', fieldId: 'f0', value: 'Pho Dau Bo', source: { host: 'www.reddit.com', capturedAt: NOW } }),
+    ]);
+    // Below eager a bare capitalised name is not enough, whichever tab it came from.
+    const careful = await orchestrate({ page: reddit, fields: [search] }, onReddit, { store, settings: async () => ({ ...local, eagerness: 'balanced' as const }), now });
+    expect(careful.suggestions).toEqual([]);
+  });
+
+  it('prefers the page in front of the user to a fresher item in another tab that names the same kind of thing', async () => {
+    let clock = NOW;
+    const store = new ContextStore(new FakeArea(), { now: () => clock });
+    await store.upsertPage({
+      tabId: 1,
+      url: 'https://www.reddit.com/r/waterloo/comments/1a/best_pho',
+      title: 'Best pho in Waterloo? : r/waterloo',
+      text: 'Best pho in Waterloo? top comment: dinner at Pho Dau Bo, always.',
+    });
+    clock += MIN;
+    await store.upsertPage({ tabId: 2, url: 'https://discord.com/channels/1', title: 'Discord', text: 'dinner at Lazeez Shawarma?' });
+    const res = await orchestrate({ page: reddit, fields: [search] }, onReddit, { store, settings: async () => local, now: () => clock });
+    expect(res.suggestions.map((s) => [s.value, s.source?.host])).toEqual([['Pho Dau Bo', 'www.reddit.com']]);
+  });
+
+  it('never fills the page with its own furniture, whatever a provider says', async () => {
+    const { store, now } = await thread();
+    const ownId = (await store.items())[0]!.id;
+    const junk = (value: string): Suggestion => ({ kind: 'fill', fieldId: 'f0', value, confidence: 0.95, reason: '', sourceContextId: ownId });
+    for (const value of ['Best pho in Waterloo? : r/waterloo', 'Search in r/waterloo', 'Search', 'reddit']) {
+      const pushy = fakeProvider('openai', async () => [junk(value)]);
+      const res = await orchestrate({ page: reddit, fields: [search], force: true }, onReddit, { store, settings: async () => enabled, createProvider: () => pushy, now });
+      expect(res.suggestions, value).toEqual([]);
+    }
+    const good = fakeProvider('openai', async () => [junk('Pho Dau Bo')]);
+    const res = await orchestrate({ page: reddit, fields: [search], force: true }, onReddit, { store, settings: async () => enabled, createProvider: () => good, now });
+    expect(res.suggestions.map((s) => s.value)).toEqual(['Pho Dau Bo']);
   });
 });

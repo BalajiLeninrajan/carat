@@ -1,11 +1,5 @@
-import type { ElementDescriptor, FieldDescriptor, InteractSuggestion, PageMeta } from './types';
-
-/**
- * The `sourceContextId` of a click that the page's own query justifies. The
- * page's text is never a fill source, so this never names a context item;
- * the validators accept it only on a link, only while the page has a query.
- */
-export const PAGE_SOURCE = 'page';
+import type { ElementDescriptor, FieldDescriptor, InteractSuggestion, PageState } from './types';
+import { PAGE_SOURCE } from './types';
 
 /** Confidence of a click on the link whose site or title is what the user searched for. Above every level's floor. */
 export const PAGE_QUERY_CONFIDENCE = 0.8;
@@ -19,13 +13,14 @@ export interface PageIntent {
 }
 
 /**
- * The page's own query: what the content script read off the URL (`q`,
- * `query` or `search`) or a search field with text in it, else a described
- * search field that has a value. Null when the page has none, or when the
- * query has no word in it worth matching.
+ * The page's own query: `state.q`, which the content script read off the URL
+ * (`q`, `query`, `search` and the rest) or the page's own search box, else a
+ * described search field that has a value. The page state is the one place
+ * the query is worked out; this turns it into tokens. Null when the page has
+ * none, or when the query has no word in it worth matching.
  */
-export function pageIntent(page: PageMeta, fields: FieldDescriptor[] = []): PageIntent | null {
-  const query = (page.query ?? '').trim() || fields.find((f) => f.v && looksLikeSearch(f))?.v?.trim() || '';
+export function pageIntent(state: PageState | undefined, fields: FieldDescriptor[] = []): PageIntent | null {
+  const query = (state?.q ?? '').trim() || fields.find((f) => f.v && looksLikeSearch(f))?.v?.trim() || '';
   const tokens = queryTokens(query);
   return tokens.length > 0 ? { query: query.slice(0, QUERY_MAX), tokens } : null;
 }

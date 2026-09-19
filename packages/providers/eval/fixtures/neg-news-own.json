@@ -2,6 +2,7 @@
   "name": "neg-news-own",
   "request": {
     "page": { "host": "www.cbc.ca", "title": "Region approves transit fare increase starting in January", "path": "/news/canada/kitchener-waterloo/fare-increase-1.7" },
+    "state": { "kind": "article", "y": 0, "pages": 4.2, "more": true },
     "fields": [
       { "i": "f0", "t": "input:search", "al": "Search CBC", "ph": "Search", "w": "m" }
     ],
@@ -19,5 +20,6 @@
     "now": "2026-09-16T14:04:00-04:00",
     "locale": "en-CA"
   },
-  "expect": []
+  "expect": [],
+  "expectAt": { "balanced": [{ "elementId": "", "verb": "scroll" }], "eager": [{ "elementId": "", "verb": "scroll" }] }
 }

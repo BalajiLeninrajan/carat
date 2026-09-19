@@ -1,4 +1,4 @@
-import type { ClickGate, ElementDescriptor, FieldDescriptor, InteractSuggestion, PageMeta, RequestContext } from '@carat/shared';
+import type { ClickGate, ElementDescriptor, FieldDescriptor, InteractSuggestion, PageState, RequestContext } from '@carat/shared';
 import { clickAllowed, firstMatchingLink, isDestructiveElement, isDestructiveName, isPrimaryActionName, pageIntent, pageQueryClick, verbFits } from '@carat/shared';
 
 const CONFIDENCE = 0.75;
@@ -132,8 +132,8 @@ export function amountFor(text: string, e: ElementDescriptor): string | null {
  * needs no prior fill and no model, because the query is on the page and the
  * match is exact. A fuzzy query matches nothing here and goes to the model.
  */
-export function linkForQuery(page: PageMeta, fields: FieldDescriptor[], elements: ElementDescriptor[]): InteractSuggestion[] {
-  const intent = pageIntent(page, fields);
+export function linkForQuery(state: PageState | undefined, fields: FieldDescriptor[], elements: ElementDescriptor[]): InteractSuggestion[] {
+  const intent = pageIntent(state, fields);
   if (!intent) return [];
   const link = firstMatchingLink(
     elements.filter((e) => !isDestructiveElement(e)),

@@ -8,6 +8,7 @@ import type {
   InteractSuggestion,
   NavSuggestion,
   PageMeta,
+  PageState,
   Settings,
 } from '@carat/shared';
 import type { TabDiag } from './background/diag';
@@ -51,7 +52,7 @@ export type RefineResponse = Pick<SuggestResponse, 'suggestions' | 'interactions
 export interface Protocol {
   capture(data: { url: string; title: string; text: string; kind: 'page' | 'selection' }): void;
   /** `force` skips the answer cache and the dismissed/consumed filter: the user asked out loud. */
-  suggestRequest(data: { page: PageMeta; fields: FieldDescriptor[]; elements?: ElementDescriptor[]; force?: boolean }): SuggestResponse;
+  suggestRequest(data: { page: PageMeta; fields: FieldDescriptor[]; elements?: ElementDescriptor[]; state?: PageState; force?: boolean }): SuggestResponse;
   /** Long-poll for the next answer on a fast reply's `ticket`; polled again while the answer says `more`. */
   suggestRefine(data: { ticket: string }): RefineResponse;
   /** Screenshot cues from a tab; see VisionCue. */

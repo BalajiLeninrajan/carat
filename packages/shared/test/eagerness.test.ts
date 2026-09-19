@@ -20,6 +20,19 @@ describe('EAGERNESS', () => {
     expect(e!.sameOriginContext).toBe(true);
     expect(c!.looseNames).toBe(false);
     expect(e!.looseNames).toBe(true);
+    expect(c!.priorMin).toBeGreaterThan(b!.priorMin);
+    expect(b!.priorMin).toBeGreaterThan(e!.priorMin);
+  });
+
+  it('lets the priors through by level: none at conservative, the first result and Continue at balanced, the scroll too at eager', () => {
+    const serp = 0.8;
+    const checkout = 0.7;
+    const scroll = 0.55;
+    expect(EAGERNESS.conservative.priorMin).toBeGreaterThan(1);
+    expect(serp).toBeGreaterThanOrEqual(EAGERNESS.balanced.priorMin);
+    expect(checkout).toBeGreaterThanOrEqual(EAGERNESS.balanced.priorMin);
+    expect(scroll).toBeLessThan(EAGERNESS.balanced.priorMin);
+    expect(scroll).toBeGreaterThanOrEqual(EAGERNESS.eager.priorMin);
   });
 
   it('keeps the old numbers as conservative', () => {

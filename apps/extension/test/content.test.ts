@@ -1342,3 +1342,122 @@ describe('interaction chip', () => {
     expect(calls('navigate')).toEqual([]);
   });
 });
+
+describe('page scroll chip', () => {
+  let ctx: ReturnType<typeof fakeCtx>;
+  let scrollBy: ReturnType<typeof vi.fn>;
+
+  /** jsdom neither lays out nor scrolls; the page is a plain set of numbers the scheduler reads. */
+  function page(height: number, scrollY = 0): void {
+    Object.defineProperty(document.documentElement, 'scrollHeight', { configurable: true, value: height });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 });
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: scrollY });
+  }
+
+  const scrollOffer: InteractSuggestion = {
+    kind: 'interact',
+    elementId: '',
+    verb: 'scroll',
+    value: '',
+    confidence: 0.55,
+    reason: 'a page for reading, with more below the fold',
+    sourceContextId: 'page',
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    sent.mockReset();
+    sent.mockResolvedValue(undefined);
+    ctx = fakeCtx();
+    document.body.innerHTML = `<article>${'walking through the city '.repeat(60)}</article><button>Share</button>`;
+    for (const el of document.querySelectorAll('button')) onScreen(el, 100);
+    page(8000, 0);
+    scrollBy = vi.fn();
+    (window as unknown as { scrollBy: unknown }).scrollBy = scrollBy;
+  });
+
+  afterEach(() => {
+    ctx.invalidate();
+    document.body.innerHTML = '';
+    vi.useRealTimers();
+  });
+
+  it('sends the page state, offers one viewport of scroll, performs it on Tab and does not offer it again', async () => {
+    sent.mockImplementation(async (type) => (type === 'suggestRequest' ? { suggestions: [], navigation: [], interactions: [scrollOffer] } : undefined));
+    const chip = createChip(document);
+    startSuggestions(ctx, chip, document);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
+    await flush();
+
+    expect(calls('suggestRequest')[0]?.state).toMatchObject({ kind: 'article', y: 0, pages: 10, more: true });
+    // No value to quote, so the banner is the verb alone.
+    expect(chip.text).toBe('Scroll down?');
+    expect(chipHost().style.bottom).toBe('24px');
+
+    tab();
+    expect(scrollBy).toHaveBeenCalledWith({ top: 800, left: 0, behavior: 'smooth' });
+    expect(calls('feedback').at(-1)).toEqual({ kind: 'interact', host: location.host, role: 'page', name: 'scroll', accepted: true });
+
+    // A screen further down is a fresh question, and this one carries the scroll as done.
+    page(8000, 800);
+    await vi.advanceTimersByTimeAsync(SCROLL_SETTLE_MS + SNAPSHOT_TIMING.debounceMs);
+    await flush();
+    expect(calls('suggestRequest')[1]?.state).toMatchObject({ y: 1, more: true, done: ['scroll'] });
+    expect(chip.visible).toBe(false);
+  });
+
+  it('offers nothing at the bottom of the page, and offers again once the page has grown', async () => {
+    sent.mockImplementation(async (type) => (type === 'suggestRequest' ? { suggestions: [], navigation: [], interactions: [scrollOffer] } : undefined));
+    page(1000, 400);
+    const chip = createChip(document);
+    startSuggestions(ctx, chip, document);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
+    await flush();
+    expect(calls('suggestRequest')[0]?.state).toMatchObject({ more: false });
+    expect(chip.visible).toBe(false);
+
+    // A feed that loaded more below: the offer comes back even though a scroll was accepted here.
+    page(8000, 0);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.debounceMs);
+    setVisibility('visible');
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.debounceMs);
+    await flush();
+    expect(chip.text).toBe('Scroll down?');
+    tab();
+    expect(scrollBy).toHaveBeenCalledTimes(1);
+
+    Object.defineProperty(document.documentElement, 'scrollHeight', { configurable: true, value: 20_000 });
+    await vi.advanceTimersByTimeAsync(SCROLL_SETTLE_MS + SNAPSHOT_TIMING.debounceMs);
+    await flush();
+    expect(calls('suggestRequest').at(-1)?.state).not.toHaveProperty('done');
+    expect(chip.text).toBe('Scroll down?');
+  });
+
+  it('Esc suppresses the scroll for the host and moves on to the next chip in the answer', async () => {
+    const title = field('Title', 100);
+    sent.mockImplementation(async (type, data) => {
+      if (type !== 'suggestRequest') return undefined;
+      const { fields } = data as { fields: Array<{ i: string; al?: string; v?: string }> };
+      const f = fields.find((x) => x.al === 'Title' && !x.v);
+      return {
+        suggestions: f ? [s(f.i, 'Dinner', 0.9)] : [],
+        navigation: [],
+        interactions: [scrollOffer],
+      };
+    });
+    const chip = createChip(document);
+    startSuggestions(ctx, chip, document);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
+    await flush();
+    // A fill beats a scroll: the chip on the field comes first.
+    expect(chip.text).toBe('Fill "Dinner"?');
+    title.focus();
+    escape();
+    expect(chip.text).toBe('Scroll down?');
+
+    escape();
+    expect(chip.visible).toBe(false);
+    expect(scrollBy).not.toHaveBeenCalled();
+    expect(calls('feedback').at(-1)).toEqual({ kind: 'interact', host: location.host, role: 'page', name: 'scroll', accepted: false });
+  });
+});

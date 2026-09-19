@@ -15,7 +15,7 @@ import { scoreAndPickContext } from './score';
  * provider errored or timed out, nothing was cached. The rest are the gate's
  * own verdicts, `own-context` covering a tab whose only fresh text is its own.
  */
-export type PrewarmVerdict = Exclude<GateVerdict, 'ok'> | 'warmed' | 'warm' | 'unknown-page' | 'failed';
+export type PrewarmVerdict = Exclude<GateVerdict, 'ok'> | 'warmed' | 'warm' | 'unknown-page' | 'no-context' | 'failed';
 
 export interface PrewarmDiag {
   at: number;
@@ -105,11 +105,12 @@ export function createPrewarmer(deps: PrewarmDeps): Prewarmer {
     const settings = await deps.settings();
     const items = await deps.store.items();
     const at = await deps.store.clock();
-    const gate = explainGate({ page: known.page, fields: known.fields }, items, settings, requester, at);
+    const gate = explainGate({ page: known.page, fields: known.fields }, settings);
     if (gate !== 'ok') return note(gate);
-    // The gate also passes on the tab's own text, which only ever feeds tab offers; a fill needs another tab's.
+    // The gate lets everything with a snapshot through now, but a pre-warm has no page
+    // to read a prior off yet: without another tab's text there is nothing to warm from.
     const context = scoreAndPickContext(items, requester, at, settings.eagerness);
-    if (context.length === 0) return note('own-context');
+    if (context.length === 0) return note('no-context');
 
     const key = prewarmKey(known.id, context);
     // The in-flight check comes after the last await so two commits deciding at once cannot both start a call.
