@@ -11,6 +11,8 @@ const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
 let running = 0;
 /** The tail after the last of them: frames still landing once the settle has resolved. */
 let tail: number | null = null;
+/** Waiting for the mark to come off, so the page is read after it has stopped moving. */
+let waiting: Array<() => void> = [];
 
 /**
  * Whether the page is moving because carat moved it. A smooth scroll of one
@@ -21,6 +23,18 @@ let tail: number | null = null;
  */
 export function caratScrolling(): boolean {
   return running > 0 || tail !== null;
+}
+
+/**
+ * Resolves the moment the mark comes off, or at once when it is not on. The
+ * question after a scroll carat performed waits on this rather than on a
+ * timer: the outline read while the page is still moving is the old one.
+ */
+export function caratScrollEnd(): Promise<void> {
+  if (!caratScrolling()) return Promise.resolve();
+  return new Promise((resolve) => {
+    waiting.push(resolve);
+  });
 }
 
 /** Run a scroll of carat's own under that mark. */
@@ -36,6 +50,9 @@ function own(win: Window, start: () => void): Promise<void> {
     if (running > 0) return;
     tail = win.setTimeout(() => {
       tail = null;
+      const woken = waiting;
+      waiting = [];
+      for (const resolve of woken) resolve();
     }, SCROLL_SETTLE_MS);
   });
 }
