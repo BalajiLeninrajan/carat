@@ -381,7 +381,7 @@ describe('orchestrate', () => {
     }
   });
 
-  it('runs Jev, then the chat model, then regex, all inside one call when the provider is cloudflare', async () => {
+  it('races regex, Jev and the chat model inside one call when the provider is cloudflare', async () => {
     const cloudflare: Settings = { ...enabled, provider: 'cloudflare', cfAccountId: 'acct', cfApiToken: 'cf' };
     const envelope = (answers: Record<string, unknown>) =>
       new Response(JSON.stringify({ success: true, errors: [], result: { model: 'jev', answers } }), { status: 200 });
@@ -391,16 +391,21 @@ describe('orchestrate', () => {
         { status: 200 },
       );
 
-    // Jev picks the regex candidate; the chat model is never called.
+    // Jev picks the regex candidate; the chat model, asked at the same time, has nothing to add.
     {
       const { store, now } = await seeded();
-      const fetchImpl = vi.fn(async () => envelope({ relevant: { type: 'noul', noul: 0.9 }, field_f0: { type: 'choice', choice: 'k0', confidence: 0.9, probabilities: { k0: 0.9, k1: 0.05, none: 0.05 } } }));
+      const empty = () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ suggestions: [] }) } }] }), { status: 200 });
+      const fetchImpl = vi.fn(async (url: string) =>
+        String(url).includes('api.cloudflare.com')
+          ? envelope({ relevant: { type: 'noul', noul: 0.9 }, field_f0: { type: 'choice', choice: 'k0', confidence: 0.9, probabilities: { k0: 0.9, k1: 0.05, none: 0.05 } } })
+          : empty(),
+      );
       const res = await orchestrate(maps, requester, { store, settings: async () => cloudflare, createProvider: (s) => createProvider(s, fetchImpl as unknown as typeof fetch), now });
-      expect(fetchImpl).toHaveBeenCalledTimes(1);
-      expect(String((fetchImpl.mock.calls[0] as unknown as [string])[0])).toContain('api.cloudflare.com');
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      expect(fetchImpl.mock.calls.map(([url]) => new URL(String(url)).host).sort()).toEqual(['api.cloudflare.com', 'api.openai.com']);
       expect(res.suggestions.map((s) => [s.fieldId, s.value])).toEqual([['f0', 'Seven Shores Cafe']]);
     }
-    // Jev says none; the chat model answers on the same budget.
+    // Jev says none; the chat model, on the same budget, outranks the regex answer.
     {
       const { store, ctxId, now } = await seeded();
       const fetchImpl = vi
@@ -412,7 +417,7 @@ describe('orchestrate', () => {
       expect(String((fetchImpl.mock.calls[1] as unknown as [string])[0])).toContain('api.openai.com');
       expect(res.suggestions.map((s) => s.value)).toEqual(['From the model']);
     }
-    // No chat key: Jev alone, and an error envelope falls back to regex.
+    // No chat key: Jev alone beside regex, and an error envelope leaves the regex answer.
     {
       const { store, now } = await seeded();
       const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ success: false, errors: [{ code: 10000, message: 'Authentication error' }] }), { status: 401 }));
