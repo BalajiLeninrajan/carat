@@ -86,6 +86,17 @@ describe('describeSuggest', () => {
     );
   });
 
+  it('prints the three moments that decide how fast it feels, and whether the prefix was warm', () => {
+    const line = describeSuggest(
+      { ...base, gate: 'ok', source: 'placeholder', ms: 4, placeholderMs: 4, partialMs: 210, finalMs: 812, warmed: true, kind: 'click' },
+      1000,
+    );
+    expect(line).toContain('[placeholder 4 ms, target 210 ms, action 812 ms, prefix warmed]');
+    expect(describeSuggest({ ...base, gate: 'ok', source: 'model', ms: 9, warmed: false }, 1000)).toContain('[prefix cold]');
+    // Nothing timed, nothing printed.
+    expect(describeSuggest({ ...base, gate: 'ok', source: 'cache', ms: 0 }, 1000)).not.toContain('[');
+  });
+
   it('says a failed provider, and that the cache answered', () => {
     expect(describeSuggest({ ...base, gate: 'ok', source: 'cache', ms: 0, kind: 'scroll', label: 'Scroll down' }, 1000)).toContain(
       'answer from the 60s cache',

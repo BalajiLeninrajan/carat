@@ -66,7 +66,22 @@ export function describeSuggest(d: SuggestDiag, now: number = Date.now()): strin
   const arm = d.irreversible ? ', asks for a second Tab' : '';
   const refused = d.refused ? `, refused: ${d.refused}` : '';
   const replaced = d.replaced ? ', the model replaced it' : d.refine ? ', more may follow' : '';
-  return [when, ': ', [first, attempts].filter(Boolean).join('; '), action, why, arm, refused, replaced].join('');
+  return [when, ': ', [first, attempts].filter(Boolean).join('; '), action, why, arm, refused, replaced, timings(d)].join('');
+}
+
+/**
+ * The three moments that decide how fast carat feels — the chip going up, the
+ * ring landing on the control, the words settling — and whether the prompt's
+ * prefix was already in the provider's cache when the request went out.
+ */
+function timings(d: SuggestDiag): string {
+  const parts = [
+    d.placeholderMs !== undefined ? `placeholder ${d.placeholderMs} ms` : '',
+    d.partialMs !== undefined ? `target ${d.partialMs} ms` : '',
+    d.finalMs !== undefined ? `action ${d.finalMs} ms` : '',
+    d.warmed === undefined ? '' : d.warmed ? 'prefix warmed' : 'prefix cold',
+  ].filter(Boolean);
+  return parts.length ? ` [${parts.join(', ')}]` : '';
 }
 
 function describeAttempt(a: ProviderAttempt): string {

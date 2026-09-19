@@ -63,6 +63,14 @@ export interface SuggestDiag {
   /** What produced the first action, and how long the content script waited for it. */
   source?: AnswerOrigin;
   ms?: number;
+  /** Milliseconds from the snapshot landing to the placeholder's chip. */
+  placeholderMs?: number;
+  /** To the model's streamed target, which is when the ring moves. */
+  partialMs?: number;
+  /** To the model's whole action, which is when the words settle. */
+  finalMs?: number;
+  /** The prefix this request sent was already in the provider's cache, warmed on navigation. */
+  warmed?: boolean;
   attempts?: ProviderAttempt[];
   /** The level the request ran at; names the floor an action fell under. */
   eagerness?: Eagerness;
