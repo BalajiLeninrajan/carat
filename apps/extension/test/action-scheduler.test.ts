@@ -6,7 +6,7 @@ import type { ScriptContext } from '../src/content';
 import { SNAPSHOT_TIMING, startActions } from '../src/content/action-scheduler';
 import type { FrameHub } from '../src/frames';
 import { safeSendMessage } from '../src/messaging';
-import { SCROLL_MAX_MS, SCROLL_SETTLE_MS, scrollPageDown } from '../src/scroll';
+import { SCROLL_MAX_MS, SCROLL_SETTLE_MS, caratScrolling, scrollPageDown } from '../src/scroll';
 
 vi.mock('../src/messaging', () => ({ safeSendMessage: vi.fn(async () => undefined) }));
 
@@ -98,6 +98,8 @@ const tick = (ms = 0) => vi.advanceTimersByTimeAsync(ms);
 const firstAsk = () => tick(0);
 /** Long enough for the settle timer and the gap in front of it. */
 const settled = () => tick(SNAPSHOT_TIMING.settleMs + SNAPSHOT_TIMING.minGapMs);
+/** The fast lane: the frame after carat acted, plus the guard behind it. Well short of a settle. */
+const performed = () => tick(SNAPSHOT_TIMING.afterPerformMs + 40);
 
 const tab = (): void => {
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
@@ -329,7 +331,7 @@ describe('keeping going', () => {
     expect(chip.text).toBe('Fill Title with "Dinner"');
 
     tab();
-    await settled();
+    await performed();
     // Nobody asked for this one: accepting the fill is what brought it.
     expect(chip.visible).toBe(true);
     expect(chip.text).toBe('Fill Notes with "Seven Shores"');
@@ -338,7 +340,7 @@ describe('keeping going', () => {
     expect(order.indexOf('feedback')).toBeLessThan(order.lastIndexOf('nextAction'));
 
     tab();
-    await settled();
+    await performed();
     expect(chip.text).toBe('Click "Save"');
     chip.destroy();
   });
@@ -354,7 +356,7 @@ describe('keeping going', () => {
     expect(chip.visible).toBe(true);
 
     tab();
-    await settled();
+    await performed();
     // The background offered the same fill again; it is already done here.
     expect(asks().length).toBeGreaterThan(1);
     expect(chip.visible).toBe(false);
@@ -404,6 +406,98 @@ describe('keeping going', () => {
     // The focus asked at once, but the gap since the first request is not up.
     expect(asks()).toHaveLength(1);
     await tick(SNAPSHOT_TIMING.minGapMs);
+    expect(asks()).toHaveLength(2);
+    chip.destroy();
+  });
+});
+
+describe('the fast lane after carat acts', () => {
+  it('asks inside a frame and a guard of the fill, with the chip up long before the settle', async () => {
+    document.body.innerHTML = '<main><input aria-label="Title"><input aria-label="Notes"><button>Save</button></main>';
+    layAll();
+    answerEach([
+      action({ kind: 'fill', target: 1, value: 'Dinner', label: 'Fill Title with "Dinner"' }),
+      action({ kind: 'fill', target: 2, value: 'Seven Shores', label: 'Fill Notes with "Seven Shores"' }),
+    ]);
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+
+    tab();
+    // The fill is in and reported, but the frame it lands in has not come round yet.
+    await tick(0);
+    expect(asks()).toHaveLength(1);
+
+    await performed();
+    expect(asks()).toHaveLength(2);
+    expect(chip.text).toBe('Fill Notes with "Seven Shores"');
+    // Under a fifth of what the old settle cost, and the gap is no part of it either.
+    expect(SNAPSHOT_TIMING.afterPerformMs + 40).toBeLessThan(SNAPSHOT_TIMING.settleMs);
+    chip.destroy();
+  });
+
+  it('asks once more, and only once, when the page goes on loading behind the immediate question', async () => {
+    document.body.innerHTML = '<main><input aria-label="Title"><button>Save</button></main>';
+    layAll();
+    // The click lands on a page that has nothing to offer yet; the form arrives after it.
+    answerEach([action({ kind: 'fill', target: 1, value: 'Dinner', label: 'Fill Title with "Dinner"' }), null, action({ target: 2, label: 'Click "Save"' })]);
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+
+    tab();
+    await performed();
+    expect(asks()).toHaveLength(2);
+    expect(chip.visible).toBe(false);
+    const immediate = (asks()[1] as { outline: string }).outline;
+
+    // The rest of the page arrives. The settle watcher is still behind the immediate ask.
+    const late = document.createElement('p');
+    late.textContent = 'the rest of the page arrived';
+    document.querySelector('main')!.append(late);
+    await settled();
+    expect(asks()).toHaveLength(3);
+    expect((asks()[2] as { outline: string }).outline).not.toBe(immediate);
+    expect(chip.text).toBe('Click "Save"');
+
+    // Both watchers wanted that question; only one went out, and nothing follows it.
+    await tick(SNAPSHOT_TIMING.settleMs * 4);
+    expect(asks()).toHaveLength(3);
+    chip.destroy();
+  });
+
+  it('holds the settle re-ask when the outline did not move', async () => {
+    document.body.innerHTML = '<main><input aria-label="Title"><button>Save</button></main>';
+    layAll();
+    answerEach([action({ kind: 'fill', target: 1, value: 'Dinner', label: 'Fill Title with "Dinner"' }), null]);
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+
+    tab();
+    await performed();
+    expect(asks()).toHaveLength(2);
+
+    // Nothing changed after the immediate question, so there is nothing to ask again about.
+    await tick(SNAPSHOT_TIMING.settleMs * 4);
+    expect(asks()).toHaveLength(2);
+    chip.destroy();
+  });
+
+  it('leaves the user\u2019s own click waiting out the settle', async () => {
+    document.body.innerHTML = '<main><input aria-label="Title"><button>Save</button></main>';
+    layAll();
+    answer(null);
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    // Past the gap, so the settle is the only thing left in the way.
+    await tick(SNAPSHOT_TIMING.minGapMs);
+
+    document.querySelector('button')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await tick(SNAPSHOT_TIMING.settleMs - 1);
+    expect(asks()).toHaveLength(1);
+    await tick(1);
     expect(asks()).toHaveLength(2);
     chip.destroy();
   });
@@ -629,10 +723,9 @@ describe('scroll, then scroll again', () => {
     }) as unknown as typeof safeSendMessage);
   }
 
-  /** Carat's scroll runs, the page settles, and the question after it goes out. */
+  /** Carat's scroll runs, the mark comes off, and the question goes out on it. */
   const scrolledAndSettled = async (): Promise<void> => {
-    await tick(SCROLL_MAX_MS);
-    await settled();
+    await tick(SCROLL_MAX_MS + SCROLL_SETTLE_MS);
   };
 
   afterEach(() => {
@@ -664,6 +757,28 @@ describe('scroll, then scroll again', () => {
     expect(window.scrollY).toBe(window.innerHeight * 2);
     expect(asks().length).toBeGreaterThan(2);
     expect(chip.visible).toBe(false);
+    chip.destroy();
+  });
+
+  it('waits for carat\u2019s own scrolling to stop, and asks the moment it does', async () => {
+    threeScreens();
+    answerScrolls();
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    expect(asks()).toHaveLength(1);
+
+    tab();
+    // The page is still under carat's mark; the outline it would read now is the one already asked about.
+    await tick(300);
+    expect(caratScrolling()).toBe(true);
+    expect(asks()).toHaveLength(1);
+
+    // The mark comes off and the question goes out on it, well short of the settle.
+    await tick(SCROLL_SETTLE_MS + 20);
+    expect(caratScrolling()).toBe(false);
+    expect(asks()).toHaveLength(2);
+    expect(chip.text).toBe('Scroll more');
     chip.destroy();
   });
 
@@ -763,7 +878,7 @@ describe('a context clear', () => {
     const handle = startActions(fakeCtx(), chip, document, { hub: noFrames });
     await firstAsk();
     tab();
-    await settled();
+    await performed();
     // Accepted once, so it will not be offered again.
     expect(chip.visible).toBe(false);
 

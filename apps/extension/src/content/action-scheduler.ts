@@ -6,7 +6,7 @@ import { createFrameHub } from '../frames';
 import { performInteraction, roleOf, stillFits } from '../interact';
 import type { OutlineTarget } from '../outline';
 import { assembleEvidence } from '../outline';
-import { caratScrolling, inViewport, scrollPageDown, scrollToTarget, viewportsOf } from '../scroll';
+import { caratScrollEnd, caratScrolling, inViewport, scrollPageDown, scrollToTarget, viewportsOf } from '../scroll';
 import type { ScriptContext } from './context';
 import type { PageState } from './page-state';
 import { send } from './send';
@@ -18,6 +18,12 @@ export const SNAPSHOT_TIMING = {
   mutationQuietMs: 400,
   /** How long after carat acted, or after the user did, the page counts as settled. */
   settleMs: 500,
+  /**
+   * After carat performed an action the question does not wait for the page
+   * to settle: it goes out on the next frame, and this is the guard behind
+   * that frame for the paint the change lands in.
+   */
+  afterPerformMs: 60,
   /** No two requests closer together than this, whatever asked for them. */
   minGapMs: 500,
   /** The same outline, with nothing new in the timeline, is not asked about again inside this window. */
@@ -31,11 +37,12 @@ export const SNAPSHOT_TIMING = {
 } as const;
 
 /**
- * Why a request is going out. They differ in what may stop them: `quiet`
- * needs the outline to have changed, `force` skips every gate, `retry`
- * follows an Esc, and the rest go through the memo.
+ * Why a request is going out. They differ in what may stop them: `quiet` and
+ * `settled` need the outline to have changed, `force` skips every gate,
+ * `performed` skips the memo and the gap both, `retry` follows an Esc, and
+ * the rest go through the memo.
  */
-type Trigger = 'first' | 'quiet' | 'evidence' | 'focus' | 'performed' | 'user' | 'retry' | 'lost' | 'force';
+type Trigger = 'first' | 'quiet' | 'evidence' | 'focus' | 'performed' | 'settled' | 'user' | 'retry' | 'lost' | 'force';
 
 export interface ActionsHandle {
   /** The page's own text changed; ask again unless a chip is already up. */
@@ -141,7 +148,8 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
 
   const afterUser = settleTimer(SNAPSHOT_TIMING.settleMs, () => ask('user'));
   const afterCapture = settleTimer(SNAPSHOT_TIMING.mutationQuietMs, () => ask('evidence'));
-  const afterPerform = settleTimer(SNAPSHOT_TIMING.settleMs, () => ask('performed'));
+  // Behind the fast lane, not in front of it: the page that keeps loading after a click.
+  const afterPerform = settleTimer(SNAPSHOT_TIMING.settleMs, () => ask('settled'));
   const afterMutation = settleTimer(SNAPSHOT_TIMING.mutationQuietMs, () => ask('quiet'));
 
   /** A request the model may still improve on has closed; the chip is final. */
@@ -165,13 +173,16 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     if (awaitingUser && trigger !== 'force' && trigger !== 'user' && trigger !== 'focus' && trigger !== 'retry') return;
     const force = nextTrigger === 'force' || trigger === 'force';
     nextTrigger = force ? 'force' : trigger;
-    // The shortcut waits for nothing, not even the gap a queued trigger is sitting out.
-    if (force && gapTimer !== null) {
+    // The shortcut waits for nothing, and neither does the question after
+    // carat acted: repeated Tab is the whole point of that one, so the gap
+    // the other triggers sit out does not apply to it.
+    const immediate = nextTrigger === 'force' || nextTrigger === 'performed';
+    if (immediate && gapTimer !== null) {
       clearTimeout(gapTimer);
       gapTimer = null;
     }
     if (gapTimer !== null || inFlight) return;
-    const wait = force ? 0 : SNAPSHOT_TIMING.minGapMs - (Date.now() - lastSentAt);
+    const wait = immediate ? 0 : SNAPSHOT_TIMING.minGapMs - (Date.now() - lastSentAt);
     if (wait > 0) {
       gapTimer = ctx.setTimeout(() => {
         gapTimer = null;
@@ -220,9 +231,11 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
       // Two questions the memo must not answer: a lost ticket, whose whole
       // point is that the last answer never arrived, and the one after carat
       // acted, which the timeline has a new line for whatever the outline did.
+      // The settle behind that one is not the same question: it is only worth
+      // asking if the page moved after the immediate one went out.
       if (!force && trigger !== 'lost' && trigger !== 'performed') {
         // A page that settled without changing has nothing new to say.
-        if (trigger === 'quiet' && !fresh) return;
+        if ((trigger === 'quiet' || trigger === 'settled') && !fresh) return;
         if (!fresh && events === lastEvents && now - lastAt < SNAPSHOT_TIMING.identicalMs) return;
       }
       lastHash = hash;
@@ -373,8 +386,36 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
       performing = false;
     }
     userActed();
-    // Whatever just happened is the newest thing in the timeline; ask once the page has taken it in.
+    // Whatever just happened is the newest thing in the timeline. Ask as soon
+    // as the DOM carries it, and leave the settle watcher behind that for a
+    // page that goes on loading once the immediate question has gone out.
+    askPerformed();
     afterPerform.soon();
+  }
+
+  /**
+   * The fast lane. The page has what carat just did by the next frame, so the
+   * question goes out then, with the short guard behind it for the paint. A
+   * scroll is the exception: the page is still moving under carat's own
+   * scroll, and the outline read before it stops is the one already asked
+   * about, so that one waits for the mark to come off instead.
+   */
+  function askPerformed(): void {
+    const g = gen;
+    const go = (): void => {
+      if (ctx.isValid && g === gen) ask('performed');
+    };
+    if (caratScrolling()) {
+      void caratScrollEnd().then(go);
+      return;
+    }
+    onFrame(() => ctx.setTimeout(go, SNAPSHOT_TIMING.afterPerformMs));
+  }
+
+  /** The next frame, or the next task where there are no frames to wait for. */
+  function onFrame(fn: () => void): void {
+    if (typeof win.requestAnimationFrame === 'function') win.requestAnimationFrame(() => fn());
+    else ctx.setTimeout(fn, 0);
   }
 
   /**
