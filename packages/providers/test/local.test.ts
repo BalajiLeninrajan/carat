@@ -225,6 +225,47 @@ describe('LocalProvider interactions', () => {
   });
 });
 
+describe('LocalProvider page query links', () => {
+  const serp = () => fixture('serp-doordash-link').request;
+
+  it('offers the first result the page query names, with no context and nothing filled', async () => {
+    expect(await local.suggest(serp(), { signal })).toEqual([
+      {
+        kind: 'interact',
+        elementId: 'e1',
+        verb: 'click',
+        value: 'Order Now | Quick and Easy Food Delivery',
+        confidence: 0.8,
+        reason: expect.stringContaining('"doordash"'),
+        sourceContextId: 'page',
+      },
+    ]);
+    // The same at every level: the query is on the page, so there is nothing to be unsure about.
+    for (const level of EAGERNESS_LEVELS) expect((await at(level).suggest(serp(), { signal })).map((s) => s.confidence)).toEqual([0.8]);
+  });
+
+  it('reads the query off a filled search field when the page carries none', async () => {
+    const req = serp();
+    const { query: _q, ...page } = req.page;
+    const out = await local.suggest({ ...req, page }, { signal });
+    expect(out.map((s) => s.kind === 'interact' && s.elementId)).toEqual(['e1']);
+  });
+
+  it('offers nothing for a query no link answers, for a link with no destination, or with no query at all', async () => {
+    const req = serp();
+    const { query: _q, ...page } = req.page;
+    expect(await local.suggest(fixture('neg-serp-weather').request, { signal })).toEqual([]);
+    expect(await local.suggest({ ...req, elements: req.elements!.map(({ h: _h, ...e }) => e) }, { signal })).toEqual([]);
+    expect(await local.suggest({ ...req, page, fields: [{ i: 'f0', t: 'input:text', al: 'Add title', v: 'doordash' }] }, { signal })).toEqual([]);
+  });
+
+  it('never follows a short link named like an action, even when the query names it', async () => {
+    const req = serp();
+    const elements = [req.elements![0]!, { i: 'e1', r: 'link' as const, nm: 'Unsubscribe', h: 'doordash.com' }];
+    expect(await local.suggest({ ...req, elements }, { signal })).toEqual([]);
+  });
+});
+
 describe('affirms and amountFor', () => {
   it('matches whole words without negation nearby', () => {
     expect(affirms("I'm a vegetarian", 'Vegetarian')).toBe(true);

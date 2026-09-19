@@ -154,6 +154,29 @@ describe('buildJevRequest', () => {
     expect(Object.keys(vegetarian.questions)).toEqual(['interact']);
     expect(vegetarian.interactOptions.map((o) => [o.key, o.verb, o.sourceContextId])).toEqual([['e0', 'check', 'c1']]);
   });
+
+  it('asks about a real link only while the page has a query it relates to, and tells Jev the destination site', () => {
+    const serp: SuggestRequest = {
+      page: { host: 'www.google.com', title: 'food delivery near me - Google Search', path: '/search', query: 'food delivery near me' },
+      fields: [],
+      elements: [
+        { i: 'e0', r: 'button', nm: 'Search', p: 1 },
+        { i: 'e1', r: 'link', nm: 'Order Now | Quick and Easy Food Delivery', h: 'doordash.com' },
+        { i: 'e2', r: 'link', nm: 'Waterloo weather', h: 'weathernetwork.com' },
+        { i: 'e3', r: 'link', nm: 'Sign out' },
+      ],
+      context: [],
+      now: calendar.now,
+    };
+    const b = buildJevRequest(serp, [])!;
+    expect(b.interactOptions.map((o) => [o.key, o.verb, o.sourceContextId])).toEqual([['e1', 'click', 'page']]);
+    expect((b.questions.interact!.criteria as Record<string, unknown>).e1).toMatchObject({ action: 'click "Order Now | Quick and Easy Food Delivery"', site: 'doordash.com' });
+
+    // No query on the page: a real link is no one's to follow, however much carat filled. The Search button still is.
+    const { query: _q, ...page } = serp.page;
+    expect(buildJevRequest({ ...serp, page }, [])).toBeNull();
+    expect(buildJevRequest({ ...serp, page, filled: ['c1'] }, [])!.interactOptions.map((o) => o.key)).toEqual(['e0']);
+  });
 });
 
 describe('JevProvider', () => {

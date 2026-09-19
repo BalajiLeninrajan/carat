@@ -3,7 +3,7 @@ import { DEFAULT_EAGERNESS, EAGERNESS, isIntentDestination } from '@carat/shared
 import type { Provider, SuggestOptions } from './provider';
 import { sameSite } from './same-site';
 import { classifyField, type FieldKind } from './local/fields';
-import { interactions } from './local/interact';
+import { interactions, linkForQuery } from './local/interact';
 import { candidatesFrom, type Candidate } from './local/candidates';
 import { extractAddress, extractEmailRequest, extractPlan, extractWhen } from './local/extract';
 
@@ -20,9 +20,10 @@ const SCORE = { address: 4, exact: 3, event: 2, titleCase: 1, name: 0.5 } as con
 
 /**
  * Regex fallback: no network, one field per kind, one action per intent,
- * narrow interactions. At `eager` it also offers bare capitalised names and
- * lowercase quoted strings for search and title fields, at a confidence
- * that says so, and reads other tabs on the page's own site.
+ * narrow interactions, and the search result the page's own query names. At
+ * `eager` it also offers bare capitalised names and lowercase quoted strings
+ * for search and title fields, at a confidence that says so, and reads other
+ * tabs on the page's own site.
  */
 export class LocalProvider implements Provider {
   readonly id = 'local' as const;
@@ -39,6 +40,7 @@ export class LocalProvider implements Provider {
         filled: req.filled ?? [],
         gate: { eagerness: this.eagerness, flow: req.flow === true, fillable: req.fields.some((f) => !f.v) },
       }),
+      ...linkForQuery(req.page, req.fields, req.elements ?? []),
       ...actions(req.own ?? [], req.page, req.now),
     ];
   }

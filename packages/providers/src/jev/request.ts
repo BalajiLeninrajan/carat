@@ -1,5 +1,15 @@
-import type { ClickGate, Eagerness, ElementDescriptor, FieldDescriptor, InteractVerb, SuggestRequest } from '@carat/shared';
-import { DEFAULT_EAGERNESS, EAGERNESS, clickAllowed, isDestructiveName, isPrimaryActionName } from '@carat/shared';
+import type { ClickGate, Eagerness, ElementDescriptor, FieldDescriptor, InteractVerb, PageIntent, SuggestRequest } from '@carat/shared';
+import {
+  DEFAULT_EAGERNESS,
+  EAGERNESS,
+  PAGE_SOURCE,
+  clickAllowed,
+  isDestructiveElement,
+  isPrimaryActionName,
+  isSiteLink,
+  linkRelatesToQuery,
+  pageIntent,
+} from '@carat/shared';
 import { isNeverFill } from '../local/fields';
 import { CANDIDATE_LABEL, extractCandidates, type Candidate } from '../local/candidates';
 import { mentions } from '../local/interact';
@@ -69,7 +79,8 @@ const UNSURE_RULE: Record<Eagerness, string> = {
 export const fillRules = (eagerness: Eagerness): string[] => [...RULES_HEAD, UNSURE_RULE[eagerness]];
 
 const INTERACT_RULES = [
-  'A button or link is pressed only to commit fields carat itself just filled on this page (`filled` names their sources), or when it is the page\'s primary action with a continue-style name (Search, Continue, Next) and the option says so. Save, Create, Done and Apply are typical. A button that does anything else is `none`.',
+  'A button is pressed only to commit fields carat itself just filled on this page (`filled` names their sources), or when it is the page\'s primary action with a continue-style name (Search, Continue, Next) and the option says so. Save, Create, Done and Apply are typical. A button that does anything else is `none`.',
+  'A real link (it has a `site`) is followed only when `page.query` says what the user searched for and the link is the result that answers it, judged by its site and its title. Pick the first such result. Any other link is `none`.',
   'A checkbox, switch or radio is changed only when a sentence in `context` states the user\'s own preference or fact in those words ("I\'m a vegetarian"), not negated and not about someone else.',
   'Never anything that sends, pays, orders, deletes or signs out. Nothing is chained: one control, pressed once.',
   'When unsure, pick `none`. No chip beats a wrong click.',
@@ -90,7 +101,7 @@ export function buildJevRequest(req: SuggestRequest, context: Ctx[], eagerness: 
           .slice(0, MAX_OPTIONS)
           .map((candidate, i) => ({ key: `k${i}`, candidate, source: byId.get(candidate.sourceContextId)! }));
   const gate: ClickGate = { filled: (req.filled?.length ?? 0) > 0, flow: req.flow === true, eagerness, fillable: askedFields.length > 0 };
-  const interactOptions = interactionOptions(req.elements ?? [], context, req.filled ?? [], gate);
+  const interactOptions = interactionOptions(req.elements ?? [], context, req.filled ?? [], gate, pageIntent(req.page, req.fields));
   if (options.length === 0 && interactOptions.length === 0) return null;
 
   const state: Record<string, unknown> = {
@@ -168,18 +179,23 @@ export function buildJevRequest(req: SuggestRequest, context: Ctx[], eagerness: 
 }
 
 /**
- * Elements Jev may be asked about: a button or link after carat filled
- * something (it cites the fill's source), or the primary action when the
- * click gate lets it through without one (it cites the newest context item);
- * a toggle only when a context item names it (it cites that item).
- * Destructive names never appear, nor do money controls: Jev is not asked
- * about paying. Whether the sentence affirms or negates the toggle is Jev's call.
+ * Elements Jev may be asked about: a button (or an anchor acting as one)
+ * after carat filled something (it cites the fill's source), or the primary
+ * action when the click gate lets it through without one (it cites the newest
+ * context item); a real link only while the page has a query the link has
+ * something to do with (it cites the page); a toggle only when a context item
+ * names it (it cites that item). Destructive names never appear, nor do money
+ * controls: Jev is not asked about paying. Whether the sentence affirms or
+ * negates the toggle is Jev's call.
  */
-function interactionOptions(elements: ElementDescriptor[], context: Ctx[], filled: string[], gate: ClickGate): JevInteractOption[] {
+function interactionOptions(elements: ElementDescriptor[], context: Ctx[], filled: string[], gate: ClickGate, intent: PageIntent | null): JevInteractOption[] {
   const out: JevInteractOption[] = [];
   for (const element of elements) {
-    if (isDestructiveName(element.nm) || element.m === 1) continue;
-    if (element.r === 'button' || element.r === 'link') {
+    if (isDestructiveElement(element) || element.m === 1) continue;
+    if (isSiteLink(element)) {
+      if (!intent || !linkRelatesToQuery(element, intent)) continue;
+      out.push({ key: element.i, element, verb: 'click', sourceContextId: PAGE_SOURCE, reason: `the page's own query is "${intent.query}"` });
+    } else if (element.r === 'button' || element.r === 'link') {
       const source = filled[0];
       if (source !== undefined) {
         out.push({ key: element.i, element, verb: 'click', sourceContextId: source, reason: 'carat just filled fields on this page' });
@@ -218,6 +234,7 @@ function describeElement(e: ElementDescriptor): Record<string, unknown> {
     name: e.nm,
     ...(e.st ? { state: e.st } : {}),
     ...(e.nb ? { nearby_text: e.nb } : {}),
+    ...(e.h ? { site: e.h } : {}),
     ...(e.p ? { primary: true } : {}),
   };
 }

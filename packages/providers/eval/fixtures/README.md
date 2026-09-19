@@ -1,6 +1,6 @@
 Each fixture is `{ name, request: SuggestRequest, expect: Expectation[] }`. A fill expectation is `{ fieldId, valueIncludes }`; an action expectation is `{ intent, valueIncludes, whenStartsWith? }`; an interaction expectation is `{ elementId, verb, valueIncludes }`. An empty `expect` means the provider must return nothing.
 
-`request.context` holds text from other tabs and is the only source for fills and interactions. `request.own` holds text from the requesting tab and is the only source for actions. `request.elements` lists the page's interactive controls; `request.filled` lists the context ids behind fields carat itself just filled, which is the only thing that justifies clicking a Save-like button.
+`request.context` holds text from other tabs and is the only source for fills and interactions. `request.own` holds text from the requesting tab and is the only source for actions. `request.elements` lists the page's interactive controls; `request.filled` lists the context ids behind fields carat itself just filled, which is the only thing that justifies clicking a Save-like button. `page.query` is what the user searched for on the page; it is the only thing that justifies following a real link (an element with `r: "link"` and a destination site `h`), and such a suggestion cites `"page"` as its source.
 
 Two optional keys make a fixture depend on the eagerness level the eval runs at (`--eagerness`, default `eager`):
 
