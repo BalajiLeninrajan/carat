@@ -31,9 +31,10 @@ export const SNAPSHOT_TIMING = {
   /**
    * Esc means "not that". The question goes back out after the first wait
    * with the dismissal in the timeline, then after the second if that answer
-   * is refused too, and then carat waits for the user.
+   * is refused too, and from the third on at the last wait, for as long as
+   * the page is open; the model is never left with nothing to try.
    */
-  escRetryMs: [3000, 6000],
+  escRetryMs: [3000, 6000, 10_000],
 } as const;
 
 /**
@@ -346,15 +347,14 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
 
   /**
    * Ask again, once the dismissal has reached the timeline, so the model
-   * reads it and picks something else. The second refusal buys a longer wait
-   * and the third ends it: after that the user has to move.
+   * reads it and picks something else. Each refusal buys a longer wait up to
+   * the last one, which then repeats: carat keeps trying, just not eagerly.
    */
   function retryAfterDismissal(): void {
     cancelRetry();
     const waits = SNAPSHOT_TIMING.escRetryMs;
-    const wait = escapes < waits.length ? waits[escapes] : null;
+    const wait = waits[Math.min(escapes, waits.length - 1)]!;
     escapes++;
-    if (wait === null) return;
     retryTimer = ctx.setTimeout(() => {
       retryTimer = null;
       void reported.then(() => ask('retry'));

@@ -507,7 +507,7 @@ describe('Esc means "not that"', () => {
   const esc = (): void => {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
   };
-  const [FIRST_WAIT, SECOND_WAIT] = SNAPSHOT_TIMING.escRetryMs;
+  const [FIRST_WAIT, SECOND_WAIT, LAST_WAIT] = SNAPSHOT_TIMING.escRetryMs;
 
   it('asks again after the first wait, with the dismissal already reported', async () => {
     document.body.innerHTML = '<main><input aria-label="Title"><button>Save</button></main>';
@@ -532,13 +532,14 @@ describe('Esc means "not that"', () => {
     chip.destroy();
   });
 
-  it('backs off to the second wait, and then stops until the user moves', async () => {
-    document.body.innerHTML = '<main><input aria-label="Title"><input aria-label="Notes"><button>Save</button></main>';
+  it('backs off to the second wait, then keeps asking at the last wait', async () => {
+    document.body.innerHTML = '<main><input aria-label="Title"><input aria-label="Notes"><input aria-label="Where"><button>Save</button></main>';
     layAll();
     answerEach([
-      action({ target: 3, label: 'Click "Save"' }),
+      action({ target: 4, label: 'Click "Save"' }),
       action({ kind: 'fill', target: 1, value: 'Dinner', label: 'Fill Title with "Dinner"' }),
       action({ kind: 'fill', target: 2, value: 'Seven Shores', label: 'Fill Notes with "Seven Shores"' }),
+      action({ kind: 'fill', target: 3, value: 'Waterloo', label: 'Fill Where with "Waterloo"' }),
     ]);
     const chip = createChip(document);
     startActions(fakeCtx(), chip, document, { hub: noFrames });
@@ -555,15 +556,15 @@ describe('Esc means "not that"', () => {
     await tick(SECOND_WAIT - FIRST_WAIT);
     expect(asks()).toHaveLength(3);
 
-    // The third ends it: no timer at all now.
+    // The third buys the last wait, and so does every refusal after it: carat never goes quiet on its own.
     esc();
-    await tick(SECOND_WAIT * 3);
+    await tick(LAST_WAIT - 1);
     expect(asks()).toHaveLength(3);
-
-    // Until the user does something of their own.
-    document.querySelector('button')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await settled();
+    await tick(1);
     expect(asks()).toHaveLength(4);
+    esc();
+    await tick(LAST_WAIT);
+    expect(asks()).toHaveLength(5);
     chip.destroy();
   });
 
