@@ -3,14 +3,14 @@ import { DEFAULT_SETTINGS } from '@carat/shared';
 import type { StorageArea } from './storage-area';
 
 const KEY = 'settings';
-const PROVIDERS: ReadonlySet<Settings['provider']> = new Set(['openai', 'baseten', 'local']);
+const PROVIDERS: ReadonlySet<Settings['provider']> = new Set(['openai', 'baseten', 'local', 'cloudflare']);
 
 export interface SettingsStore {
   get(): Promise<Settings>;
   set(patch: Partial<Settings>): Promise<Settings>;
 }
 
-/** Settings live in chrome.storage.local; the key never leaves the background context. */
+/** Settings live in chrome.storage.local; the keys never leave the background context. */
 export function createSettingsStore(area: Pick<StorageArea, 'get' | 'set'>): SettingsStore {
   return {
     async get() {
@@ -38,9 +38,23 @@ function sanitize(raw: unknown): Settings {
     baseURL: str(r.baseURL, DEFAULT_SETTINGS.baseURL).trim().replace(/\/+$/, '') || DEFAULT_SETTINGS.baseURL,
     apiKey: str(r.apiKey, DEFAULT_SETTINGS.apiKey).trim(),
     model: str(r.model, DEFAULT_SETTINGS.model).trim() || DEFAULT_SETTINGS.model,
+    cfAccountId: str(r.cfAccountId, DEFAULT_SETTINGS.cfAccountId).trim(),
+    cfApiToken: str(r.cfApiToken, DEFAULT_SETTINGS.cfApiToken).trim(),
     disabledHosts: hosts(r.disabledHosts),
     statusLine: typeof r.statusLine === 'boolean' ? r.statusLine : DEFAULT_SETTINGS.statusLine,
+    screenshots: typeof r.screenshots === 'boolean' ? r.screenshots : DEFAULT_SETTINGS.screenshots,
+    smartModel: str(r.smartModel, '').trim() || legacySmartModel(r.visionModel),
   };
+}
+
+// `visionModel` is the name this setting had before, and every save wrote its
+// default back, so a stored 'gpt-5.6' says nothing about what the user wanted.
+// Anything else was typed in and carries over the first time it is read.
+const OLD_SMART_DEFAULT = 'gpt-5.6';
+
+function legacySmartModel(v: unknown): string {
+  const model = typeof v === 'string' ? v.trim() : '';
+  return model === OLD_SMART_DEFAULT ? '' : model;
 }
 
 const MAX_DISABLED_HOSTS = 200;

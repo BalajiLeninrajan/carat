@@ -1,6 +1,6 @@
 import type { TabDiag } from '@/src/background/diag';
 import { relativeAge } from '@/src/format/age';
-import { describeCapture, describeSuggest } from '@/src/format/diag';
+import { describeCapture, describeSuggest, describeVision } from '@/src/format/diag';
 import { sendMessage, type KnownItem } from '@/src/messaging';
 import { isSiteOff, siteHost, withSite } from '@/src/store/sites';
 
@@ -16,6 +16,7 @@ const siteHostLabel = document.getElementById('site-host') as HTMLElement;
 
 const diagCapture = document.getElementById('diag-capture') as HTMLElement;
 const diagSuggest = document.getElementById('diag-suggest') as HTMLElement;
+const diagVision = document.getElementById('diag-vision') as HTMLElement;
 
 // The host of the tab the popup was opened over; undefined on chrome:// and friends.
 let activeHost: string | undefined;
@@ -48,6 +49,9 @@ function renderDiag(diag: TabDiag | null): void {
   const now = Date.now();
   diagCapture.textContent = diag?.capture ? describeCapture(diag.capture, now) : 'no capture from this tab yet';
   diagSuggest.textContent = diag?.suggest ? describeSuggest(diag.suggest, now) : 'no check on this tab yet';
+  // Only says anything once a screenshot cue has come from this tab; most tabs never send one.
+  diagVision.hidden = !diag?.vision;
+  diagVision.textContent = diag?.vision ? describeVision(diag.vision, now) : '';
 }
 
 function renderSite(settings: { disabledHosts?: string[] }): void {

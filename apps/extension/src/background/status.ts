@@ -28,13 +28,16 @@ export function describeStatus(settings: Settings, url: string | undefined): Sta
         : isSiteOff(settings, host)
           ? 'site-off'
           : undefined;
-  // The same rule createProvider applies: no key means the regex provider answers, whatever the setting says.
-  const local = settings.provider === 'local' || settings.apiKey === '';
-  return {
+  const base: Omit<StatusInfo, 'provider' | 'model'> = {
     show: settings.statusLine,
     running: reason === undefined,
     ...(reason ? { reason } : {}),
-    provider: local ? 'local' : settings.provider,
-    model: local ? 'local' : settings.model,
   };
+  // The same rules createProvider applies. Cloudflare with an account id and token asks Jev first,
+  // then the chat model when a key is set too; without those credentials it behaves like openai.
+  const jev = settings.provider === 'cloudflare' && settings.cfAccountId !== '' && settings.cfApiToken !== '';
+  if (jev) return { ...base, provider: 'cloudflare', model: settings.apiKey === '' ? 'jev' : `jev+${settings.model}` };
+  // No key means the regex provider answers, whatever the setting says.
+  const local = settings.provider === 'local' || settings.apiKey === '';
+  return { ...base, provider: local ? 'local' : settings.provider, model: local ? 'local' : settings.model };
 }

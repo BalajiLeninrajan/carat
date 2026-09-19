@@ -1,11 +1,14 @@
+/** `vision` is text a model read off a screenshot of the tab; it is stored and scored like `page`. */
+export type ContextKind = 'page' | 'selection' | 'vision';
+
 export interface ContextItem {
   id: string;
   tabId: number;
   origin: string;
   path: string; // no query, no hash
   title: string; // <= 80 chars
-  kind: 'page' | 'selection';
-  text: string; // page <= 4000 chars, selection <= 1000
+  kind: ContextKind;
+  text: string; // page and vision <= 4000 chars, selection <= 1000
   hash: number; // FNV-1a of normalized text
   capturedAt: number;
   lastSeenAt: number;
@@ -158,12 +161,41 @@ export interface NavSuggestion {
 
 export interface Settings {
   enabled: boolean;
-  provider: 'openai' | 'baseten' | 'local';
+  provider: 'openai' | 'baseten' | 'local' | 'cloudflare';
   baseURL: string; // default https://api.openai.com/v1
   apiKey: string; // may be ''
   model: string; // default gpt-5.6-luna
+  cfAccountId: string; // Cloudflare account id for Workers AI; may be ''
+  cfApiToken: string; // Workers AI token; stays in chrome.storage.local like apiKey
   disabledHosts: string[]; // exact hosts (with port) where carat neither reads nor suggests
   statusLine: boolean; // small bottom-right line on every page: running or not, and which model
+  /** Opt-in: screenshot thin source tabs and run the slower smart path. Default off. */
+  screenshots: boolean;
+  /**
+   * Optional override for the smart path: a text-only second opinion after the
+   * fast answer, and the reader of screenshots at capture time. Blank means the
+   * fast model itself, run with low reasoning instead of none. Whatever it is
+   * must accept images.
+   */
+  smartModel: string;
+}
+
+/**
+ * Why a tab was worth a picture. `thin-text`: little visible body text, so the
+ * picture mostly stands in for text and a small rendering reads fine.
+ * `image-heavy`: the text was there but an image or canvas filled the view, so
+ * the interesting part is inside that image and needs the full rendering.
+ */
+export type ImageCue = 'thin-text' | 'image-heavy';
+
+/** A downscaled screenshot handed to the smart model, plus where, when and why it was taken. */
+export interface ImageInput {
+  dataUrl: string; // data:image/jpeg;base64,...
+  title: string;
+  host: string;
+  /** Time of the capture, ISO 8601 with offset; relative dates in the picture are resolved against it. */
+  now: string;
+  cue: ImageCue;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -172,8 +204,12 @@ export const DEFAULT_SETTINGS: Settings = {
   baseURL: 'https://api.openai.com/v1',
   apiKey: '',
   model: 'gpt-5.6-luna',
+  cfAccountId: '',
+  cfApiToken: '',
   disabledHosts: [],
   statusLine: false,
+  screenshots: false,
+  smartModel: '',
 };
 
 export const LIMITS = {
@@ -184,4 +220,11 @@ export const LIMITS = {
   maxSuggestions: 2,
   maxNavigations: 2,
   providerTimeoutMs: 6000,
+  /** Body text under this many chars marks a source tab as thin enough to screenshot. */
+  thinTextChars: 400,
+  /** Whole smart path: waiting for a transcription plus the smart suggest call. */
+  smartTimeoutMs: 15000,
+  transcribeTimeoutMs: 20000,
+  /** A fast answer at or above this confidence is not worth a smart call. */
+  smartBelowConfidence: 0.9,
 } as const;

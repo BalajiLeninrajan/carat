@@ -1,11 +1,13 @@
 import { defineBackground } from 'wxt/utils/define-background';
 import { isDenylisted } from '@carat/shared';
 import { onMessage, sendMessage } from '../src/messaging';
-import { ContextStore, createSettingsStore, isSiteOff, parseLocation } from '../src/store';
+import { ContextStore, ShotStore, createSettingsStore, isSiteOff, parseLocation } from '../src/store';
 import {
   DiagLog,
+  RefineQueue,
   chromeTabsApi,
   clearKnown,
+  createVisionPipeline,
   describeStatus,
   getKnown,
   handleFeedback,
@@ -17,7 +19,7 @@ import {
   requesterFromSender,
   setPinned,
 } from '../src/background';
-import type { CaptureVerdict } from '../src/background';
+import type { CaptureVerdict, ScreenApi } from '../src/background';
 
 const SWEEP_ALARM = 'carat-sweep';
 const SUGGEST_COMMAND = 'carat-suggest';
@@ -25,11 +27,20 @@ const SUGGEST_COMMAND = 'carat-suggest';
 export default defineBackground(() => {
   // Constructed eagerly, loaded lazily: the first store call after a wake reads storage.session back.
   const store = new ContextStore(chrome.storage.session);
+  const shots = new ShotStore(chrome.storage.session);
   const diag = new DiagLog(chrome.storage.session);
   const settings = createSettingsStore(chrome.storage.local);
   const extensionBase = chrome.runtime.getURL('');
   const trusted = (sender: chrome.runtime.MessageSender) => isExtensionPage(sender, extensionBase);
   const tabs = chromeTabsApi();
+  const refine = new RefineQueue();
+  const vision = createVisionPipeline({
+    store,
+    shots,
+    settings: () => settings.get(),
+    tabs: screenApi(),
+    onDiag: (tabId, d) => void diag.recordVision(tabId, d),
+  });
 
   onMessage('capture', async ({ data, sender }) => {
     const tabId = sender.tab?.id;
@@ -50,6 +61,12 @@ export default defineBackground(() => {
     return note(item ? 'stored' : 'empty');
   });
 
+  // Fire and forget from the content script's side; a picture or a model call must never hold a message port.
+  onMessage('vision', ({ data, sender }) => {
+    const tabId = sender.tab?.id;
+    if (tabId !== undefined) void vision.handle(data, tabId).catch(() => undefined);
+  });
+
   onMessage('suggestRequest', async ({ data, sender }) => {
     const tabId = sender.tab?.id;
     try {
@@ -57,10 +74,20 @@ export default defineBackground(() => {
         store,
         settings: () => settings.get(),
         tabs: openTabs,
+        refine,
+        vision,
         ...(tabId !== undefined ? { onDiag: (d) => void diag.recordSuggest(tabId, d) } : {}),
       });
     } catch {
       return { suggestions: [], navigation: [], interactions: [] };
+    }
+  });
+
+  onMessage('suggestRefine', async ({ data, sender }) => {
+    try {
+      return await refine.claim(data.ticket, sender.tab?.id);
+    } catch {
+      return { suggestions: [], interactions: [] };
     }
   });
 
@@ -81,7 +108,10 @@ export default defineBackground(() => {
 
   // The key and the cross-tab context stay with the extension's own pages; a content script gets a redacted view.
   onMessage('getKnown', ({ sender }) => (trusted(sender) ? getKnown(store) : { items: [], pinned: false }));
-  onMessage('clearKnown', ({ sender }) => (trusted(sender) ? clearKnown(store) : undefined));
+  onMessage('clearKnown', async ({ sender }) => {
+    if (!trusted(sender)) return;
+    await Promise.all([clearKnown(store), shots.clear()]);
+  });
   onMessage('setPinned', async ({ data, sender }) =>
     trusted(sender) ? setPinned(store, data.pinned) : { pinned: await store.isPinned() },
   );
@@ -96,7 +126,9 @@ export default defineBackground(() => {
   });
   onMessage('setSettings', async ({ data, sender }) => {
     if (!trusted(sender)) return redactSettings(await settings.get());
-    return settings.set(data);
+    const next = await settings.set(data);
+    if (!next.screenshots) await shots.clear();
+    return next;
   });
 
   // The shortcut asks the focused tab's content script to snapshot again, past
@@ -106,8 +138,26 @@ export default defineBackground(() => {
     sendMessage('forceSuggest', undefined, tab.id).catch(() => undefined);
   });
 
-  void chrome.alarms.create(SWEEP_ALARM, { periodInMinutes: 5 });
+  // Every minute rather than five: a screenshot must not outlive its three-minute TTL by much.
+  void chrome.alarms.create(SWEEP_ALARM, { periodInMinutes: 1 });
   chrome.alarms.onAlarm.addListener((alarm) => {
-    if (alarm.name === SWEEP_ALARM) void store.sweep();
+    if (alarm.name !== SWEEP_ALARM) return;
+    void store.sweep();
+    void shots.sweep();
   });
 });
+
+function screenApi(): ScreenApi {
+  return {
+    async get(tabId) {
+      try {
+        const tab = await chrome.tabs.get(tabId);
+        return { active: tab.active, windowId: tab.windowId };
+      } catch {
+        return undefined;
+      }
+    },
+    // <all_urls> in host_permissions is what lets this run without activeTab.
+    captureVisible: (windowId) => chrome.tabs.captureVisibleTab(windowId, { format: 'jpeg', quality: 70 }),
+  };
+}

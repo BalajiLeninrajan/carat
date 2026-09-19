@@ -7,9 +7,13 @@ export interface SettingsFormValues {
   apiKey: string;
   model: string;
   statusLine: boolean;
+  cfAccountId: string;
+  cfApiToken: string;
+  smartModel: string;
+  screenshots: boolean;
 }
 
-const PROVIDERS: ReadonlySet<Settings['provider']> = new Set(['openai', 'baseten', 'local']);
+const PROVIDERS: ReadonlySet<Settings['provider']> = new Set(['openai', 'baseten', 'local', 'cloudflare']);
 
 // Blank URL/model fall back to the documented defaults so a cleared field can
 // never produce a request to "/chat/completions" or a request with model "".
@@ -17,6 +21,7 @@ const PROVIDERS: ReadonlySet<Settings['provider']> = new Set(['openai', 'baseten
 export function normalizeSettings(v: SettingsFormValues): Partial<Settings> {
   const baseURL = v.baseURL.trim().replace(/\/+$/, '');
   const model = v.model.trim();
+  const smartModel = v.smartModel.trim();
   return {
     enabled: v.enabled,
     provider: PROVIDERS.has(v.provider as Settings['provider'])
@@ -26,5 +31,9 @@ export function normalizeSettings(v: SettingsFormValues): Partial<Settings> {
     apiKey: v.apiKey.trim(),
     model: model === '' ? DEFAULT_SETTINGS.model : model,
     statusLine: v.statusLine,
+    cfAccountId: v.cfAccountId.trim(),
+    cfApiToken: v.cfApiToken.trim(),
+    smartModel, // blank is a setting of its own: the fast model with low reasoning
+    screenshots: v.screenshots,
   };
 }

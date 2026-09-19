@@ -93,24 +93,29 @@ export class ContextStore {
     return this.upsert('selection', input);
   }
 
+  /** Text a model read off a screenshot of the tab; one per tab, capped like a page. */
+  upsertVision(input: CaptureInput): Promise<ContextItem | undefined> {
+    return this.upsert('vision', input);
+  }
+
   private async upsert(kind: ContextItem['kind'], input: CaptureInput): Promise<ContextItem | undefined> {
     await this.load();
     if (this.state.pinned) return undefined;
     const now = this.at();
     const location = parseLocation(input.url);
     if (!location) return undefined;
-    const max = kind === 'page' ? LIMITS.pageTextChars : LIMITS.selectionTextChars;
+    const max = kind === 'selection' ? LIMITS.selectionTextChars : LIMITS.pageTextChars;
     const text = truncate(normalizeWhitespace(input.text), max);
     if (!text) return undefined;
     const hash = hashText(text);
     const title = truncate(normalizeWhitespace(input.title), LIMITS.titleChars);
 
     const ctx = this.state.ctx;
-    // One page item per tab; selections dedupe on identical text from the same tab.
+    // One page and one vision item per tab; selections dedupe on identical text from the same tab.
     const existing =
-      kind === 'page'
-        ? ctx.find((i) => i.kind === 'page' && i.tabId === input.tabId)
-        : ctx.find((i) => i.kind === 'selection' && i.tabId === input.tabId && i.hash === hash);
+      kind === 'selection'
+        ? ctx.find((i) => i.kind === 'selection' && i.tabId === input.tabId && i.hash === hash)
+        : ctx.find((i) => i.kind === kind && i.tabId === input.tabId);
 
     let item: ContextItem;
     if (existing && existing.hash === hash) {

@@ -8,6 +8,7 @@ import type { StorageArea } from '../src/store';
 import type { SuggestDiag } from '../src/background';
 import {
   DiagLog,
+  RefineQueue,
   explainGate,
   fingerprintMatchesDescriptor,
   gate,
@@ -304,6 +305,47 @@ describe('orchestrate', () => {
     }
   });
 
+  it('runs Jev, then the chat model, then regex, all inside one call when the provider is cloudflare', async () => {
+    const cloudflare: Settings = { ...enabled, provider: 'cloudflare', cfAccountId: 'acct', cfApiToken: 'cf' };
+    const envelope = (answers: Record<string, unknown>) =>
+      new Response(JSON.stringify({ success: true, errors: [], result: { model: 'jev', answers } }), { status: 200 });
+    const completion = (value: string, sourceContextId: string) =>
+      new Response(
+        JSON.stringify({ choices: [{ message: { content: JSON.stringify({ suggestions: [{ fieldId: 'f0', value, confidence: 0.9, reason: 'r', sourceContextId }] }) } }] }),
+        { status: 200 },
+      );
+
+    // Jev picks the regex candidate; the chat model is never called.
+    {
+      const { store, now } = await seeded();
+      const fetchImpl = vi.fn(async () => envelope({ relevant: { type: 'noul', noul: 0.9 }, field_f0: { type: 'choice', choice: 'k0', confidence: 0.9, probabilities: { k0: 0.9, k1: 0.05, none: 0.05 } } }));
+      const res = await orchestrate(maps, requester, { store, settings: async () => cloudflare, createProvider: (s) => createProvider(s, fetchImpl as unknown as typeof fetch), now });
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      expect(String((fetchImpl.mock.calls[0] as unknown as [string])[0])).toContain('api.cloudflare.com');
+      expect(res.suggestions.map((s) => [s.fieldId, s.value])).toEqual([['f0', 'Seven Shores Cafe']]);
+    }
+    // Jev says none; the chat model answers on the same budget.
+    {
+      const { store, ctxId, now } = await seeded();
+      const fetchImpl = vi
+        .fn()
+        .mockResolvedValueOnce(envelope({ relevant: { type: 'noul', noul: 0.2 } }))
+        .mockResolvedValueOnce(completion('From the model', ctxId));
+      const res = await orchestrate(maps, requester, { store, settings: async () => cloudflare, createProvider: (s) => createProvider(s, fetchImpl as unknown as typeof fetch), now });
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      expect(String((fetchImpl.mock.calls[1] as unknown as [string])[0])).toContain('api.openai.com');
+      expect(res.suggestions.map((s) => s.value)).toEqual(['From the model']);
+    }
+    // No chat key: Jev alone, and an error envelope falls back to regex.
+    {
+      const { store, now } = await seeded();
+      const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ success: false, errors: [{ code: 10000, message: 'Authentication error' }] }), { status: 401 }));
+      const res = await orchestrate(maps, requester, { store, settings: async () => ({ ...cloudflare, apiKey: '' }), createProvider: (s) => createProvider(s, fetchImpl as unknown as typeof fetch), now });
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      expect(res.suggestions.map((s) => [s.fieldId, s.value])).toEqual([['f0', 'Seven Shores Cafe']]);
+    }
+  });
+
   it('falls back to the local provider when the provider times out', async () => {
     const { store, ctxId, now } = await seeded();
     let aborted = false;
@@ -512,6 +554,217 @@ describe('orchestrate', () => {
   });
 });
 
+const smartOn: Settings = { ...enabled, screenshots: true };
+const idle = { hasPending: () => false, settled: async () => undefined };
+const tick = () => new Promise((r) => setTimeout(r, 0));
+
+describe('orchestrate smart path', () => {
+  it('issues the fast request without waiting on any vision work', async () => {
+    const { store, ctxId, now } = await seeded();
+    const order: string[] = [];
+    const fast = fakeProvider('openai', async () => {
+      order.push('fast');
+      return [suggestion({ sourceContextId: ctxId, confidence: 0.8 })];
+    });
+    const smart = fakeProvider('openai', () => {
+      order.push('smart');
+      return new Promise(() => undefined); // hangs for good
+    });
+    let settle!: () => void;
+    const vision = { hasPending: () => true, settled: () => new Promise<void>((r) => (settle = r)) };
+    const refine = new RefineQueue(() => undefined);
+
+    const started = performance.now();
+    const res = await orchestrate(maps, requester, {
+      store,
+      settings: async () => smartOn,
+      createProvider: () => fast,
+      createSmartProvider: () => smart,
+      refine,
+      vision,
+      now,
+      smartTimeoutMs: 1000,
+    });
+    const elapsed = performance.now() - started;
+
+    expect(res.suggestions.map((s) => s.value)).toEqual(['Seven Shores Cafe']);
+    expect(typeof res.ticket).toBe('string');
+    expect(elapsed).toBeLessThan(100);
+    // The smart model has not even been asked: it is waiting on the transcription, which the fast reply did not.
+    expect(order).toEqual(['fast']);
+
+    settle();
+    expect(await refine.claim(res.ticket!, requester.tabId)).toEqual({ suggestions: [], interactions: [] }); // hung past its own budget
+    expect(order).toEqual(['fast', 'smart']);
+  });
+
+  it('lets a surer smart answer replace the fast one, and serves the merged answer from cache afterwards', async () => {
+    const { store, ctxId, now } = await seeded();
+    const fast = fakeProvider('openai', async () => [suggestion({ sourceContextId: ctxId, confidence: 0.75, value: 'Seven Shores' })]);
+    const smart = fakeProvider('openai', async () => [suggestion({ sourceContextId: ctxId, confidence: 0.92, value: 'Seven Shores Cafe' })]);
+    const refine = new RefineQueue(() => undefined);
+    const deps = { store, settings: async () => smartOn, createProvider: () => fast, createSmartProvider: () => smart, refine, vision: idle, now };
+
+    const first = await orchestrate(maps, requester, deps);
+    expect(first.suggestions.map((s) => s.value)).toEqual(['Seven Shores']);
+    expect(await refine.claim(first.ticket!, requester.tabId)).toEqual({
+      suggestions: [expect.objectContaining({ value: 'Seven Shores Cafe', confidence: 0.92 })],
+      interactions: [],
+    });
+
+    const second = await orchestrate(maps, requester, deps);
+    expect(second.suggestions.map((s) => s.value)).toEqual(['Seven Shores Cafe']);
+    expect(second.ticket).toBeUndefined();
+    expect(fast.calls).toBe(1);
+    expect(smart.calls).toBe(1);
+  });
+
+  it('keeps the fast answer when the smart one is no surer', async () => {
+    const { store, ctxId, now } = await seeded();
+    const fast = fakeProvider('openai', async () => [suggestion({ sourceContextId: ctxId, confidence: 0.8, value: 'Seven Shores Cafe' })]);
+    const smart = fakeProvider('openai', async () => [suggestion({ sourceContextId: ctxId, confidence: 0.8, value: 'Other' })]);
+    const refine = new RefineQueue(() => undefined);
+    const res = await orchestrate(maps, requester, {
+      store,
+      settings: async () => smartOn,
+      createProvider: () => fast,
+      createSmartProvider: () => smart,
+      refine,
+      vision: idle,
+      now,
+    });
+    expect((await refine.claim(res.ticket!, requester.tabId)).suggestions.map((s) => s.value)).toEqual(['Seven Shores Cafe']);
+  });
+
+  it('answers from a screenshot the fast path could not wait for', async () => {
+    let clock = NOW;
+    const store = new ContextStore(new FakeArea(), { now: () => clock });
+    const fast = fakeProvider('openai', async () => [suggestion()]);
+    const smart = fakeProvider('openai', async (req) => [suggestion({ sourceContextId: req.context[0]!.id, confidence: 0.88 })]);
+    const vision = {
+      hasPending: () => true,
+      settled: async () => {
+        await store.upsertVision({
+          tabId: 1,
+          url: 'https://discord.com/channels/1',
+          title: 'Discord',
+          text: 'Discord · discord.com alex: dinner at Seven Shores Cafe, Friday at 6?',
+        });
+      },
+    };
+    const refine = new RefineQueue(() => undefined);
+    const res = await orchestrate(maps, requester, {
+      store,
+      settings: async () => smartOn,
+      createProvider: () => fast,
+      createSmartProvider: () => smart,
+      refine,
+      vision,
+      now: () => clock,
+    });
+    expect(res.suggestions).toEqual([]);
+    expect(fast.calls).toBe(0);
+    expect(typeof res.ticket).toBe('string');
+
+    const out = await refine.claim(res.ticket!, requester.tabId);
+    const [item] = await store.items();
+    expect(item?.kind).toBe('vision');
+    expect(out.suggestions).toEqual([expect.objectContaining({ fieldId: 'f0', sourceContextId: item!.id })]);
+    expect(smart.calls).toBe(1);
+  });
+
+  it('makes no smart call when it cannot help', async () => {
+    const { store, ctxId, now } = await seeded();
+    const sure = fakeProvider('openai', async () => [suggestion({ sourceContextId: ctxId, confidence: 0.95 })]);
+    const unsure = fakeProvider('openai', async () => [suggestion({ sourceContextId: ctxId, confidence: 0.75 })]);
+    const smart = fakeProvider('openai', async () => [suggestion({ sourceContextId: ctxId, confidence: 0.99, value: 'Other' })]);
+    const refine = new RefineQueue(() => undefined);
+    const base = { store, createProvider: () => unsure, createSmartProvider: () => smart, refine, vision: idle, now };
+    const fields = (nm: string) => ({ ...maps, fields: [{ i: 'f0', t: 'input:text', nm }] });
+
+    // screenshots off
+    expect((await orchestrate(fields('a'), requester, { ...base, settings: async () => enabled })).ticket).toBeUndefined();
+    // the fast answer is already sure
+    expect((await orchestrate(fields('b'), requester, { ...base, createProvider: () => sure, settings: async () => smartOn })).ticket).toBeUndefined();
+    // no smart provider (local, or no key)
+    expect((await orchestrate(fields('c'), requester, { ...base, createSmartProvider: () => undefined, settings: async () => smartOn })).ticket).toBeUndefined();
+    // the smart path is not wired at all
+    expect((await orchestrate(fields('d'), requester, { ...base, refine: undefined, settings: async () => smartOn })).ticket).toBeUndefined();
+    // no context and nothing on its way
+    expect(await orchestrate(fields('e'), { tabId: 1, origin: 'https://discord.com' }, { ...base, settings: async () => smartOn })).toEqual({
+      suggestions: [],
+      navigation: [],
+      interactions: [],
+    });
+    expect(smart.calls).toBe(0);
+    await tick();
+  });
+});
+
+describe('orchestrate smart path over the whole answer', () => {
+  it('merges interactions per element, leaves tab offers as the fast pass made them, and never counts a tab offer as sure', async () => {
+    const { store, ctxId, now } = await seeded();
+    await store.upsertPage({ tabId: 2, url: 'https://calendar.google.com/calendar/u/0/r/eventedit', title: 'Calendar', text: 'dinner at Seven Shores Cafe, Friday at 6? add it to the calendar' });
+    await handleFeedback({ fieldId: 'f0', fingerprint: 'input|text|||Add title|', contextId: ctxId, accepted: true, host: 'calendar.google.com' }, store, 2);
+    const ownId = (await store.items()).find((i) => i.tabId === 2)!.id;
+    const fast = fakeProvider('openai', async () => [
+      interact({ sourceContextId: ctxId, confidence: 0.75 }),
+      action({ sourceContextId: ownId, confidence: 0.95 }),
+    ]);
+    const smart = fakeProvider('openai', async () => [
+      interact({ sourceContextId: ctxId, confidence: 0.9, reason: 'surer' }),
+      interact({ sourceContextId: ctxId, elementId: 'e1', verb: 'check', value: 'All day', confidence: 0.8 }),
+      action({ sourceContextId: ownId, intent: 'calendar', value: 'Something else', confidence: 0.99 }),
+    ]);
+    const refine = new RefineQueue(() => undefined);
+    const input = { page: calendarPage, fields: [], elements };
+    const res = await orchestrate(input, onCalendar, {
+      store,
+      settings: async () => smartOn,
+      createProvider: () => fast,
+      createSmartProvider: () => smart,
+      refine,
+      vision: idle,
+      now,
+      tabs: async () => [],
+    });
+    expect(res.interactions.map((i) => [i.elementId, i.confidence])).toEqual([['e0', 0.75]]);
+    expect(res.navigation.map((n) => n.intent)).toEqual(['maps']);
+    expect(typeof res.ticket).toBe('string');
+
+    const out = await refine.claim(res.ticket!, onCalendar.tabId);
+    expect(out.suggestions).toEqual([]);
+    expect(out.interactions.map((i) => [i.elementId, i.verb, i.confidence, i.reason])).toEqual([
+      ['e0', 'click', 0.9, 'surer'],
+      ['e1', 'check', 0.8, 'r'],
+    ]);
+    // The merged answer is what the cache now holds, tab offer included and unchanged.
+    const again = await orchestrate(input, onCalendar, { store, settings: async () => smartOn, createProvider: () => fast, now, tabs: async () => [] });
+    expect(again.interactions.map((i) => [i.elementId, i.confidence])).toEqual([['e0', 0.9], ['e1', 0.8]]);
+    expect(again.navigation.map((n) => [n.intent, n.value])).toEqual([['maps', 'Seven Shores Cafe']]);
+    expect(fast.calls).toBe(1);
+  });
+
+  it('feeds a vision item to the fast path like page text, and counts it as the tab\'s own text for actions', async () => {
+    const { store, now } = await seeded();
+    await store.upsertVision({ tabId: 1, url: 'https://discord.com/channels/1', title: 'Discord', text: 'Discord · discord.com alex: dinner at Seven Shores Cafe, Friday at 6?' });
+    const items = await store.items();
+    const vision = items.find((i) => i.kind === 'vision')!;
+    expect(gate(maps, [vision], enabled, requester, NOW)).toBe(true);
+    expect(scoreAndPickContext([vision], requester, NOW).map((c) => c.kind)).toEqual(['vision']);
+    expect(ownContext([vision], { tabId: 1, origin: 'https://discord.com' }, NOW).map((c) => c.id)).toEqual([vision.id]);
+
+    const seen: SuggestRequest[] = [];
+    const fast = fakeProvider('openai', async (req) => {
+      seen.push(req);
+      return [suggestion({ sourceContextId: vision.id })];
+    });
+    const res = await orchestrate(maps, requester, { store, settings: async () => enabled, createProvider: () => fast, now });
+    expect(res.suggestions.map((s) => [s.value, s.source?.host])).toEqual([['Seven Shores Cafe', 'discord.com']]);
+    expect(seen[0]!.context.map((c) => c.kind).sort()).toEqual(['page', 'vision']);
+  });
+});
+
 describe('trusted senders', () => {
   const ext = 'chrome-extension://abcdefgh';
 
@@ -526,8 +779,9 @@ describe('trusted senders', () => {
     expect(isExtensionPage({}, base)).toBe(false);
   });
 
-  it('redacts the key and nothing else', () => {
-    expect(redactSettings(enabled)).toEqual({ ...enabled, apiKey: '' });
+  it('redacts the keys and nothing else', () => {
+    const withCloudflare = { ...enabled, cfAccountId: 'acct', cfApiToken: 'cf-secret' };
+    expect(redactSettings(withCloudflare)).toEqual({ ...withCloudflare, apiKey: '', cfApiToken: '' });
   });
 });
 

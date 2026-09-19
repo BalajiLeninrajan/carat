@@ -10,19 +10,21 @@ import type {
   SuggestRequest,
   Suggestion,
 } from '@carat/shared';
-import { LIMITS, fnv1a, isDestructiveName, isIntentName, verbFits } from '@carat/shared';
+import { LIMITS, fnv1a, isDestructiveName, isIntentName, mergeSuggestions, verbFits } from '@carat/shared';
 import type { Provider } from '@carat/providers';
-import { LocalProvider, createProvider } from '@carat/providers';
-import type { SuggestResponse, SuggestionSource } from '../messaging';
+import { LocalProvider, createProvider, createSmartProvider } from '@carat/providers';
+import type { InteractionView, RefineResponse, SuggestResponse, SuggestionSource, SuggestionView } from '../messaging';
 import type { ContextStore } from '../store';
 import { interactSuppressionKey, navSuppressionKey, suppressionPrefix } from '../store';
-import type { ProviderAttempt, SuggestDiag } from './diag';
+import type { GateVerdict, ProviderAttempt, SuggestDiag } from './diag';
 import { fingerprintMatchesDescriptor } from './fingerprint';
 import { explainGate } from './gate';
 import type { OpenTab } from './navigation';
 import { resolveNavigation } from './navigation';
+import type { RefineQueue } from './refine';
 import type { Requester } from './requester';
 import { ownContext, scoreAndPickContext } from './score';
+import type { VisionPipeline } from './vision';
 
 export interface SuggestInput {
   page: PageMeta;
@@ -43,10 +45,25 @@ export interface OrchestrateDeps {
   onDiag?: (diag: SuggestDiag) => void;
   /** The user's open tabs, read only to turn "open" into "focus". Never written to here. */
   tabs?: () => Promise<OpenTab[]>;
+  /** The smart second pass. `refine` and `vision` must both be present for one to start. */
+  createSmartProvider?: (settings: Settings) => Provider | undefined;
+  refine?: RefineQueue;
+  vision?: Pick<VisionPipeline, 'hasPending' | 'settled'>;
+  smartTimeoutMs?: number;
 }
 
 const NONE: SuggestResponse = { suggestions: [], navigation: [], interactions: [] };
 
+/** Gate verdicts a transcript still on its way could overturn. */
+const CONTEXT_VERDICTS: ReadonlySet<GateVerdict> = new Set(['no-context', 'stale-context', 'own-context']);
+
+/**
+ * The fast path answers from text context on the configured provider inside
+ * one 6s budget and returns. When that answer is weak, or a screenshot is
+ * still being read, a smart call starts in the background on the vision
+ * model; its result is handed back through the ticket and written to the
+ * cache, and the fast reply never waits for it.
+ */
 export async function orchestrate(input: SuggestInput, requester: Requester, deps: OrchestrateDeps): Promise<SuggestResponse> {
   const now = deps.now ?? (() => Date.now());
   const timeoutMs = deps.timeoutMs ?? LIMITS.providerTimeoutMs;
@@ -62,9 +79,17 @@ export async function orchestrate(input: SuggestInput, requester: Requester, dep
   // Freshness follows the store's clock, which stands still while pinned.
   const at = await store.clock();
   diag.gate = explainGate({ ...input, elements, filled }, items, settings, requester, at);
+  const smart = smartPath(settings, deps, requester);
+  const shape: Shape = { input, elements, filled, store };
   if (diag.gate !== 'ok') {
+    const result: SuggestResponse = { ...NONE };
+    // Nothing to read yet, but a screenshot is being transcribed: the smart pass alone may have an answer.
+    if (smart?.pending && CONTEXT_VERDICTS.has(diag.gate)) {
+      result.ticket = smart.queue.add(requester.tabId, smartSuggest(shape, requester, [], smart, deps, now));
+      diag.refine = true;
+    }
     deps.onDiag?.(diag);
-    return NONE;
+    return result;
   }
 
   const context = scoreAndPickContext(items, requester, at);
@@ -78,17 +103,7 @@ export async function orchestrate(input: SuggestInput, requester: Requester, dep
   let suggestions = input.force ? undefined : await store.getCached(key);
   diag.cached = suggestions !== undefined;
   if (!suggestions) {
-    const req: SuggestRequest = {
-      page: input.page,
-      fields: input.fields,
-      ...(elements.length > 0 ? { elements } : {}),
-      ...(filled.length > 0 ? { filled } : {}),
-      context,
-      ...(own.length > 0 ? { own } : {}),
-      now: new Date(now()).toISOString(),
-      ...(typeof navigator !== 'undefined' && navigator.language ? { locale: navigator.language } : {}),
-    };
-    const outcome = await callProvider(req, settings, deps, timeoutMs);
+    const outcome = await callProvider(request(shape, context, own, now()), settings, deps, timeoutMs);
     diag.attempts = outcome.attempts;
     suggestions = valid(outcome.suggestions, input.fields, elements, filled, context, own);
     // A transport error or timeout is not "nothing to suggest": caching it
@@ -96,6 +111,126 @@ export async function orchestrate(input: SuggestInput, requester: Requester, dep
     if (!outcome.failed) await store.setCached(key, suggestions);
   }
 
+  const offered = await offer(suggestions, shape, context, own);
+  const tabs = offered.actions.length > 0 ? await (deps.tabs ?? noTabs)().catch(() => []) : [];
+  const navigation = resolveNavigation(offered.actions, tabs, requester, input.page)
+    .slice(0, LIMITS.maxNavigations)
+    .map(offered.withSource);
+  const result: SuggestResponse = { suggestions: offered.fills, navigation, interactions: offered.interactions };
+  // Only a fresh answer, or one a transcript may still improve, is worth a second opinion; and only
+  // when there is (or will be) other tabs' text to answer from, since tab offers are never refined.
+  const worthAsking = smart && (context.length > 0 || smart.pending) && (!diag.cached || smart.pending);
+  if (worthAsking && weak([...result.suggestions, ...result.interactions])) {
+    result.ticket = smart.queue.add(requester.tabId, smartSuggest(shape, requester, suggestions, smart, deps, now));
+    diag.refine = true;
+  }
+  diag.offered = result.suggestions.length;
+  diag.navigation = navigation.length;
+  diag.interactions = result.interactions.length;
+  deps.onDiag?.(diag);
+  return result;
+}
+
+/** The parts of one request that both passes share. */
+interface Shape {
+  input: SuggestInput;
+  elements: ElementDescriptor[];
+  filled: string[];
+  store: ContextStore;
+}
+
+interface SmartPath {
+  provider: Provider;
+  queue: RefineQueue;
+  vision: Pick<VisionPipeline, 'hasPending' | 'settled'>;
+  /** A screenshot from another tab is being read right now. */
+  pending: boolean;
+}
+
+function smartPath(settings: Settings, deps: OrchestrateDeps, requester: Requester): SmartPath | undefined {
+  if (!settings.screenshots || !deps.refine || !deps.vision) return undefined;
+  let provider: Provider | undefined;
+  try {
+    provider = (deps.createSmartProvider ?? createSmartProvider)(settings);
+  } catch {
+    return undefined;
+  }
+  if (!provider) return undefined;
+  return { provider, queue: deps.refine, vision: deps.vision, pending: deps.vision.hasPending(requester) };
+}
+
+/** Nothing shown, or nothing the model was sure of. */
+function weak(shown: Array<{ confidence: number }>): boolean {
+  return shown.every((s) => s.confidence < LIMITS.smartBelowConfidence);
+}
+
+/**
+ * Wait for any screenshot still being read (it is the context most likely to
+ * change the answer), re-pick context, ask the smart model, and fold its
+ * answer over the fast one: per field or element the surer one wins, and tab
+ * offers stay as they were. The merged answer replaces the cache entry so the
+ * next fast request on this page starts from it.
+ */
+async function smartSuggest(
+  shape: Shape,
+  requester: Requester,
+  fast: Suggestion[],
+  smart: SmartPath,
+  deps: OrchestrateDeps,
+  now: () => number,
+): Promise<RefineResponse> {
+  const budget = deps.smartTimeoutMs ?? LIMITS.smartTimeoutMs;
+  const deadline = Date.now() + budget;
+  // Leave the model at least a fifth of the budget however long the transcription takes.
+  await Promise.race([smart.vision.settled(), sleep(budget * 0.8)]);
+
+  const { store, input, elements, filled } = shape;
+  const items = await store.items();
+  const at = await store.clock();
+  const context = scoreAndPickContext(items, requester, at);
+  const own = ownContext(items, requester, at);
+  const remaining = deadline - Date.now();
+  if (context.length === 0 || remaining < MIN_SMART_MS) return { suggestions: [], interactions: [] };
+
+  let answer: Suggestion[];
+  try {
+    answer = valid(await withTimeout(smart.provider, request(shape, context, own, now()), remaining), input.fields, elements, filled, context, own);
+  } catch {
+    return { suggestions: [], interactions: [] };
+  }
+  const merged = mergeSuggestions(fast, answer);
+  await store.setCached(cacheKey(input, elements, filled, context, own), merged);
+  const offered = await offer(merged, shape, context, own);
+  return { suggestions: offered.fills, interactions: offered.interactions };
+}
+
+const MIN_SMART_MS = 500;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function request(shape: Shape, context: RequestContext, own: RequestContext, now: number): SuggestRequest {
+  const { input, elements, filled } = shape;
+  return {
+    page: input.page,
+    fields: input.fields,
+    ...(elements.length > 0 ? { elements } : {}),
+    ...(filled.length > 0 ? { filled } : {}),
+    context,
+    ...(own.length > 0 ? { own } : {}),
+    now: new Date(now).toISOString(),
+    ...(typeof navigator !== 'undefined' && navigator.language ? { locale: navigator.language } : {}),
+  };
+}
+
+/**
+ * What the chip may show: minus what the user already accepted or dismissed
+ * (unless they asked out loud), one per field, element or intent, top two,
+ * each tagged with where its text came from.
+ */
+async function offer(suggestions: Suggestion[], shape: Shape, context: RequestContext, own: RequestContext) {
+  const { input, elements, store } = shape;
   const suppressed = input.force ? [] : await store.suppressedKeys();
   const fills = suggestions.filter(isFill).filter((s) => !isSuppressed(s, input, suppressed));
   const actions = suggestions.filter(isAction).filter((a) => !suppressed.includes(navSuppressionKey(a.intent, a.value)));
@@ -103,22 +238,17 @@ export async function orchestrate(input: SuggestInput, requester: Requester, dep
     const el = elements.find((e) => e.i === s.elementId);
     return !!el && !suppressed.includes(interactSuppressionKey(input.page.host, el.r, el.nm));
   });
-  const tabs = actions.length > 0 ? await (deps.tabs ?? noTabs)().catch(() => []) : [];
   const sources = new Map([...context, ...own].map((c) => [c.id, sourceOf(c)] as const));
   const withSource = <T extends { sourceContextId: string }>(s: T): T & { source?: SuggestionSource } => ({
     ...s,
     ...(sources.has(s.sourceContextId) ? { source: sources.get(s.sourceContextId) } : {}),
   });
-  const offered = topPerField(fills).slice(0, LIMITS.maxSuggestions).map(withSource);
-  const navigation = resolveNavigation(topPerIntent(actions), tabs, requester, input.page)
-    .slice(0, LIMITS.maxNavigations)
-    .map(withSource);
-  const offeredInteractions = topPerElement(interactions).slice(0, LIMITS.maxSuggestions).map(withSource);
-  diag.offered = offered.length;
-  diag.navigation = navigation.length;
-  diag.interactions = offeredInteractions.length;
-  deps.onDiag?.(diag);
-  return { suggestions: offered, navigation, interactions: offeredInteractions };
+  return {
+    fills: topPerField(fills).slice(0, LIMITS.maxSuggestions).map(withSource) as SuggestionView[],
+    actions: topPerIntent(actions),
+    interactions: topPerElement(interactions).slice(0, LIMITS.maxSuggestions).map(withSource) as InteractionView[],
+    withSource,
+  };
 }
 
 // The chip may say where a value came from; the text it came from stays here.

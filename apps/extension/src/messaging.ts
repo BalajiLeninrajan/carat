@@ -13,6 +13,7 @@ import type {
 import type { TabDiag } from './background/diag';
 import type { FeedbackInput } from './background/feedback';
 import type { StatusInfo } from './background/status';
+import type { VisionCue } from './background/vision';
 
 export type KnownItem = Pick<ContextItem, 'id' | 'origin' | 'title' | 'kind' | 'capturedAt'> & {
   preview: string;
@@ -33,7 +34,12 @@ export interface SuggestResponse {
   navigation: NavigationView[];
   /** Resolved against `elements` in the request; the content script performs one after a Tab. */
   interactions: InteractionView[];
+  /** Set when a smart second pass is on its way; the content script polls `suggestRefine` with it. */
+  ticket?: string;
 }
+
+/** The smart second pass: fills and interactions folded over the fast answer. Tab offers are never refined. */
+export type RefineResponse = Pick<SuggestResponse, 'suggestions' | 'interactions'>;
 
 // Background handles every message but `forceSuggest`, which it sends to one
 // tab's content script when the keyboard shortcut fires. Content scripts and
@@ -42,6 +48,10 @@ export interface Protocol {
   capture(data: { url: string; title: string; text: string; kind: 'page' | 'selection' }): void;
   /** `force` skips the answer cache and the dismissed/consumed filter: the user asked out loud. */
   suggestRequest(data: { page: PageMeta; fields: FieldDescriptor[]; elements?: ElementDescriptor[]; force?: boolean }): SuggestResponse;
+  /** Long-poll for the smart answer named by a fast reply's `ticket`. */
+  suggestRefine(data: { ticket: string }): RefineResponse;
+  /** Screenshot cues from a tab; see VisionCue. */
+  vision(data: VisionCue): void;
   forceSuggest(): void;
   feedback(data: FeedbackInput): void;
   /** Sent only from a navigation chip's Tab press; the background rebuilds the URL before acting. */

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { relativeAge } from '../src/format/age';
-import { describeCapture, describeSuggest } from '../src/format/diag';
+import { describeCapture, describeSuggest, describeVision } from '../src/format/diag';
 
 const NOW = 1_000_000;
 
@@ -76,6 +76,23 @@ describe('describeSuggest', () => {
   it('says when the answer came from cache', () => {
     expect(describeSuggest({ ...base, gate: 'ok', cached: true, offered: 0 }, NOW)).toBe(
       'checked 15s ago: answer from cache, offered 0',
+    );
+  });
+});
+
+describe('describeVision', () => {
+  it('says what became of the last screenshot cue', () => {
+    expect(describeVision({ at: NOW - 30_000, host: 'discord.com', verdict: 'transcribed' }, NOW)).toBe(
+      'screenshot of discord.com 30s ago: transcript stored, picture deleted',
+    );
+    expect(describeVision({ at: NOW, host: 'discord.com', verdict: 'not-in-front' }, NOW)).toBe(
+      'screenshot of discord.com just now: skipped, the tab was not in front',
+    );
+  });
+
+  it('notes a smart second opinion on the check line', () => {
+    expect(describeSuggest({ at: NOW, host: 'www.google.com', fields: 1, gate: 'ok', cached: false, attempts: [{ id: 'openai', ms: 40, count: 1 }], offered: 1, refine: true }, NOW)).toBe(
+      'checked just now: openai answered in 40 ms with 1, offered 1; smart model asked for a second opinion',
     );
   });
 });

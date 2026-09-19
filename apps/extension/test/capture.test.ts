@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { captureVisibleText, collectVisibleText, shouldCapture } from '../src/capture';
+import { captureVisibleText, collectVisibleText, isThinPage, mayCapture, shouldCapture } from '../src/capture';
 
 const HTTPS = { protocol: 'https:', hostname: 'example.com' };
 const LONG = 'Dinner at Seven Shores Cafe, Friday at 6? Bring the whole team along.';
@@ -121,5 +121,43 @@ describe('shouldCapture', () => {
     document.body.innerHTML = '<p>Short.</p>';
     expect(shouldCapture(document, HTTPS)).toBe(false);
     expect(shouldCapture(document, HTTPS, LONG)).toBe(true);
+  });
+});
+
+describe('mayCapture', () => {
+  it('refuses non-http pages, denylisted hosts and password pages whatever the text', () => {
+    document.body.innerHTML = `<p>${LONG}</p>`;
+    expect(mayCapture(document, HTTPS)).toBe(true);
+    expect(mayCapture(document, { protocol: 'chrome:', hostname: 'extensions' })).toBe(false);
+    expect(mayCapture(document, { protocol: 'https:', hostname: 'app.chase.com' })).toBe(false);
+    document.body.innerHTML = `<p>${LONG}</p><input type="Password">`;
+    expect(mayCapture(document, HTTPS)).toBe(false);
+  });
+});
+
+describe('isThinPage', () => {
+  const rect = (el: Element, w: number, h: number) => {
+    el.getBoundingClientRect = () => ({ top: 0, left: 0, right: w, bottom: h, width: w, height: h }) as DOMRect;
+  };
+
+  it('is thin under 400 chars of body text and not above', () => {
+    document.body.innerHTML = '<p>short</p>';
+    expect(isThinPage(document, window, 120)).toBe(true);
+    expect(isThinPage(document, window, 399)).toBe(true);
+    expect(isThinPage(document, window, 400)).toBe(false);
+  });
+
+  it('is thin when an image or canvas covers a good part of the viewport', () => {
+    document.body.innerHTML = '<img id="a"><p>lots of text</p>';
+    const img = document.getElementById('a')!;
+    rect(img, 100, 100);
+    expect(isThinPage(document, window, 2000)).toBe(false);
+    rect(img, Math.round(window.innerWidth * 0.5), Math.round(window.innerHeight * 0.4));
+    expect(isThinPage(document, window, 2000)).toBe(true);
+    img.setAttribute('style', 'display:none');
+    expect(isThinPage(document, window, 2000)).toBe(false);
+    document.body.innerHTML = '<canvas id="c"></canvas>';
+    rect(document.getElementById('c')!, window.innerWidth, window.innerHeight);
+    expect(isThinPage(document, window, 2000)).toBe(true);
   });
 });

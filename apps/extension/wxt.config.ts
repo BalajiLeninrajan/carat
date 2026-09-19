@@ -5,7 +5,7 @@ export default defineConfig({
     name: 'Carat',
     description: 'Fills a field, presses a control or opens the next tab from what you just read. One Tab each.',
     permissions: ['storage', 'alarms', 'tabs'],
-    host_permissions: ['<all_urls>', 'https://api.openai.com/*'],
+    host_permissions: ['<all_urls>', 'https://api.openai.com/*', 'https://api.cloudflare.com/*'],
     commands: {
       'carat-suggest': {
         suggested_key: { default: 'Alt+Shift+C' },

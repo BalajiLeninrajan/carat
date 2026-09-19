@@ -1,8 +1,11 @@
 export type {
   ActionSuggestion,
   ContextItem,
+  ContextKind,
   ElementDescriptor,
   ElementRole,
+  ImageCue,
+  ImageInput,
   FieldDescriptor,
   FillSuggestion,
   IntentName,
@@ -23,7 +26,7 @@ export {
   SUGGESTION_RESPONSE_FORMAT,
 } from './schema';
 export type { SuggestionList } from './schema';
-export { buildMessages, SYSTEM_PROMPT, FEW_SHOTS } from './prompt';
+export { buildMessages, SYSTEM_PROMPT, TRANSCRIBE_PROMPT, FEW_SHOTS } from './prompt';
 export type { ChatMessage, ChatRole } from './prompt';
 export { INTENT_REGISTRY, buildIntentUrl, calendarDates, intentLabel, isIntentDestination } from './intents';
 export type { IntentEntity, IntentSpec } from './intents';
@@ -42,3 +45,4 @@ export {
 export type { ChipText } from './interact';
 export { truncate, normalizeWhitespace } from './truncate';
 export { fnv1a, hashText } from './hash';
+export { mergeSuggestions } from './merge';

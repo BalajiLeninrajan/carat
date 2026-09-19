@@ -1,7 +1,8 @@
 import { LIMITS, hashText, normalizeWhitespace, truncate } from '@carat/shared';
-import { captureVisibleText, collectVisibleText, shouldCapture } from '../capture';
+import { captureVisibleText, collectVisibleText, isThinPage, mayCapture, shouldCapture } from '../capture';
 import type { ScriptContext } from './context';
 import { debounce } from './context';
+import type { PageState } from './page-state';
 import { send } from './send';
 
 export const CAPTURE_TIMING = {
@@ -9,23 +10,30 @@ export const CAPTURE_TIMING = {
   selectionMs: 500,
   mutationMs: 5000,
   minSelectionChars: 3,
+  /** Least time between two screenshot cues for one page. */
+  screenshotMs: 15_000,
 } as const;
 
 export interface CaptureOptions {
   /** Runs after a page or selection capture is sent; the suggest scheduler re-asks with the new own text. */
   onCaptured?: () => void;
+  /** Shared with the suggest scheduler: no screenshot cue once a chip has shown on this page. */
+  page?: PageState;
 }
 
 export function startCapture(ctx: ScriptContext, doc: Document = document, opts: CaptureOptions = {}): void {
   const win = doc.defaultView;
   if (!win) return;
   const captured = opts.onCaptured ?? (() => undefined);
+  const page = opts.page;
 
   let lastBody = '';
   let lastPageHash = -1;
   let lastPageAt = 0;
   let lastSelectionHash = -1;
   let mutationTimer: number | null = null;
+  let cuedHref = '';
+  let cuedAt = 0;
 
   // The 40-char minimum is measured on body text alone; the title/host header
   // could otherwise clear it on an empty page.
@@ -34,9 +42,33 @@ export function startCapture(ctx: ScriptContext, doc: Document = document, opts:
     return shouldCapture(doc, doc.location, lastBody);
   };
 
-  const capturePage = (onlyIfChanged: boolean): void => {
+  /**
+   * Ask the background for a picture of this tab while it is in front, and to
+   * read it once the tab hides. Only for pages whose text capture is thin,
+   * never for a page a chip has been shown on, and never for a page whose
+   * text may not leave it either.
+   */
+  const cue = (leaving: boolean): void => {
+    if (page?.filling) return;
+    const href = doc.location.href;
+    const base = { url: href, title: doc.title, bodyChars: lastBody.length };
+    if (leaving) {
+      if (cuedHref === href) void send('vision', { action: 'leaving', ...base });
+      return;
+    }
+    if (!mayCapture(doc, doc.location) || !isThinPage(doc, win, lastBody.length)) return;
+    const now = Date.now();
+    if (cuedHref === href && now - cuedAt < CAPTURE_TIMING.screenshotMs) return;
+    cuedHref = href;
+    cuedAt = now;
+    void send('vision', { action: 'shot', ...base });
+  };
+
+  const capturePage = (onlyIfChanged: boolean, leaving = false): void => {
     lastPageAt = Date.now();
-    if (!allowed()) return;
+    const ok = allowed();
+    cue(leaving);
+    if (!ok) return;
     const text = captureVisibleText(doc, win);
     const hash = hashText(text);
     if (onlyIfChanged && hash === lastPageHash) return;
@@ -59,7 +91,7 @@ export function startCapture(ctx: ScriptContext, doc: Document = document, opts:
 
   ctx.setTimeout(() => capturePage(false), CAPTURE_TIMING.initialMs);
   ctx.addEventListener(doc, 'visibilitychange', () => {
-    if (doc.visibilityState === 'hidden') capturePage(false);
+    if (doc.visibilityState === 'hidden') capturePage(false, true);
   });
   ctx.addEventListener(doc, 'selectionchange', selectionSoon);
   ctx.addEventListener(doc, 'copy', captureSelection);

@@ -36,6 +36,16 @@ Field fills only use text from other tabs; the page being filled is never its ow
 
 If a tab already shows the destination, the chip says "Switch to" instead of "Open in" and reuses that tab.
 
+## Fast path and smart path
+
+Every chip comes from the fast path first: text captured from other tabs, the chat model with `reasoning_effort: none`, a 6s budget. It never sees an image. The smart path is opt-in ("Screenshots of tabs with little text" on the options page, off by default) and never delays the chip. By default it is the same model with `reasoning_effort: low`; the optional "Smart model" field swaps in a bigger one. Either way it does two jobs.
+
+The first is at capture time. When a tab you are reading is mostly an image, a pasted screenshot or a canvas app, Carat takes one picture of that tab while it is in front and keeps it in session storage for at most three minutes (two pictures at most, one per tab). When you switch away, the picture goes to the smart model with the capture time, and it writes back the visible text followed by a `Facts:` block: dates and times resolved against that moment ("3 days ago" under an Instagram post becomes the date), places, addresses, people and handles, prices, and one line per poster, sign, menu or map pin stating what it shows. A page cued by thin text is sent at `detail: low`; one cued by a large image is sent at `detail: high`, since the image is the part worth reading. The picture is deleted and the text joins the context store as a `vision` item, capped like a page, so the fast path can use it from then on.
+
+The second is a slower second opinion, from text only. On pages where the fast answer was empty or unsure, `orchestrate` hands the content script a ticket and asks the smart model in the background; if its answer arrives before you act and it is more confident, the chip's value changes in place. The same goes for a chip on a control (Save, a checkbox, a slider): a surer smart answer for the same element replaces its value in place. A chip never moves to another field or element, never comes back after you dismissed it because of a smart answer, and tab offers are never refined. With the Cloudflare provider the second opinion still goes to the chat model at Base URL; Jev only picks among regex candidates. `reasoning_effort` is only sent to `api.openai.com`; other OpenAI-compatible servers get the same requests without it.
+
+No picture is ever taken of a page Carat has offered to fill, of a page with a password field, of a denylisted host, or of a site you switched off in the popup, and nothing is photographed while the store is pinned. The popup's third debug line says what became of the tab's last screenshot cue.
+
 ## Running it
 
 ```

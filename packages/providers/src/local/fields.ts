@@ -5,13 +5,18 @@ export type FieldKind = 'email' | 'phone' | 'location' | 'title' | 'search';
 // Credential and card fields are never filled from other tabs' text, whatever their label says.
 const NEVER_FILL = /\b(?:username|current-password|new-password|one-time-code|cc-[a-z-]+)\b/;
 
+/** True for credential and card fields, which no provider may fill from other tabs' text. */
+export function isNeverFill(f: FieldDescriptor): boolean {
+  return NEVER_FILL.test((f.ac ?? '').toLowerCase());
+}
+
 /** Guess what a field wants from its descriptor, or null when it is none of the kinds we can fill. */
 export function classifyField(f: FieldDescriptor): FieldKind | null {
   const text = [f.nm, f.ph, f.al, f.lb, f.nb].filter(Boolean).join(' ').toLowerCase();
   const ac = (f.ac ?? '').toLowerCase();
   const nm = (f.nm ?? '').toLowerCase();
 
-  if (NEVER_FILL.test(ac)) return null;
+  if (isNeverFill(f)) return null;
   if (f.t === 'input:email' || ac.includes('email') || /\be-?mail\b|\brecipients?\b/.test(text) || nm === 'to') {
     return 'email';
   }
