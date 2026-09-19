@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NavSuggestion, Suggestion } from '@carat/shared';
-import { createChip, type Chip, type ChipShowOptions } from '../src/chip';
+import { createChip, type Chip, type ChipShowOptions, type CornerShowOptions } from '../src/chip';
 import { CAPTURE_TIMING, SNAPSHOT_TIMING, startCapture, startSuggestions } from '../src/content';
 import type { ScriptContext } from '../src/content';
+import type { NavigationView } from '../src/messaging';
 
 const sent = vi.hoisted(() => vi.fn<(type: string, data: unknown) => Promise<unknown>>());
 vi.mock('../src/messaging', () => ({ safeSendMessage: sent }));
@@ -309,7 +310,7 @@ describe('navigation chip', () => {
     vi.useRealTimers();
   });
 
-  function answer(fills: (fields: Array<{ i: string; al?: string }>) => Suggestion[], navigation: NavSuggestion[]) {
+  function answer(fills: (fields: Array<{ i: string; al?: string }>) => Suggestion[], navigation: NavigationView[]) {
     sent.mockImplementation(async (type, data) => {
       if (type !== 'suggestRequest') return undefined;
       const { fields } = data as { fields: Array<{ i: string; al?: string }> };
@@ -334,6 +335,29 @@ describe('navigation chip', () => {
     expect(calls('navigate')).toEqual([nav]);
     expect(calls('feedback')).toEqual([{ kind: 'nav', intent: 'maps', value: 'Seven Shores Cafe', accepted: true }]);
     expect(host.style.display).toBe('none');
+  });
+
+  it('tells the corner chip the offer came from this page, and why', async () => {
+    field('Message #general', 100);
+    const twoMinutesAgo = Date.now() - 2 * 60_000;
+    answer(() => [], [{ ...nav, reason: 'a place to meet', source: { host: document.location.host, capturedAt: twoMinutesAgo } }]);
+    const shows: CornerShowOptions[] = [];
+    const chip: Chip = {
+      show: () => undefined,
+      showCorner: (opts) => void shows.push(opts),
+      hide: () => undefined,
+      destroy: () => undefined,
+      visible: false,
+    };
+    startSuggestions(ctx, chip, document);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
+    await flush();
+    expect(shows[0]).toMatchObject({
+      label: 'Open in Google Maps',
+      value: 'Seven Shores Cafe',
+      detail: 'from this page · 2m ago',
+      reason: 'a place to meet',
+    });
   });
 
   it('prefers a field chip over the corner chip when the answer has both', async () => {

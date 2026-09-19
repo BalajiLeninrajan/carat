@@ -147,6 +147,17 @@ describe('chip', () => {
 
     rich.show({ target, value: 'Plain', onAccept, onDismiss });
     expect(shown()).toEqual({ label: 'Fill "Plain"?', sub: '', subHidden: true, title: null });
+
+    // The corner chip carries the same two lines.
+    rich.showCorner({ label: 'Open in Google Maps', value: 'Seven Shores Cafe', detail: 'from this page · just now', reason: 'a place to meet', onAccept, onDismiss });
+    expect(shown()).toEqual({
+      label: 'Open in Google Maps: "Seven Shores Cafe"?',
+      sub: 'from this page · just now',
+      subHidden: false,
+      title: 'a place to meet',
+    });
+    rich.showCorner({ label: 'Open in Google Maps', value: 'Plain', onAccept, onDismiss });
+    expect(shown()).toEqual({ label: 'Open in Google Maps: "Plain"?', sub: '', subHidden: true, title: null });
     rich.destroy();
   });
 

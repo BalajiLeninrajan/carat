@@ -694,6 +694,23 @@ describe('orchestrate navigation', () => {
     expect((await orchestrate(input, onDiscord, deps)).navigation).toEqual([]);
   });
 
+  it('says which of the page\'s own captures a tab offer came from, counts it for the popup, and brings a dismissed one back when forced', async () => {
+    const { store, now } = await seeded();
+    const reports: SuggestDiag[] = [];
+    const deps = { store, settings: async () => local, now, onDiag: (d: SuggestDiag) => void reports.push(d) };
+    const first = await orchestrate(input, onDiscord, deps);
+    expect(first.navigation.map((n) => n.source)).toEqual([
+      { host: 'discord.com', capturedAt: NOW },
+      { host: 'discord.com', capturedAt: NOW },
+    ]);
+    expect(reports[0]).toMatchObject({ gate: 'ok', offered: 0, navigation: 2 });
+
+    await handleFeedback({ kind: 'nav', intent: 'maps', value: 'Seven Shores Cafe', accepted: false }, store);
+    expect((await orchestrate(input, onDiscord, deps)).navigation.map((n) => n.intent)).toEqual(['calendar']);
+    expect((await orchestrate({ ...input, force: true }, onDiscord, deps)).navigation.map((n) => n.intent)).toEqual(['maps', 'calendar']);
+    expect(reports[2]).toMatchObject({ cached: false, navigation: 2 });
+  });
+
   it('does not ask for tabs when there is nothing to navigate to', async () => {
     const { store, ctxId, now } = await seeded();
     const tabs = vi.fn(async () => []);

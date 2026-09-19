@@ -55,6 +55,15 @@ describe('describeSuggest', () => {
     ).toBe('checked 15s ago: openai failed after 812 ms (HTTP 401); local answered in 3 ms with 1, offered 1');
   });
 
+  it('counts tab offers separately from fills', () => {
+    expect(describeSuggest({ ...base, gate: 'ok', cached: false, attempts: [{ id: 'local', ms: 2, count: 2 }], offered: 0, navigation: 1 }, NOW)).toBe(
+      'checked 15s ago: local answered in 2 ms with 2, offered 0, 1 tab offer',
+    );
+    expect(describeSuggest({ ...base, gate: 'ok', cached: true, offered: 1, navigation: 2 }, NOW)).toBe(
+      'checked 15s ago: answer from cache, offered 1, 2 tab offers',
+    );
+  });
+
   it('says when the answer came from cache', () => {
     expect(describeSuggest({ ...base, gate: 'ok', cached: true, offered: 0 }, NOW)).toBe(
       'checked 15s ago: answer from cache, offered 0',
