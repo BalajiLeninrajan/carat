@@ -312,6 +312,27 @@ describe('corner chip', () => {
     expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 
+  it('can drop the colon and, given a target, defers Tab to another text field the way a field chip does', () => {
+    const target = document.createElement('input');
+    document.body.append(target);
+    chip.showCorner({ label: 'Scroll to', bare: true, value: 'Add location', target, onAccept, onDismiss });
+    expect(chip.text).toBe('Scroll to "Add location"?');
+
+    composer.focus();
+    expect(key(composer, 'Tab').defaultPrevented).toBe(false);
+    expect(onAccept).not.toHaveBeenCalled();
+
+    composer.blur();
+    expect(key(document.body, 'Tab').defaultPrevented).toBe(true);
+    expect(onAccept).toHaveBeenCalledTimes(1);
+
+    // The field carat just filled is a fine place to press Tab from.
+    chip.showCorner({ label: 'Scroll to', bare: true, value: 'Add location', target, interceptFrom: composer, onAccept, onDismiss });
+    composer.focus();
+    expect(key(composer, 'Tab').defaultPrevented).toBe(true);
+    expect(onAccept).toHaveBeenCalledTimes(2);
+  });
+
   it('returns to field placement when a field chip follows it', () => {
     const target = document.createElement('input');
     onScreen(target);

@@ -35,6 +35,15 @@ export interface ChipShowOptions extends ChipText {
 /** A chip with no field: a larger banner centred at the bottom of the viewport that takes Tab from anywhere on the page. */
 export interface CornerShowOptions extends ChipText {
   label: string; // "Open in Google Maps"
+  /** Leave out the colon after the label: `Scroll to "Save"?` rather than `Open in Google Maps: "Seven Shores Cafe"?`. */
+  bare?: boolean;
+  /**
+   * The element the banner is about, when it has one (the off-screen target
+   * of a scroll). With it, Tab is taken only when nothing else could want it,
+   * by the same rule as a field chip; without it, from anywhere.
+   */
+  target?: Element;
+  interceptFrom?: Element | null;
 }
 
 export interface Chip {
@@ -55,11 +64,13 @@ const HOST_ATTR = 'data-carat-chip';
 interface SessionBase extends ChipCallbacks {
   timer: ReturnType<typeof setTimeout>;
   onScreen: boolean;
+  /** When set, Tab defers to a text field that has focus unless it is this or `interceptFrom`. */
+  target: Element | null;
+  interceptFrom: Element | null;
 }
 interface FieldSession extends SessionBase {
   mode: 'field';
   target: Element;
-  interceptFrom: Element | null;
   observer: ResizeObserver | null;
 }
 interface CornerSession extends SessionBase {
@@ -105,8 +116,8 @@ export function createChip(doc: Document = document): Chip {
       return;
     }
     if (e.key !== 'Tab' || e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) return;
-    // A corner chip has no field of its own to defer to; Tab is its whole interface.
-    if (session.mode === 'field' && !shouldInterceptTab(deepActiveElement(doc), session.target, session.interceptFrom)) return;
+    // A tab-offer banner has no field of its own to defer to; Tab is its whole interface.
+    if (session.target && !shouldInterceptTab(deepActiveElement(doc), session.target, session.interceptFrom)) return;
     e.preventDefault();
     e.stopImmediatePropagation();
     accept();
@@ -152,7 +163,14 @@ export function createChip(doc: Document = document): Chip {
     win.addEventListener('keydown', onKeydown, true);
     pill.addEventListener('click', onClick);
     pill.addEventListener('mousedown', onMousedown);
-    return { onAccept: opts.onAccept, onDismiss: opts.onDismiss, onScreen: false, timer: setTimeout(() => dismiss('timeout'), AUTO_DISMISS_MS) };
+    return {
+      onAccept: opts.onAccept,
+      onDismiss: opts.onDismiss,
+      onScreen: false,
+      target: null,
+      interceptFrom: null,
+      timer: setTimeout(() => dismiss('timeout'), AUTO_DISMISS_MS),
+    };
   }
 
   function show(opts: ChipShowOptions): void {
@@ -173,8 +191,8 @@ export function createChip(doc: Document = document): Chip {
   }
 
   function showCorner(opts: CornerShowOptions): void {
-    const base = mount(`${opts.label}:`, '', opts);
-    session = { ...base, mode: 'corner', onScreen: true };
+    const base = mount(opts.bare ? opts.label : `${opts.label}:`, '', opts);
+    session = { ...base, mode: 'corner', onScreen: true, target: opts.target ?? null, interceptFrom: opts.interceptFrom ?? null };
     pill.classList.add('is-banner');
     host.style.top = 'auto';
     host.style.right = 'auto';

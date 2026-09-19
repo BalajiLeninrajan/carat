@@ -1,12 +1,13 @@
 import type { ElementDescriptor, FieldDescriptor } from '@carat/shared';
 import { interactionChipText, mergeSuggestions } from '@carat/shared';
 import type { Chip } from '../chip';
-import { isTextEntry } from '../chip/keys';
+import { deepActiveElement, isTextEntry } from '../chip/keys';
 import { fillElement, resolveTarget } from '../fill';
 import { relativeAge } from '../format/age';
 import type { ElementEntry } from '../interact';
 import { enumerateElements, performInteraction, stillFits } from '../interact';
 import type { InteractionView, NavigationView, SuggestionSource, SuggestionView } from '../messaging';
+import { inViewport, scrollToTarget } from '../scroll';
 import type { FieldEntry } from '../snapshot';
 import { enumerateFields, valueOf } from '../snapshot';
 import type { ScriptContext } from './context';
@@ -47,7 +48,22 @@ const EMPTY: Answer = { suggestions: [], navigation: [], interactions: [] };
 type Shown =
   | { kind: 'fill'; id: string; suggestion: SuggestionView; interceptFrom: Element | null }
   | { kind: 'interact'; id: string; suggestion: InteractionView; interceptFrom: Element | null }
+  | { kind: 'scroll'; id: string }
   | { kind: 'nav' };
+
+/** What the scroll banner says and does; the chip for the suggestion follows once the page has settled. */
+interface ScrollOffer {
+  target: Element;
+  /** What goes in quotes: the field's label or the element's accessible name. */
+  name: string;
+  detail?: string;
+  reason?: string;
+  interceptFrom: Element | null;
+  /** Show the chip for the same suggestion; `from` is what had focus when Tab was pressed. */
+  then: (from: Element | null) => void;
+  /** Esc, or typing, on the banner: drop the suggestion for this page load, telling nobody. */
+  forget: () => void;
+}
 
 interface PresentOptions {
   /** Keep the chip on this field or element rather than picking afresh; used when only its value changes. */
@@ -81,8 +97,9 @@ export function startSuggestions(
   doc: Document = document,
   opts: SuggestOptions = {},
 ): SuggestionsHandle {
-  const win = doc.defaultView;
-  if (!win) return NO_HANDLE;
+  const maybeWin = doc.defaultView;
+  if (!maybeWin) return NO_HANDLE;
+  const win: Window = maybeWin;
   const { page } = opts;
   const observer: RequestObserver = opts;
 
@@ -163,6 +180,7 @@ export function startSuggestions(
     snap.interactions = mergeSuggestions(snap.interactions, interactions);
     const cur = shown;
     if (chip.visible && cur) {
+      // A scroll banner names no value; the chip after the scroll reads the merged answer.
       if (cur.kind === 'fill') {
         const better = snap.suggestions.find((s) => s.fieldId === cur.id);
         if (better && better !== cur.suggestion) {
@@ -229,12 +247,27 @@ export function startSuggestions(
       });
     };
     const interceptFrom = 'interceptFrom' in opts ? (opts.interceptFrom ?? null) : justFilled;
+    const view = {
+      ...(suggestion.source ? { detail: describeSource(suggestion.source, host) } : {}),
+      ...(suggestion.reason ? { reason: suggestion.reason } : {}),
+    };
+
+    if (!inViewport(target, win)) {
+      presentScroll(pick.i, {
+        target,
+        name: fieldName(pick),
+        ...view,
+        interceptFrom,
+        then: (from) => presentFill(last?.suggestions ?? suggestions, descriptors, registries, { prefer: pick.i, interceptFrom: from }),
+        forget,
+      });
+      return true;
+    }
 
     chip.show({
       target,
       value: suggestion.value,
-      ...(suggestion.source ? { detail: describeSource(suggestion.source, doc.location.host) } : {}),
-      ...(suggestion.reason ? { reason: suggestion.reason } : {}),
+      ...view,
       interceptFrom,
       onAccept() {
         justFilled = null;
@@ -290,22 +323,52 @@ export function startSuggestions(
       void send('feedback', { kind: 'interact', host, role: entry.role, name: entry.name, accepted });
     };
     const interceptFrom = 'interceptFrom' in opts ? (opts.interceptFrom ?? null) : justFilled;
+    const view = {
+      ...(pick.source ? { detail: describeSource(pick.source, host) } : {}),
+      ...(pick.reason ? { reason: pick.reason } : {}),
+    };
+    const accepted = (): void => {
+      done.add(entry.key);
+      feedback(true);
+      snapshotSoon();
+    };
+
+    if (!inViewport(entry.el, win)) {
+      presentScroll(pick.elementId, {
+        target: entry.el,
+        name: entry.name,
+        ...view,
+        interceptFrom,
+        then: (from) => {
+          if (pick.verb !== 'scroll') {
+            presentInteract(last?.interactions ?? interactions, registry, { prefer: pick.elementId, interceptFrom: from });
+            return;
+          }
+          // A bare scroll was the whole interaction. The element is in view now, which the
+          // memoised answer knows nothing about, so the next snapshot asks afresh.
+          forget();
+          done.add(entry.key);
+          feedback(true);
+          last = null;
+          snapshotSoon();
+        },
+        forget,
+      });
+      return true;
+    }
 
     chip.show({
       target: entry.el,
       verb: text.verb,
       value: text.value,
       tail: text.tail,
-      ...(pick.source ? { detail: describeSource(pick.source, host) } : {}),
-      ...(pick.reason ? { reason: pick.reason } : {}),
+      ...view,
       interceptFrom,
       onAccept() {
         justFilled = null;
         forget();
         if (!stillFits(entry.el, pick.verb) || !performInteraction(entry.el, pick.verb, pick.value)) return;
-        done.add(entry.key);
-        feedback(true);
-        snapshotSoon();
+        accepted();
       },
       onDismiss(reason) {
         if (reason !== 'escape' && reason !== 'typed') return;
@@ -317,6 +380,43 @@ export function startSuggestions(
     justFilled = null;
     markFilling();
     return true;
+  }
+
+  /**
+   * The suggestion's target is scrolled out of view, so the field chip would
+   * be invisible. Offer the scroll instead, as a banner: `Scroll to "Add
+   * location"? Tab`. Tab brings the element to the middle of the viewport
+   * and, once the page has settled, the normal chip for the same suggestion
+   * appears, taking Tab from wherever focus was. A scroll is not a fill: it
+   * sends no feedback, no filling cue, and consumes nothing. Esc drops the
+   * offer for this page load and says nothing to the background.
+   */
+  function presentScroll(id: string, offer: ScrollOffer): void {
+    const { target } = offer;
+    chip.showCorner({
+      label: 'Scroll to',
+      bare: true,
+      value: offer.name,
+      ...(offer.detail ? { detail: offer.detail } : {}),
+      ...(offer.reason ? { reason: offer.reason } : {}),
+      target,
+      interceptFrom: offer.interceptFrom,
+      onAccept() {
+        const from = deepActiveElement(doc);
+        const snap = last;
+        void scrollToTarget(target, win).then(() => {
+          // A newer answer, or a page that moved on, owns the chip now.
+          if (!ctx.isValid || last !== snap || !target.isConnected) return;
+          offer.then(from);
+        });
+      },
+      onDismiss(reason) {
+        if (reason === 'escape' || reason === 'typed') offer.forget();
+      },
+    });
+    shown = { kind: 'scroll', id };
+    justFilled = null;
+    if (last) last.shown = true;
   }
 
   // A corner chip does not make this the page being filled: it is the source page, and may still be photographed.
@@ -393,6 +493,11 @@ function describeSource(source: SuggestionSource, here: string): string {
   return `from ${where} · ${relativeAge(source.capturedAt)}`;
 }
 
+/** What the scroll banner calls a field: its label, aria-label, placeholder or name, whichever the page gave it. */
+function fieldName(d: FieldDescriptor): string {
+  return d.lb || d.al || d.ph || d.nm || 'the field';
+}
+
 function isField(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
   if (isTextEntry(target)) return true;
@@ -400,7 +505,7 @@ function isField(target: EventTarget | null): boolean {
   return role !== null && FIELD_ROLES.has(role);
 }
 
-// Focus moves without changing what is worth suggesting; the rest of the descriptor does.
+// Focus and scrolling move without changing what is worth suggesting; the rest of the descriptor does.
 function snapshotKey(descriptors: FieldDescriptor[], elements: ElementDescriptor[]): string {
-  return JSON.stringify([descriptors.map(({ f: _f, ...d }) => d), elements]);
+  return JSON.stringify([descriptors.map(({ f: _f, o: _o, ...d }) => d), elements.map(({ o: _o, ...e }) => e)]);
 }

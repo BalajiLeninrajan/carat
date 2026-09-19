@@ -4,6 +4,7 @@ import { createChip, type Chip, type ChipShowOptions, type CornerShowOptions } f
 import { CAPTURE_TIMING, SNAPSHOT_TIMING, createPageState, startCapture, startSuggestions } from '../src/content';
 import type { ScriptContext } from '../src/content';
 import type { NavigationView } from '../src/messaging';
+import { SCROLL_SETTLE_MS } from '../src/scroll';
 
 const sent = vi.hoisted(() => vi.fn<(type: string, data: unknown) => Promise<unknown>>());
 vi.mock('../src/messaging', () => ({ safeSendMessage: sent }));
@@ -42,6 +43,15 @@ function field(label: string, top: number): HTMLInputElement {
   document.body.append(el);
   return el;
 }
+
+/** jsdom has no scrollIntoView; this one records its options and moves the element into the viewport. */
+function scrollable(el: Element): ReturnType<typeof vi.fn> {
+  const fn = vi.fn(() => onScreen(el, 300));
+  (el as { scrollIntoView: unknown }).scrollIntoView = fn;
+  return fn;
+}
+const SCROLL_OPTS = { block: 'center', inline: 'nearest', behavior: 'smooth' };
+const chipHost = () => document.querySelector('[data-carat-chip]') as HTMLElement;
 
 function tab(): KeyboardEvent {
   const e = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
@@ -353,6 +363,115 @@ describe('content wiring', () => {
     await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.debounceMs + providerMs);
     await flush();
     expect(calls('suggestRequest')).toHaveLength(2);
+  });
+
+  it('offers to scroll to an off-screen field as a banner, scrolls on Tab, then shows the fill chip that the next Tab accepts', async () => {
+    const title = field('Title', 100);
+    const where = field('Location', 2000);
+    const scrolled = scrollable(where);
+    const values: Record<string, string> = { Title: 'Dinner', Location: '123 King St' };
+    const page = createPageState();
+    let offScreen: unknown;
+    sent.mockImplementation(async (type, data) => {
+      if (type !== 'suggestRequest') return undefined;
+      const { fields } = data as { fields: Array<{ i: string; al?: string; v?: string; o?: 1 }> };
+      offScreen = fields.map((f) => [f.al, f.o]);
+      const suggestions: Suggestion[] = fields
+        .filter((f) => !f.v && f.al && values[f.al])
+        .map((f) => ({ kind: 'fill' as const, fieldId: f.i, value: values[f.al!]!, confidence: 0.9, reason: '', sourceContextId: 'c1' }));
+      return { suggestions };
+    });
+    const chip = createChip(document);
+    startSuggestions(ctx, chip, document, { page });
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
+    await flush();
+    // The whole page was described, with the off-screen field flagged and ranked after the one in view.
+    expect(offScreen).toEqual([['Title', undefined], ['Location', 1]]);
+    expect(chip.text).toBe('Fill "Dinner"?');
+
+    title.focus();
+    tab();
+    expect(title.value).toBe('Dinner');
+    // The next suggestion is below the fold: a banner, not an invisible chip, and not yet a filling page for it.
+    expect(chip.text).toBe('Scroll to "Location"?');
+    expect(chipHost().style.bottom).toBe('24px');
+    expect(scrolled).not.toHaveBeenCalled();
+
+    // Tab from the field carat just filled is taken, scrolls, and nothing else happens yet.
+    const e = tab();
+    expect(e.defaultPrevented).toBe(true);
+    expect(scrolled).toHaveBeenCalledWith(SCROLL_OPTS);
+    expect(where.value).toBe('');
+    expect(chip.visible).toBe(false);
+    expect(calls('feedback')).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(SCROLL_SETTLE_MS);
+    await flush();
+    expect(chip.text).toBe('Fill "123 King St"?');
+    expect(chipHost().style.bottom).toBe('');
+    expect(document.activeElement).toBe(title);
+    const e2 = tab();
+    expect(e2.defaultPrevented).toBe(true);
+    expect(where.value).toBe('123 King St');
+    expect(calls('feedback')).toHaveLength(2);
+    expect(calls('feedback')[1]).toMatchObject({ accepted: true, contextId: 'c1' });
+    expect(calls('suggestRequest')).toHaveLength(1);
+  });
+
+  it('shows the scroll banner first when the only suggestion is off-screen, without marking the page as being filled', async () => {
+    const where = field('Location', 2000);
+    const scrolled = scrollable(where);
+    const page = createPageState();
+    sent.mockImplementation(async (type, data) => {
+      if (type !== 'suggestRequest') return undefined;
+      const { fields } = data as { fields: Array<{ i: string; al?: string }> };
+      const f = fields.find((x) => x.al === 'Location')!;
+      return { suggestions: [{ kind: 'fill', fieldId: f.i, value: '123 King St', confidence: 0.9, reason: 'why', sourceContextId: 'c1' }] };
+    });
+    const chip = createChip(document);
+    startSuggestions(ctx, chip, document, { page });
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
+    await flush();
+    expect(chip.text).toBe('Scroll to "Location"?');
+    expect(page.filling).toBe(false);
+    expect(calls('vision')).toEqual([]);
+
+    tab();
+    await vi.advanceTimersByTimeAsync(SCROLL_SETTLE_MS);
+    await flush();
+    expect(scrolled).toHaveBeenCalledTimes(1);
+    expect(chip.text).toBe('Fill "123 King St"?');
+    expect(page.filling).toBe(true);
+    expect(calls('vision')).toEqual([expect.objectContaining({ action: 'filling' })]);
+  });
+
+  it('Esc on the scroll banner scrolls nothing, sends no feedback, and does not bring the banner back on the next focus', async () => {
+    const notes = field('Notes', 100);
+    const where = field('Location', 2000);
+    const scrolled = scrollable(where);
+    sent.mockImplementation(async (type, data) => {
+      if (type !== 'suggestRequest') return undefined;
+      const { fields } = data as { fields: Array<{ i: string; al?: string }> };
+      const f = fields.find((x) => x.al === 'Location')!;
+      return { suggestions: [{ kind: 'fill', fieldId: f.i, value: '123 King St', confidence: 0.9, reason: '', sourceContextId: 'c1' }] };
+    });
+    const chip = createChip(document);
+    startSuggestions(ctx, chip, document);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
+    await flush();
+    expect(chip.text).toBe('Scroll to "Location"?');
+
+    escape();
+    expect(chip.visible).toBe(false);
+    expect(scrolled).not.toHaveBeenCalled();
+    expect(where.value).toBe('');
+    expect(calls('feedback')).toEqual([]);
+
+    notes.focus();
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.debounceMs);
+    await flush();
+    expect(chip.visible).toBe(false);
+    expect(calls('suggestRequest')).toHaveLength(1);
   });
 
   it('never fills over text the user typed while the request was in flight', async () => {
@@ -778,6 +897,66 @@ describe('interaction chip', () => {
     await flush();
     expect(chip.visible).toBe(false);
     expect(calls('suggestRequest')).toHaveLength(1);
+  });
+
+  it('scrolls to an off-screen button on one Tab and clicks it on the next, reporting only the click', async () => {
+    const save = button('Save', 2000);
+    const scrolled = scrollable(save);
+    const clicks = vi.fn();
+    save.addEventListener('click', clicks);
+    answer((_f, elements) => ({
+      interactions: elements.map((e) => ({ kind: 'interact' as const, elementId: e.i, verb: 'click' as const, value: 'Save', confidence: 0.85, reason: '', sourceContextId: 'c1' })),
+    }));
+    const chip = createChip(document);
+    startSuggestions(ctx, chip, document);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
+    await flush();
+    expect((calls('suggestRequest')[0]?.elements as Array<{ o?: 1 }>)[0]?.o).toBe(1);
+    expect(chip.text).toBe('Scroll to "Save"?');
+
+    tab();
+    expect(scrolled).toHaveBeenCalledWith(SCROLL_OPTS);
+    expect(clicks).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(SCROLL_SETTLE_MS);
+    await flush();
+    expect(chip.text).toBe('Click "Save"?');
+    expect(calls('feedback')).toEqual([]);
+
+    tab();
+    expect(clicks).toHaveBeenCalledTimes(1);
+    expect(calls('feedback')).toEqual([{ kind: 'interact', host: location.host, role: 'button', name: 'Save', accepted: true }]);
+  });
+
+  it('performs a bare scroll suggestion as the whole interaction and asks again once the element is in view', async () => {
+    const save = button('Save', 2000);
+    const scrolled = scrollable(save);
+    const clicks = vi.fn();
+    save.addEventListener('click', clicks);
+    answer((_f, elements) => ({
+      interactions: elements
+        .filter((e) => (e as { o?: 1 }).o === 1)
+        .map((e) => ({ kind: 'interact' as const, elementId: e.i, verb: 'scroll' as const, value: '', confidence: 0.85, reason: '', sourceContextId: 'c1' })),
+    }));
+    const chip = createChip(document);
+    startSuggestions(ctx, chip, document);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
+    await flush();
+    expect(chip.text).toBe('Scroll to "Save"?');
+
+    tab();
+    await vi.advanceTimersByTimeAsync(SCROLL_SETTLE_MS);
+    await flush();
+    expect(scrolled).toHaveBeenCalledTimes(1);
+    expect(clicks).not.toHaveBeenCalled();
+    expect(chip.visible).toBe(false);
+    expect(calls('feedback')).toEqual([{ kind: 'interact', host: location.host, role: 'button', name: 'Save', accepted: true }]);
+
+    // The element is on-screen now, so the fresh request carries no flag and the answer has nothing left to scroll to.
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.debounceMs);
+    await flush();
+    expect(calls('suggestRequest')).toHaveLength(2);
+    expect((calls('suggestRequest')[1]?.elements as Array<{ o?: 1 }>)[0]?.o).toBeUndefined();
+    expect(chip.visible).toBe(false);
   });
 
   it('prefers a fill over an interaction and an interaction over the corner chip', async () => {
