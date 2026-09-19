@@ -94,3 +94,4 @@ export {
 export type { Entity, EntityKind, EntityList, PredictInput } from './predict-prompt';
 export { KNOWN_PAGES, knownPageFor, knownPageForUrl, matchesKnownField } from './known-fields';
 export type { KnownPage, KnownPageId } from './known-fields';
+export * from './next-action';
