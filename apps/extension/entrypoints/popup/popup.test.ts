@@ -89,6 +89,73 @@ describe('popup', () => {
     expect(app.dataset.state).toBe('empty');
   });
 
+  it('clears from the header: the list empties as you click, the button says so, and it never locks', async () => {
+    vi.useFakeTimers();
+    const wiped = deferred<undefined>();
+    sendMessage.mockImplementation((type: string) => {
+      if (type === 'getSettings') return Promise.resolve({ enabled: true });
+      if (type === 'getKnown') {
+        return Promise.resolve({
+          items: [
+            {
+              id: 'a',
+              origin: 'https://discord.com',
+              title: 'general',
+              kind: 'page',
+              capturedAt: Date.now(),
+              preview: 'dinner?',
+            },
+          ],
+          pinned: true,
+        });
+      }
+      if (type === 'clearKnown') return wiped.promise;
+      return Promise.resolve(undefined);
+    });
+    await import('./main');
+    await vi.advanceTimersByTimeAsync(0);
+    const app = document.getElementById('app') as HTMLElement;
+    const clear = document.getElementById('clear') as HTMLButtonElement;
+    // At the top of the popup, beside the on switch, rather than tucked into the footer.
+    expect(clear.closest('header')).not.toBeNull();
+    expect(clear.textContent).toBe('Clear what carat remembers');
+    expect(document.querySelectorAll('#list li')).toHaveLength(1);
+
+    clear.click();
+    // The list goes as the user clicks, not after the round trip.
+    expect(document.querySelectorAll('#list li')).toHaveLength(0);
+    expect(app.dataset.state).toBe('empty');
+    expect((document.getElementById('pinned-note') as HTMLElement).hidden).toBe(true);
+    expect(clear.textContent).toBe('Clearing…');
+    expect(clear.disabled).toBe(false);
+
+    wiped.resolve(undefined);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sendMessage).toHaveBeenCalledWith('clearKnown', undefined);
+    expect(clear.textContent).toBe('Cleared');
+    expect(clear.disabled).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(clear.textContent).toBe('Clear what carat remembers');
+  });
+
+  it('says the worker is offline when a clear times out, and takes the label back', async () => {
+    vi.useFakeTimers();
+    sendMessage.mockImplementation((type: string) =>
+      type === 'clearKnown'
+        ? new Promise(() => {})
+        : Promise.resolve(type === 'getSettings' ? { enabled: true } : { items: [] }),
+    );
+    await import('./main');
+    await vi.advanceTimersByTimeAsync(0);
+    const clear = document.getElementById('clear') as HTMLButtonElement;
+    clear.click();
+    await vi.advanceTimersByTimeAsync(3001);
+    expect((document.getElementById('app') as HTMLElement).dataset.state).toBe('offline');
+    expect(clear.textContent).toBe('Clear what carat remembers');
+    expect(clear.disabled).toBe(false);
+  });
+
   it('flips to offline when the background hangs, and retries', async () => {
     vi.useFakeTimers();
     sendMessage.mockImplementation(() => new Promise(() => {}));
