@@ -268,7 +268,16 @@ describe('settings store', () => {
       statusLine: false,
       screenshots: false,
       smartModel: '',
+      eagerness: 'eager',
     });
+  });
+
+  it('keeps eagerness to the three levels and defaults it to eager', async () => {
+    const settings = createSettingsStore(new FakeArea());
+    expect((await settings.set({ eagerness: 'balanced' })).eagerness).toBe('balanced');
+    expect((await settings.set({ eagerness: 'conservative' })).eagerness).toBe('conservative');
+    expect((await settings.set({ eagerness: 'reckless' as never })).eagerness).toBe('eager');
+    expect((await settings.set({ eagerness: 3 as never })).eagerness).toBe('eager');
   });
 
   it('keeps screenshots off unless stored as true and keeps a blank smart model blank', async () => {

@@ -2,7 +2,7 @@ import { DEFAULT_SETTINGS } from '@carat/shared';
 import { describe, expect, it } from 'vitest';
 import { normalizeSettings } from './settings-form';
 
-const base = { enabled: true, provider: 'openai', baseURL: '', apiKey: '', model: '', statusLine: false, cfAccountId: '', cfApiToken: '', smartModel: '', screenshots: false };
+const base = { enabled: true, provider: 'openai', baseURL: '', apiKey: '', model: '', statusLine: false, cfAccountId: '', cfApiToken: '', smartModel: '', screenshots: false, eagerness: 'eager' };
 
 describe('normalizeSettings', () => {
   it('fills blank baseURL and model with the defaults', () => {
@@ -51,6 +51,14 @@ describe('normalizeSettings', () => {
     expect(s.cfApiToken).toBe('cf-x');
     expect(normalizeSettings(base).cfAccountId).toBe('');
     expect(normalizeSettings(base).cfApiToken).toBe('');
+  });
+
+  it('keeps eagerness to a known level, eager when the form sends nonsense', () => {
+    expect(normalizeSettings(base).eagerness).toBe('eager');
+    expect(normalizeSettings({ ...base, eagerness: 'balanced' }).eagerness).toBe('balanced');
+    expect(normalizeSettings({ ...base, eagerness: 'conservative' }).eagerness).toBe('conservative');
+    expect(normalizeSettings({ ...base, eagerness: '' }).eagerness).toBe(DEFAULT_SETTINGS.eagerness);
+    expect(normalizeSettings({ ...base, eagerness: 'Eager' }).eagerness).toBe(DEFAULT_SETTINGS.eagerness);
   });
 
   it('carries the status line toggle through', () => {

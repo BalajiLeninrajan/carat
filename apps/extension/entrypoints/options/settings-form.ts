@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, type Settings } from '@carat/shared';
+import { DEFAULT_SETTINGS, isEagerness, type Settings } from '@carat/shared';
 
 export interface SettingsFormValues {
   enabled: boolean;
@@ -11,6 +11,7 @@ export interface SettingsFormValues {
   cfApiToken: string;
   smartModel: string;
   screenshots: boolean;
+  eagerness: string;
 }
 
 const PROVIDERS: ReadonlySet<Settings['provider']> = new Set(['openai', 'baseten', 'local', 'cloudflare']);
@@ -35,5 +36,6 @@ export function normalizeSettings(v: SettingsFormValues): Partial<Settings> {
     cfApiToken: v.cfApiToken.trim(),
     smartModel, // blank is a setting of its own: the fast model with low reasoning
     screenshots: v.screenshots,
+    eagerness: isEagerness(v.eagerness) ? v.eagerness : DEFAULT_SETTINGS.eagerness,
   };
 }

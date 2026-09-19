@@ -2,7 +2,7 @@ import type { ContextItem, ElementDescriptor, FieldDescriptor, PageMeta, Setting
 import { CONTROL_ROLES, isDenylisted } from '@carat/shared';
 import { isSiteOff } from '../store';
 import type { GateVerdict } from './diag';
-import { isForeign, isFresh } from './eligible';
+import { isFresh, isSource } from './eligible';
 import type { Requester } from './requester';
 import { ownContext } from './score';
 
@@ -33,8 +33,9 @@ export function gate(
 
 /**
  * Same checks as `gate`, but says which one stopped the request. Fresh text
- * from another tab and origin feeds fills and interactions; the requesting
- * tab's own fresh text feeds actions. Either is enough to ask.
+ * from another tab feeds fills and interactions (another origin too, below
+ * eager); the requesting tab's own fresh text feeds actions. Either is enough
+ * to ask.
  */
 export function explainGate(
   input: GateInput,
@@ -50,9 +51,9 @@ export function explainGate(
   if (items.length === 0) return 'no-context';
   const fresh = items.filter((i) => isFresh(i, now));
   if (fresh.length === 0) return 'stale-context';
-  if (fresh.some((i) => isForeign(i, requester))) return 'ok';
+  if (fresh.some((i) => isSource(i, requester, settings.eagerness))) return 'ok';
   if (ownContext(items, requester, now).length > 0) return 'ok';
-  // Fresh text exists but is neither another site's nor this tab's own: another tab on the same site.
+  // Fresh text exists but is neither another site's nor this tab's own: another tab on the same site, shut out below eager.
   return 'own-context';
 }
 

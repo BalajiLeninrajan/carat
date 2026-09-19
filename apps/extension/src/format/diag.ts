@@ -1,3 +1,4 @@
+import { DEFAULT_EAGERNESS, EAGERNESS } from '@carat/shared';
 import type { CaptureDiag, CaptureVerdict, GateVerdict, ProviderAttempt, SuggestDiag, VisionDiag, VisionVerdict } from '../background/diag';
 import { relativeAge } from './age';
 
@@ -45,7 +46,7 @@ export function describeCapture(d: CaptureDiag, now: number = Date.now()): strin
   return `${d.kind} from ${d.host} ${relativeAge(d.at, now)}: ${CAPTURE[d.verdict]}`;
 }
 
-/** One line: "checked 5s ago: openai answered in 812 ms with 1, offered 1". */
+/** One line: "checked 5s ago: openai answered in 812 ms with 1, offered 1, 2 candidates under the eager floor (0.35)". */
 export function describeSuggest(d: SuggestDiag, now: number = Date.now()): string {
   const when = `checked ${relativeAge(d.at, now)}`;
   if (d.gate !== 'ok') return `${when}: no request, ${GATE[d.gate]}`;
@@ -54,8 +55,12 @@ export function describeSuggest(d: SuggestDiag, now: number = Date.now()): strin
     : (d.attempts ?? []).map(describeAttempt).join('; ') || 'no provider ran';
   const tabs = d.navigation ? `, ${d.navigation} tab ${d.navigation === 1 ? 'offer' : 'offers'}` : '';
   const controls = d.interactions ? `, ${d.interactions} ${d.interactions === 1 ? 'control' : 'controls'}` : '';
+  const level = d.eagerness ?? DEFAULT_EAGERNESS;
+  const floor = d.underFloor
+    ? `, ${d.underFloor} ${d.underFloor === 1 ? 'candidate' : 'candidates'} under the ${level} floor (${EAGERNESS[level].minConfidence})`
+    : '';
   const smart = d.refine ? '; smart model asked for a second opinion' : '';
-  return `${when}: ${outcome}, offered ${d.offered ?? 0}${tabs}${controls}${smart}`;
+  return `${when}: ${outcome}, offered ${d.offered ?? 0}${tabs}${controls}${floor}${smart}`;
 }
 
 function describeAttempt(a: ProviderAttempt): string {

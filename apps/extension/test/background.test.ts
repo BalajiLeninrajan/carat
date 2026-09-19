@@ -63,19 +63,30 @@ const maps = {
   fields: [{ i: 'f0', t: 'input:text', nm: 'searchboxinput', ph: 'Search Google Maps', f: 1 as const }],
 };
 const requester = { tabId: 2, origin: 'https://www.google.com' };
+// The product default is eager; `careful` is the old behaviour, for the checks that are about it.
 const enabled: Settings = { ...DEFAULT_SETTINGS, apiKey: 'sk-test' };
+const careful: Settings = { ...enabled, eagerness: 'balanced' };
 
 describe('gate', () => {
   it('passes with a fresh item from another tab and origin', () => {
     expect(gate(maps, [item()], enabled, requester, NOW)).toBe(true);
   });
 
-  it('needs a different tab AND a different origin for fills, or the requesting tab itself for actions', () => {
-    // Same origin from another tab is an echo of what the user is looking at.
-    expect(gate(maps, [item({ origin: 'https://www.google.com' })], enabled, requester, NOW)).toBe(false);
+  it('needs a different tab AND a different origin for fills below eager, or the requesting tab itself for actions', () => {
+    // Same origin from another tab is an echo of what the user is looking at, unless eager says otherwise.
+    expect(gate(maps, [item({ origin: 'https://www.google.com' })], careful, requester, NOW)).toBe(false);
+    expect(gate(maps, [item({ origin: 'https://www.google.com' })], { ...enabled, eagerness: 'conservative' }, requester, NOW)).toBe(false);
+    expect(gate(maps, [item({ origin: 'https://www.google.com' })], enabled, requester, NOW)).toBe(true);
     // The requesting tab's own page is a source for navigation, so it clears the gate on its own.
     expect(gate(maps, [item({ tabId: 2 })], enabled, requester, NOW)).toBe(true);
     expect(gate(maps, [item({ tabId: 2, lastSeenAt: NOW - 31 * MIN })], enabled, requester, NOW)).toBe(false);
+  });
+
+  it('at eager, still refuses the requesting tab itself as a fill source and keeps the freshness window', () => {
+    const noOwnText = { ...maps, page: { ...maps.page, host: 'www.google.com' } };
+    // Only the requesting tab's own item, on a request that is not from a tab: no other tab to draw on.
+    expect(gate(noOwnText, [item({ tabId: 2, origin: 'https://www.google.com' })], enabled, { tabId: undefined, origin: 'https://www.google.com' }, NOW)).toBe(false);
+    expect(gate(maps, [item({ origin: 'https://www.google.com', lastSeenAt: NOW - 31 * MIN })], enabled, requester, NOW)).toBe(false);
   });
 
   it('ignores items older than the store TTL', () => {
@@ -107,8 +118,9 @@ describe('explainGate', () => {
     expect(explainGate(bank, [item()], enabled, requester, NOW)).toBe('denylisted');
     expect(explainGate({ ...maps, fields: [] }, [item()], enabled, requester, NOW)).toBe('no-fields');
     expect(explainGate(maps, [], enabled, requester, NOW)).toBe('no-context');
-    // Another tab on the same site is an echo; the requesting tab's own text is a source for actions.
-    expect(explainGate(maps, [item({ origin: 'https://www.google.com' })], enabled, requester, NOW)).toBe('own-context');
+    // Another tab on the same site is an echo below eager; the requesting tab's own text is a source for actions.
+    expect(explainGate(maps, [item({ origin: 'https://www.google.com' })], careful, requester, NOW)).toBe('own-context');
+    expect(explainGate(maps, [item({ origin: 'https://www.google.com' })], enabled, requester, NOW)).toBe('ok');
     expect(explainGate(maps, [item({ tabId: 2 })], enabled, requester, NOW)).toBe('ok');
     expect(explainGate(maps, [item({ lastSeenAt: NOW - 31 * MIN })], enabled, requester, NOW)).toBe('stale-context');
     expect(explainGate(maps, [item({ tabId: 2, lastSeenAt: NOW - 31 * MIN })], enabled, requester, NOW)).toBe('stale-context');
@@ -173,9 +185,13 @@ describe('scoreAndPickContext', () => {
     expect(tail?.text.length).toBeGreaterThan(1000);
   });
 
-  it('excludes the requesting tab and origin', () => {
+  it('excludes the requesting tab always, and its origin below eager', () => {
     const items = [item({ tabId: 2 }), item({ id: 'x', origin: 'https://www.google.com', tabId: 9 })];
-    expect(scoreAndPickContext(items, requester, NOW)).toEqual([]);
+    expect(scoreAndPickContext(items, requester, NOW, 'balanced')).toEqual([]);
+    expect(scoreAndPickContext(items, requester, NOW, 'conservative')).toEqual([]);
+    expect(scoreAndPickContext(items, requester, NOW, 'eager').map((c) => c.id)).toEqual(['x']);
+    // Without a tab id there is no telling the asker's own text from another tab's, so only the origin rule is left, at eager too.
+    expect(scoreAndPickContext(items, { tabId: undefined, origin: 'https://www.google.com' }, NOW, 'eager').map((c) => c.id)).toEqual(['c1']);
   });
 });
 
@@ -191,14 +207,14 @@ describe('fingerprintMatchesDescriptor', () => {
 
 function fakeProvider(
   id: Provider['id'],
-  impl: (req: SuggestRequest, signal: AbortSignal) => Promise<Suggestion[]>,
+  impl: (req: SuggestRequest, signal: AbortSignal, onUnderFloor?: (s: Suggestion) => void) => Promise<Suggestion[]>,
 ): Provider & { calls: number } {
   const p = {
     id,
     calls: 0,
-    suggest(req: SuggestRequest, opts: { signal: AbortSignal }) {
+    suggest(req: SuggestRequest, opts: { signal: AbortSignal; onUnderFloor?: (s: Suggestion) => void }) {
       p.calls++;
-      return impl(req, opts.signal);
+      return impl(req, opts.signal, opts.onUnderFloor);
     },
   };
   return p;
@@ -228,7 +244,7 @@ async function seeded() {
 }
 
 describe('orchestrate', () => {
-  it('returns provider suggestions, top 2, one per field', async () => {
+  it('returns provider suggestions, one per field, top 2 below eager and top 4 at eager', async () => {
     const { store, ctxId, now } = await seeded();
     const remote = fakeProvider('openai', async () => [
       suggestion({ sourceContextId: ctxId, confidence: 0.8 }),
@@ -236,14 +252,15 @@ describe('orchestrate', () => {
       suggestion({ sourceContextId: ctxId, fieldId: 'f1', confidence: 0.85 }),
       suggestion({ sourceContextId: ctxId, fieldId: 'f2', confidence: 0.75 }),
       suggestion({ sourceContextId: ctxId, fieldId: 'f3', confidence: 0.5 }),
+      suggestion({ sourceContextId: ctxId, fieldId: 'f4', confidence: 0.6 }),
     ]);
     const input = {
       ...maps,
-      fields: [...maps.fields, { i: 'f1', t: 'textarea' }, { i: 'f2', t: 'textarea' }, { i: 'f3', t: 'textarea' }],
+      fields: [...maps.fields, { i: 'f1', t: 'textarea' }, { i: 'f2', t: 'textarea' }, { i: 'f3', t: 'textarea' }, { i: 'f4', t: 'textarea' }],
     };
     const res = await orchestrate(input, requester, {
       store,
-      settings: async () => enabled,
+      settings: async () => careful,
       createProvider: () => remote,
       now,
     });
@@ -254,15 +271,74 @@ describe('orchestrate', () => {
     // The chip can say where it came from, but never gets the text itself.
     expect(res.suggestions[0]?.source).toEqual({ host: 'discord.com', capturedAt: NOW });
     expect(Object.keys(res.suggestions[0]!)).not.toContain('text');
+
+    // Eager: four of the five fields, best first; the content script shows them one at a time.
+    const eager = await orchestrate(input, requester, { store, settings: async () => enabled, createProvider: () => remote, now });
+    expect(eager.suggestions.map((s) => [s.fieldId, s.confidence])).toEqual([
+      ['f0', 0.95],
+      ['f1', 0.85],
+      ['f2', 0.75],
+      ['f4', 0.6],
+    ]);
+  });
+
+  it('applies the level\'s floor, counts what fell under it for the popup, and keys the cache by level', async () => {
+    const { store, ctxId, now } = await seeded();
+    const reports: SuggestDiag[] = [];
+    const remote = fakeProvider('openai', async () => [
+      suggestion({ sourceContextId: ctxId, confidence: 0.6 }),
+      suggestion({ sourceContextId: ctxId, fieldId: 'f1', confidence: 0.4 }),
+      suggestion({ sourceContextId: ctxId, fieldId: 'f2', confidence: 0.3 }),
+      suggestion({ sourceContextId: ctxId, fieldId: 'f9', confidence: 0.1 }), // no such field: junk, not a near miss
+    ]);
+    const input = { ...maps, fields: [...maps.fields, { i: 'f1', t: 'textarea' }, { i: 'f2', t: 'textarea' }] };
+    const deps = { store, createProvider: () => remote, now, onDiag: (d: SuggestDiag) => void reports.push(d) };
+
+    const eager = await orchestrate(input, requester, { ...deps, settings: async () => enabled });
+    expect(eager.suggestions.map((s) => s.fieldId)).toEqual(['f0', 'f1']);
+    expect(reports[0]).toMatchObject({ eagerness: 'eager', underFloor: 1, offered: 2 });
+
+    // A different level is a different cache entry: the provider is asked again and the stricter floor applies.
+    const balanced = await orchestrate(input, requester, { ...deps, settings: async () => careful });
+    expect(remote.calls).toBe(2);
+    expect(balanced.suggestions.map((s) => s.fieldId)).toEqual(['f0']);
+    expect(reports[1]).toMatchObject({ eagerness: 'balanced', underFloor: 2, offered: 1 });
+
+    const conservative = await orchestrate(input, requester, { ...deps, settings: async () => ({ ...enabled, eagerness: 'conservative' as const }) });
+    expect(conservative.suggestions).toEqual([]);
+    expect(reports[2]).toMatchObject({ eagerness: 'conservative', underFloor: 3, offered: 0 });
+
+    // Drops the provider itself reports count too.
+    const dropping = fakeProvider('openai', async (_req, _signal, onUnderFloor) => {
+      onUnderFloor?.(suggestion({ sourceContextId: ctxId, confidence: 0.2 }));
+      return [];
+    });
+    await orchestrate({ ...input, force: true }, requester, { ...deps, createProvider: () => dropping, settings: async () => enabled });
+    expect(reports[3]).toMatchObject({ cached: false, underFloor: 1, offered: 0 });
+  });
+
+  it('at eager, fills from another tab on the same site; never from the requesting tab', async () => {
+    const { store, ctxId, now } = await seeded();
+    const remote = fakeProvider('openai', async (req) => req.context.map((c) => suggestion({ sourceContextId: c.id })));
+    // The only item is Discord's, from tab 1; a second Discord tab asks.
+    const asker = { tabId: 3, origin: 'https://discord.com' };
+    const eager = await orchestrate(maps, asker, { store, settings: async () => enabled, createProvider: () => remote, now });
+    expect(eager.suggestions.map((s) => s.sourceContextId)).toEqual([ctxId]);
+    expect(remote.calls).toBe(1);
+    // The tab that captured it gets nothing: its own text is never a fill source, and the
+    // other tab's cached answer is not served to it either (context and own text key the cache apart).
+    const self = await orchestrate(maps, { tabId: 1, origin: 'https://discord.com' }, { store, settings: async () => enabled, createProvider: () => remote, now });
+    expect(self.suggestions).toEqual([]);
+    expect(remote.calls).toBe(2);
   });
 
   it('returns nothing when the gate fails and never calls the provider', async () => {
     const { store, now } = await seeded();
     const remote = fakeProvider('openai', async () => [suggestion()]);
-    // Same origin as the only item, from a tab that has captured nothing of its own.
+    // Same origin as the only item, from a tab that has captured nothing of its own: shut out below eager.
     const res = await orchestrate(maps, { tabId: 9, origin: 'https://discord.com' }, {
       store,
-      settings: async () => enabled,
+      settings: async () => careful,
       createProvider: () => remote,
       now,
     });
@@ -402,7 +478,7 @@ describe('orchestrate', () => {
     const local = fakeProvider('local', async () => [suggestion({ sourceContextId: ctxId, confidence: 0.75 })]);
     const deps = {
       store,
-      settings: async () => enabled,
+      settings: async () => careful,
       createProvider: () => flaky,
       localProvider: local,
       now,
@@ -410,7 +486,7 @@ describe('orchestrate', () => {
     };
     // A second Discord tab asking: the only context is the same site's, and not its own.
     await orchestrate(maps, { tabId: 3, origin: 'https://discord.com' }, deps);
-    expect(reports[0]).toMatchObject({ at: NOW, host: 'www.google.com', fields: 1, gate: 'own-context' });
+    expect(reports[0]).toMatchObject({ at: NOW, host: 'www.google.com', fields: 1, gate: 'own-context', eagerness: 'balanced' });
 
     await orchestrate(maps, requester, deps);
     expect(reports[1]).toMatchObject({ gate: 'ok', cached: false, offered: 1 });
@@ -1060,7 +1136,7 @@ describe('orchestrate interactions', () => {
       interact({ sourceContextId: ctxId, elementId: 'e9', value: 'Ghost' }), // not described
       interact({ sourceContextId: ctxId, elementId: 'e0', verb: 'set', value: '1' }), // wrong verb for a button
     ]);
-    const res = await orchestrate(input, onCalendar, { store, settings: async () => enabled, createProvider: () => remote, now });
+    const res = await orchestrate(input, onCalendar, { store, settings: async () => careful, createProvider: () => remote, now });
     expect(res.interactions.map((s) => [s.elementId, s.verb, s.value, s.reason])).toEqual([
       ['e0', 'click', 'Save', 'better'],
       ['e2', 'set', '40', 'r'],
@@ -1136,7 +1212,7 @@ describe('orchestrate interactions', () => {
     expect(await store.suppressedKeys()).toEqual([]);
   });
 
-  it('caps interactions at two, one per element, best first', async () => {
+  it('caps interactions at two below eager and four at eager, one per element, best first', async () => {
     const { store, ctxId, now } = await seeded();
     await handleFeedback({ fieldId: 'f0', fingerprint: 'input|text|||Add title|', contextId: ctxId, accepted: true, host: 'calendar.google.com' }, store, 2);
     const many = { ...input, elements: [...elements, { i: 'e4', r: 'checkbox' as const, nm: 'Vegetarian', st: 'off' as const }] };
@@ -1146,10 +1222,16 @@ describe('orchestrate interactions', () => {
       interact({ sourceContextId: ctxId, elementId: 'e4', verb: 'check', value: 'Vegetarian', confidence: 0.95 }),
       interact({ sourceContextId: ctxId, elementId: 'e4', verb: 'check', value: 'Vegetarian', confidence: 0.75 }),
     ]);
-    const res = await orchestrate(many, onCalendar, { store, settings: async () => enabled, createProvider: () => remote, now });
+    const res = await orchestrate(many, onCalendar, { store, settings: async () => careful, createProvider: () => remote, now });
     expect(res.interactions.map((s) => [s.elementId, s.confidence])).toEqual([
       ['e4', 0.95],
       ['e1', 0.9],
+    ]);
+    const eager = await orchestrate(many, onCalendar, { store, settings: async () => enabled, createProvider: () => remote, now });
+    expect(eager.interactions.map((s) => [s.elementId, s.confidence])).toEqual([
+      ['e4', 0.95],
+      ['e1', 0.9],
+      ['e0', 0.8],
     ]);
   });
 

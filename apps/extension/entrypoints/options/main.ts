@@ -8,7 +8,7 @@ const status = document.getElementById('status') as HTMLElement;
 const saveButton = document.getElementById('save') as HTMLButtonElement;
 const retryButton = document.getElementById('retry') as HTMLButtonElement;
 
-const field = <T extends HTMLElement>(name: string) =>
+const field = <T extends HTMLElement | RadioNodeList>(name: string) =>
   form.elements.namedItem(name) as T;
 
 const enabled = field<HTMLInputElement>('enabled');
@@ -21,6 +21,7 @@ const cfAccountId = field<HTMLInputElement>('cfAccountId');
 const cfApiToken = field<HTMLInputElement>('cfApiToken');
 const smartModel = field<HTMLInputElement>('smartModel');
 const screenshots = field<HTMLInputElement>('screenshots');
+const eagerness = field<RadioNodeList>('eagerness');
 
 // A fresh service worker can take a moment to wake; a dead one never answers.
 // Cap the wait so the page can offer a retry instead of hanging.
@@ -42,6 +43,7 @@ function render(s: Settings): void {
   cfApiToken.value = s.cfApiToken;
   smartModel.value = s.smartModel;
   screenshots.checked = s.screenshots;
+  eagerness.value = s.eagerness;
 }
 
 function read(): Partial<Settings> {
@@ -56,6 +58,7 @@ function read(): Partial<Settings> {
     cfApiToken: cfApiToken.value,
     smartModel: smartModel.value,
     screenshots: screenshots.checked,
+    eagerness: eagerness.value,
   });
 }
 

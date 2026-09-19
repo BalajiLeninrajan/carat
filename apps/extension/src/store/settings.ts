@@ -1,5 +1,5 @@
 import type { Settings } from '@carat/shared';
-import { DEFAULT_SETTINGS } from '@carat/shared';
+import { DEFAULT_SETTINGS, isEagerness } from '@carat/shared';
 import type { StorageArea } from './storage-area';
 
 const KEY = 'settings';
@@ -44,6 +44,7 @@ function sanitize(raw: unknown): Settings {
     statusLine: typeof r.statusLine === 'boolean' ? r.statusLine : DEFAULT_SETTINGS.statusLine,
     screenshots: typeof r.screenshots === 'boolean' ? r.screenshots : DEFAULT_SETTINGS.screenshots,
     smartModel: str(r.smartModel, '').trim() || legacySmartModel(r.visionModel),
+    eagerness: isEagerness(r.eagerness) ? r.eagerness : DEFAULT_SETTINGS.eagerness,
   };
 }
 

@@ -90,6 +90,22 @@ describe('describeVision', () => {
     );
   });
 
+  it('names the level and its floor when candidates were dropped for confidence', () => {
+    const base = { at: NOW, host: 'www.google.com', fields: 1, gate: 'ok' as const, cached: false, attempts: [{ id: 'openai' as const, ms: 40, count: 0 }] };
+    expect(describeSuggest({ ...base, offered: 0, eagerness: 'eager', underFloor: 2 }, NOW)).toBe(
+      'checked just now: openai answered in 40 ms with 0, offered 0, 2 candidates under the eager floor (0.35)',
+    );
+    expect(describeSuggest({ ...base, offered: 1, eagerness: 'balanced', underFloor: 1, navigation: 1 }, NOW)).toBe(
+      'checked just now: openai answered in 40 ms with 0, offered 1, 1 tab offer, 1 candidate under the balanced floor (0.55)',
+    );
+    expect(describeSuggest({ ...base, offered: 0, eagerness: 'conservative', underFloor: 3, refine: true }, NOW)).toBe(
+      'checked just now: openai answered in 40 ms with 0, offered 0, 3 candidates under the conservative floor (0.7); smart model asked for a second opinion',
+    );
+    // Nothing dropped, nothing said; a record from before the setting existed reads as the default.
+    expect(describeSuggest({ ...base, offered: 1, eagerness: 'eager' }, NOW)).not.toContain('floor');
+    expect(describeSuggest({ ...base, offered: 0, underFloor: 1 }, NOW)).toContain('under the eager floor (0.35)');
+  });
+
   it('notes a smart second opinion on the check line', () => {
     expect(describeSuggest({ at: NOW, host: 'www.google.com', fields: 1, gate: 'ok', cached: false, attempts: [{ id: 'openai', ms: 40, count: 1 }], offered: 1, refine: true }, NOW)).toBe(
       'checked just now: openai answered in 40 ms with 1, offered 1; smart model asked for a second opinion',

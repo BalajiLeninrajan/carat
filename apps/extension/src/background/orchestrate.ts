@@ -1,5 +1,7 @@
 import type {
   ActionSuggestion,
+  Eagerness,
+  EagernessKnobs,
   ElementDescriptor,
   FieldDescriptor,
   FillSuggestion,
@@ -10,8 +12,8 @@ import type {
   SuggestRequest,
   Suggestion,
 } from '@carat/shared';
-import { LIMITS, fnv1a, impliedVerb, isDestructiveName, isIntentName, isOffScreen, mergeSuggestions, verbFits } from '@carat/shared';
-import type { Provider } from '@carat/providers';
+import { EAGERNESS, LIMITS, fnv1a, impliedVerb, isDestructiveName, isIntentName, isOffScreen, mergeSuggestions, verbFits } from '@carat/shared';
+import type { Provider, SuggestOptions } from '@carat/providers';
 import { LocalProvider, createProvider, createSmartProvider } from '@carat/providers';
 import type { InteractionView, RefineResponse, SuggestResponse, SuggestionSource, SuggestionView } from '../messaging';
 import type { ContextStore } from '../store';
@@ -71,6 +73,8 @@ export async function orchestrate(input: SuggestInput, requester: Requester, dep
   const diag: SuggestDiag = { at: now(), host: input.page.host, fields: input.fields.length, gate: 'ok' };
 
   const settings = await deps.settings();
+  const { eagerness } = settings;
+  diag.eagerness = eagerness;
   const items = await store.items();
   const elements = input.elements ?? [];
   diag.elements = elements.length;
@@ -80,7 +84,7 @@ export async function orchestrate(input: SuggestInput, requester: Requester, dep
   const at = await store.clock();
   diag.gate = explainGate({ ...input, elements, filled }, items, settings, requester, at);
   const smart = smartPath(settings, deps, requester);
-  const shape: Shape = { input, elements, filled, store };
+  const shape: Shape = { input, elements, filled, store, eagerness };
   if (diag.gate !== 'ok') {
     const result: SuggestResponse = { ...NONE };
     // Nothing to read yet, but a screenshot is being transcribed: the smart pass alone may have an answer.
@@ -92,24 +96,29 @@ export async function orchestrate(input: SuggestInput, requester: Requester, dep
     return result;
   }
 
-  const context = scoreAndPickContext(items, requester, at);
+  const context = scoreAndPickContext(items, requester, at, eagerness);
   const own = ownContext(items, requester, at);
   if (context.length === 0 && own.length === 0) {
     deps.onDiag?.(diag);
     return NONE;
   }
 
-  const key = cacheKey(input, elements, filled, context, own);
+  const key = cacheKey(shape, context, own);
   const cached = input.force ? undefined : await store.getCached(key);
   diag.cached = cached !== undefined;
   let suggestions: Suggestion[];
   if (cached) {
     // The key ignores what is scrolled into view, so a cached scroll may now name an on-screen element.
-    suggestions = valid(cached, input.fields, elements, filled, context, own);
+    // The floor was already applied when the answer was cached, so nothing is counted here.
+    suggestions = valid(cached, shape, context, own);
   } else {
-    const outcome = await callProvider(request(shape, context, own, now()), settings, deps, timeoutMs);
+    // Counted whether the provider or the check below dropped them; a provider never returns what it dropped.
+    let underFloor = 0;
+    const bump = (): void => void underFloor++;
+    const outcome = await callProvider(request(shape, context, own, now()), settings, deps, timeoutMs, bump);
     diag.attempts = outcome.attempts;
-    suggestions = valid(outcome.suggestions, input.fields, elements, filled, context, own);
+    suggestions = valid(outcome.suggestions, shape, context, own, bump);
+    if (underFloor > 0) diag.underFloor = underFloor;
     // A transport error or timeout is not "nothing to suggest": caching it
     // would hide chips for a minute after one blip. Only a real answer is kept.
     if (!outcome.failed) await store.setCached(key, suggestions);
@@ -141,6 +150,7 @@ interface Shape {
   elements: ElementDescriptor[];
   filled: string[];
   store: ContextStore;
+  eagerness: Eagerness;
 }
 
 interface SmartPath {
@@ -188,22 +198,22 @@ async function smartSuggest(
   // Leave the model at least a fifth of the budget however long the transcription takes.
   await Promise.race([smart.vision.settled(), sleep(budget * 0.8)]);
 
-  const { store, input, elements, filled } = shape;
+  const { store, eagerness } = shape;
   const items = await store.items();
   const at = await store.clock();
-  const context = scoreAndPickContext(items, requester, at);
+  const context = scoreAndPickContext(items, requester, at, eagerness);
   const own = ownContext(items, requester, at);
   const remaining = deadline - Date.now();
   if (context.length === 0 || remaining < MIN_SMART_MS) return { suggestions: [], interactions: [] };
 
   let answer: Suggestion[];
   try {
-    answer = valid(await withTimeout(smart.provider, request(shape, context, own, now()), remaining), input.fields, elements, filled, context, own);
+    answer = valid(await withTimeout(smart.provider, request(shape, context, own, now()), remaining), shape, context, own);
   } catch {
     return { suggestions: [], interactions: [] };
   }
   const merged = mergeSuggestions(fast, answer);
-  await store.setCached(cacheKey(input, elements, filled, context, own), merged);
+  await store.setCached(cacheKey(shape, context, own), merged);
   const offered = await offer(merged, shape, context, own);
   return { suggestions: offered.fills, interactions: offered.interactions };
 }
@@ -230,11 +240,14 @@ function request(shape: Shape, context: RequestContext, own: RequestContext, now
 
 /**
  * What the chip may show: minus what the user already accepted or dismissed
- * (unless they asked out loud), one per field, element or intent, top two,
- * each tagged with where its text came from.
+ * (unless they asked out loud), one per field, element or intent, capped by
+ * the eagerness level (two, or four at eager), each tagged with where its
+ * text came from. The content script shows one at a time and moves to the
+ * next after Tab or Esc.
  */
 async function offer(suggestions: Suggestion[], shape: Shape, context: RequestContext, own: RequestContext) {
   const { input, elements, store } = shape;
+  const cap = EAGERNESS[shape.eagerness].maxSuggestions;
   const suppressed = input.force ? [] : await store.suppressedKeys();
   const fills = suggestions.filter(isFill).filter((s) => !isSuppressed(s, input, suppressed));
   const actions = suggestions.filter(isAction).filter((a) => !suppressed.includes(navSuppressionKey(a.intent, a.value)));
@@ -248,9 +261,9 @@ async function offer(suggestions: Suggestion[], shape: Shape, context: RequestCo
     ...(sources.has(s.sourceContextId) ? { source: sources.get(s.sourceContextId) } : {}),
   });
   return {
-    fills: topPerField(fills).slice(0, LIMITS.maxSuggestions).map(withSource) as SuggestionView[],
+    fills: topPerField(fills).slice(0, cap).map(withSource) as SuggestionView[],
     actions: topPerIntent(actions),
-    interactions: topPerElement(interactions).slice(0, LIMITS.maxSuggestions).map(withSource) as InteractionView[],
+    interactions: topPerElement(interactions).slice(0, cap).map(withSource) as InteractionView[],
     withSource,
   };
 }
@@ -288,8 +301,9 @@ async function callProvider(
   settings: Settings,
   deps: OrchestrateDeps,
   timeoutMs: number,
+  onUnderFloor?: SuggestOptions['onUnderFloor'],
 ): Promise<ProviderOutcome> {
-  const local = deps.localProvider ?? new LocalProvider();
+  const local = deps.localProvider ?? new LocalProvider(settings.eagerness);
   const deadline = Date.now() + timeoutMs;
   const floor = Math.min(FALLBACK_FLOOR_MS, timeoutMs);
   const attempts: ProviderAttempt[] = [];
@@ -302,7 +316,7 @@ async function callProvider(
     provider = local;
   }
 
-  const first = await attempt(provider, req, timeoutMs);
+  const first = await attempt(provider, req, timeoutMs, onUnderFloor);
   attempts.push(first);
   if (!first.error) {
     // An empty answer from the network provider with no key configured means
@@ -314,7 +328,7 @@ async function callProvider(
     return { suggestions: [], attempts, failed: true };
   }
 
-  const second = await attempt(local, req, Math.max(floor, deadline - Date.now()));
+  const second = await attempt(local, req, Math.max(floor, deadline - Date.now()), onUnderFloor);
   attempts.push(second);
   return { suggestions: second.suggestions, attempts, failed: first.error !== undefined };
 }
@@ -325,10 +339,11 @@ async function attempt(
   provider: Provider,
   req: SuggestRequest,
   timeoutMs: number,
+  onUnderFloor?: SuggestOptions['onUnderFloor'],
 ): Promise<ProviderAttempt & { suggestions: Suggestion[] }> {
   const started = Date.now();
   try {
-    const suggestions = await withTimeout(provider, req, timeoutMs);
+    const suggestions = await withTimeout(provider, req, timeoutMs, onUnderFloor);
     return { id: provider.id, ms: Date.now() - started, count: suggestions.length, suggestions };
   } catch (e) {
     return { id: provider.id, ms: Date.now() - started, count: 0, error: describeError(e), suggestions: [] };
@@ -341,11 +356,11 @@ function describeError(e: unknown): string {
 }
 
 // Races the signal as well as passing it: a provider that ignores abort still cannot hold the chip past the budget.
-function withTimeout(provider: Provider, req: SuggestRequest, timeoutMs: number): Promise<Suggestion[]> {
+function withTimeout(provider: Provider, req: SuggestRequest, timeoutMs: number, onUnderFloor?: SuggestOptions['onUnderFloor']): Promise<Suggestion[]> {
   const signal = AbortSignal.timeout(timeoutMs);
   return new Promise<Suggestion[]>((resolve, reject) => {
     signal.addEventListener('abort', () => reject(signal.reason), { once: true });
-    provider.suggest(req, { signal }).then(resolve, reject);
+    provider.suggest(req, { signal, ...(onUnderFloor ? { onUnderFloor } : {}) }).then(resolve, reject);
   });
 }
 
@@ -355,33 +370,36 @@ function withTimeout(provider: Provider, req: SuggestRequest, timeoutMs: number)
  * a verb that fits its role and state, cite another tab's text or a recent
  * fill, and never a destructive name. A button or link is clicked only after
  * carat filled something on the page. A scroll to an element that is already
- * on-screen becomes the verb it stood in for, or nothing.
+ * on-screen becomes the verb it stood in for, or nothing. Whatever passes all
+ * that but sits under the level's confidence floor is dropped and counted.
  */
-function valid(
-  suggestions: Suggestion[],
-  fields: FieldDescriptor[],
-  elements: ElementDescriptor[],
-  filled: string[],
-  context: RequestContext,
-  own: RequestContext,
-): Suggestion[] {
+function valid(suggestions: Suggestion[], shape: Shape, context: RequestContext, own: RequestContext, onUnderFloor?: () => void): Suggestion[] {
+  const { input, elements, filled } = shape;
+  const knobs: EagernessKnobs = EAGERNESS[shape.eagerness];
   const contextIds = new Set(context.map((c) => c.id));
   const ownIds = new Set(own.map((o) => o.id));
   const interactIds = new Set([...contextIds, ...filled]);
-  return suggestions.flatMap((raw): Suggestion[] => {
-    const s = raw.kind === 'interact' ? settleScroll(raw, elements) : raw;
-    if (!s || typeof s.value !== 'string' || s.confidence < LIMITS.minConfidence) return [];
+  const wellFormed = (s: Suggestion): boolean => {
+    if (typeof s.value !== 'string') return false;
     const bare = s.kind === 'interact' && s.verb === 'scroll';
-    if (!bare && s.value.trim().length === 0) return [];
-    if (s.kind === 'action') return isIntentName(s.intent) && ownIds.has(s.sourceContextId) ? [s] : [];
+    if (!bare && s.value.trim().length === 0) return false;
+    if (s.kind === 'action') return isIntentName(s.intent) && ownIds.has(s.sourceContextId);
     if (s.kind === 'interact') {
       const el = elements.find((e) => e.i === s.elementId);
-      if (!el || isDestructiveName(el.nm) || !interactIds.has(s.sourceContextId)) return [];
-      if (!verbFits(el, s.verb, s.value.trim())) return [];
-      return s.verb !== 'click' || (el.r !== 'button' && el.r !== 'link') || filled.length > 0 ? [s] : [];
+      if (!el || isDestructiveName(el.nm) || !interactIds.has(s.sourceContextId)) return false;
+      if (!verbFits(el, s.verb, s.value.trim())) return false;
+      return s.verb !== 'click' || (el.r !== 'button' && el.r !== 'link') || filled.length > 0;
     }
-    const field = fields.find((f) => f.i === s.fieldId);
-    return !!field && !field.v && contextIds.has(s.sourceContextId) ? [s] : []; // never over what the user typed, never from their own page
+    const field = input.fields.find((f) => f.i === s.fieldId);
+    return !!field && !field.v && contextIds.has(s.sourceContextId); // never over what the user typed, never from their own page
+  };
+  return suggestions.flatMap((raw): Suggestion[] => {
+    // Settle scrolls first, so a scroll rewritten to a click faces the click rules and the floor like any other.
+    const s = raw.kind === 'interact' ? settleScroll(raw, elements) : raw;
+    if (!s || !wellFormed(s)) return [];
+    if (s.confidence >= knobs.minConfidence) return [s];
+    onUnderFloor?.();
+    return [];
   });
 }
 
@@ -429,10 +447,13 @@ function topBy<T extends { confidence: number }>(list: T[], keyOf: (t: T) => str
   return [...best.values()].sort((a, b) => b.confidence - a.confidence);
 }
 
-function cacheKey(input: SuggestInput, elements: ElementDescriptor[], filled: string[], context: RequestContext, own: RequestContext): string {
+function cacheKey(shape: Shape, context: RequestContext, own: RequestContext): string {
+  const { input, elements, filled, eagerness } = shape;
   // Focus, width and what is scrolled into view change as the user moves around without changing what to suggest.
   const fields = input.fields.map(({ f: _f, w: _w, o: _o, ...rest }) => rest);
   const els = elements.map(({ o: _o, ...rest }) => rest);
-  const ids = [...context, ...own].map((c) => c.id).join(',');
-  return fnv1a(`${input.page.host}|${JSON.stringify(fields)}|${JSON.stringify(els)}|${filled.join(',')}|${ids}`).toString(36);
+  // Context and own ids are kept apart: the same item is a fill source for one tab and the page's own text for another.
+  const ids = `${context.map((c) => c.id).join(',')}|${own.map((c) => c.id).join(',')}`;
+  // The level is part of the key: a cached answer was filtered at the floor of the level that asked.
+  return fnv1a(`${input.page.host}|${eagerness}|${JSON.stringify(fields)}|${JSON.stringify(els)}|${filled.join(',')}|${ids}`).toString(36);
 }

@@ -474,6 +474,47 @@ describe('content wiring', () => {
     expect(calls('suggestRequest')).toHaveLength(1);
   });
 
+  it('moves to the next field\'s chip after Esc instead of dropping the whole answer', async () => {
+    const title = field('Title', 100);
+    const where = field('Location', 200);
+    const values: Record<string, string> = { Title: 'Dinner', Location: '123 King St' };
+    sent.mockImplementation(async (type, data) => {
+      if (type !== 'suggestRequest') return undefined;
+      const { fields } = data as { fields: Array<{ i: string; al?: string; v?: string }> };
+      const suggestions: Suggestion[] = fields
+        .filter((f) => !f.v && f.al && values[f.al])
+        .map((f) => ({ kind: 'fill' as const, fieldId: f.i, value: values[f.al!]!, confidence: 0.9, reason: '', sourceContextId: 'c1' }));
+      return { suggestions };
+    });
+    title.focus();
+    const chip = createChip(document);
+    startSuggestions(ctx, chip, document);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
+    await flush();
+    expect(chip.text).toBe('Fill "Dinner"?');
+
+    // Esc costs one suggestion: the same answer's next field gets its chip at once, with no new request.
+    escape();
+    expect(chip.visible).toBe(true);
+    expect(chip.text).toBe('Fill "123 King St"?');
+    expect(title.value).toBe('');
+    expect(calls('feedback')).toEqual([expect.objectContaining({ accepted: false, fieldId: expect.any(String) })]);
+    expect(calls('suggestRequest')).toHaveLength(1);
+
+    // The Esc that dismissed the first chip did not reach the new one; a second Esc dismisses it, and the answer is spent.
+    escape();
+    expect(chip.visible).toBe(false);
+    expect(calls('feedback')).toHaveLength(2);
+    expect(where.value).toBe('');
+    expect(calls('suggestRequest')).toHaveLength(1);
+    // Focusing the same field again re-presents the spent answer: nothing to show, and still no new request.
+    title.focus();
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.debounceMs);
+    await flush();
+    expect(chip.visible).toBe(false);
+    expect(calls('suggestRequest')).toHaveLength(1);
+  });
+
   it('never fills over text the user typed while the request was in flight', async () => {
     const search = field('Search', 100);
     search.focus();
@@ -957,6 +998,39 @@ describe('interaction chip', () => {
     expect(calls('suggestRequest')).toHaveLength(2);
     expect((calls('suggestRequest')[1]?.elements as Array<{ o?: 1 }>)[0]?.o).toBeUndefined();
     expect(chip.visible).toBe(false);
+  });
+
+  it('moves from a dismissed fill to the same answer\'s interaction, and from a dismissed interaction to the corner chip', async () => {
+    const title = field('Title', 100);
+    const save = button('Save', 200);
+    const clicks = vi.fn();
+    save.addEventListener('click', clicks);
+    sent.mockImplementation(async (type, data) => {
+      if (type !== 'suggestRequest') return undefined;
+      const { fields, elements } = data as { fields: Fields; elements?: Elements };
+      return {
+        suggestions: fields.filter((f) => !f.v).map((f) => ({ kind: 'fill', fieldId: f.i, value: 'Dinner', confidence: 0.9, reason: '', sourceContextId: 'c1' })),
+        interactions: (elements ?? []).map((e) => ({ kind: 'interact', elementId: e.i, verb: 'click', value: 'Save', confidence: 0.85, reason: '', sourceContextId: 'c1' })),
+        navigation: [nav],
+      };
+    });
+    const chip = createChip(document);
+    startSuggestions(ctx, chip, document);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
+    await flush();
+    expect(chip.text).toBe('Fill "Dinner"?');
+    title.focus();
+    escape();
+    expect(chip.text).toBe('Click "Save"?');
+    expect(title.value).toBe('');
+    escape();
+    expect(clicks).not.toHaveBeenCalled();
+    expect(chip.text).toBe(`${nav.label}: "${nav.value}"?`);
+    escape();
+    expect(chip.visible).toBe(false);
+    expect(calls('navigate')).toEqual([]);
+    expect(calls('feedback').map((f) => f.accepted)).toEqual([false, false, false]);
+    expect(calls('suggestRequest')).toHaveLength(1);
   });
 
   it('prefers a fill over an interaction and an interaction over the corner chip', async () => {

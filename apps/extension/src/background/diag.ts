@@ -1,4 +1,4 @@
-import type { Settings } from '@carat/shared';
+import type { Eagerness, Settings } from '@carat/shared';
 import type { StorageArea } from '../store';
 
 /** Why the last suggestion request on a tab did or did not reach a provider. */
@@ -68,6 +68,10 @@ export interface SuggestDiag {
   /** Set once the gate passed. */
   cached?: boolean;
   attempts?: ProviderAttempt[];
+  /** The level the request ran at; names the floor when candidates fell under it. */
+  eagerness?: Eagerness;
+  /** Otherwise valid candidates the provider or the service worker dropped for confidence under the level's floor. */
+  underFloor?: number;
   /** Field fills handed to the content script after suppression. */
   offered?: number;
   /** Tab offers (open or switch) handed over alongside them. */

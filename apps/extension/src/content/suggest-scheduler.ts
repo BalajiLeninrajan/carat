@@ -110,6 +110,8 @@ export function startSuggestions(
   let shown: Shown | null = null;
   // Elements already acted on in this page load (`role|name`); never offered twice.
   const done = new Set<string>();
+  // The descriptors and registries the current answer was presented against, so Esc can move on to the next chip in it.
+  let view: { descriptors: FieldDescriptor[]; registries: Registries } | null = null;
 
   const snapshot = async (force = false): Promise<void> => {
     if (!ctx.isValid || doc.visibilityState === 'hidden') return;
@@ -199,9 +201,20 @@ export function startSuggestions(
 
   // A field chip wins, then a chip on an element; the corner chip only appears when there is nothing on the page to act on.
   function present(answer: Answer, descriptors: FieldDescriptor[], registries: Registries): void {
+    view = { descriptors, registries };
     if (presentFill(answer.suggestions, descriptors, registries)) return;
     if (presentInteract(answer.interactions, registries.elements)) return;
     presentNav(answer.navigation);
+  }
+
+  /**
+   * After Esc, the next chip from the same answer: the dismissed one is
+   * already out of `last`, so this lands on the next field, element or
+   * offer, or on nothing. Esc costs one suggestion, never the whole answer.
+   */
+  function advance(): void {
+    if (!last || !view) return;
+    present(last, view.descriptors, view.registries);
   }
 
   /** From here on this is the page being filled: no picture of it, ever. */
@@ -285,6 +298,8 @@ export function startSuggestions(
         if (reason !== 'escape' && reason !== 'typed') return;
         forget();
         feedback(false);
+        // Typing means the user is busy in this field; Esc means "not that one", so the next one gets its turn.
+        if (reason === 'escape') advance();
       },
     });
     shown = { kind: 'fill', id: pick.i, suggestion, interceptFrom };
@@ -374,6 +389,7 @@ export function startSuggestions(
         if (reason !== 'escape' && reason !== 'typed') return;
         forget();
         feedback(false);
+        if (reason === 'escape') advance();
       },
     });
     shown = { kind: 'interact', id: pick.elementId, suggestion: pick, interceptFrom };
@@ -389,7 +405,8 @@ export function startSuggestions(
    * and, once the page has settled, the normal chip for the same suggestion
    * appears, taking Tab from wherever focus was. A scroll is not a fill: it
    * sends no feedback, no filling cue, and consumes nothing. Esc drops the
-   * offer for this page load and says nothing to the background.
+   * offer for this page load, says nothing to the background, and moves on
+   * to the answer's next item.
    */
   function presentScroll(id: string, offer: ScrollOffer): void {
     const { target } = offer;
@@ -411,7 +428,10 @@ export function startSuggestions(
         });
       },
       onDismiss(reason) {
-        if (reason === 'escape' || reason === 'typed') offer.forget();
+        if (reason !== 'escape' && reason !== 'typed') return;
+        offer.forget();
+        // Declining a scroll is "not that one" as much as Esc on a chip is: the answer's next item gets its turn.
+        if (reason === 'escape') advance();
       },
     });
     shown = { kind: 'scroll', id };
@@ -447,6 +467,7 @@ export function startSuggestions(
         if (reason !== 'escape' && reason !== 'typed') return;
         forget();
         feedback(false);
+        if (reason === 'escape') advance();
       },
     });
     shown = { kind: 'nav' };
