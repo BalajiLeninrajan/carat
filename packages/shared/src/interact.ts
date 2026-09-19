@@ -1,7 +1,13 @@
+<<<<<<< HEAD
 import { isMoneyName } from './destructive';
 import type { Eagerness } from './eagerness';
 import { EAGERNESS } from './eagerness';
 import type { ElementDescriptor, ElementRole, InteractVerb } from './types';
+||||||| parent of 8a35abe (Add a page state, a prior floor per level, the page scroll and the next-step prompt section)
+import type { ElementDescriptor, ElementRole, InteractVerb } from './types';
+=======
+import type { ElementDescriptor, ElementRole, InteractSuggestion, InteractVerb } from './types';
+>>>>>>> 8a35abe (Add a page state, a prior floor per level, the page scroll and the next-step prompt section)
 
 /**
  * Verbs the content script can perform on each role, besides `scroll`, which
@@ -76,6 +82,29 @@ export function isOffScreen(d: { o?: 1 }): boolean {
   return d.o === 1;
 }
 
+/** A scroll of the page itself, one viewport down: `verb: 'scroll'` with no element. */
+export function isPageScroll(s: Pick<InteractSuggestion, 'verb' | 'elementId'>): boolean {
+  return s.verb === 'scroll' && s.elementId === '';
+}
+
+/** What a page scroll is reported and suppressed as: a pseudo-element with this role and name. */
+export const PAGE_SCROLL_ROLE = 'page';
+export const PAGE_SCROLL_NAME = 'scroll';
+/** The `done` entry a page scroll leaves in the page state until new content appears. */
+export const PAGE_SCROLL_DONE = 'scroll';
+
+/**
+ * Buttons that move a form or checkout on without committing money or a
+ * message. Anything that pays, orders or sends is on the destructive list and
+ * never enumerated in the first place; "Submit" and "Sign up" are left out
+ * here too, since they commit whatever the form holds.
+ */
+const CONTINUE_NAME = /^(?:continue|next|proceed|next step|continue to (?:shipping|payment|review|delivery|checkout)|review order|save|save and continue|done|apply)$/i;
+
+export function isContinueName(name: string): boolean {
+  return CONTINUE_NAME.test(name.replace(/\s+/g, ' ').trim());
+}
+
 /**
  * The verb a bare `scroll` stands in for once the element is on-screen: the
  * one thing a button, link, tab, menu item or disclosure does, or the state
@@ -138,17 +167,25 @@ export interface ChipText {
   tail: string; // " to 40", or ""
 }
 
+<<<<<<< HEAD
 /**
  * The words on the chip: `Click "Save"`, `Select "7:00 AM Air Canada"`, `Check "Vegetarian"`,
  * `Set "Volume" to 40`, `Choose "Canada"`, `Scroll to "Save"`; with a link's site, `Open "Order Now" on doordash.com`.
  */
 export function interactionChipText(verb: InteractVerb, name: string, value: string, role?: ElementRole, site?: string): ChipText {
+||||||| parent of 8a35abe (Add a page state, a prior floor per level, the page scroll and the next-step prompt section)
+/** The words on the chip: `Click "Save"`, `Check "Vegetarian"`, `Set "Volume" to 40`, `Choose "Canada"`, `Scroll to "Save"`. */
+export function interactionChipText(verb: InteractVerb, name: string, value: string): ChipText {
+=======
+/** The words on the chip: `Click "Save"`, `Check "Vegetarian"`, `Set "Volume" to 40`, `Choose "Canada"`, `Scroll to "Save"`, or `Scroll down` for the page itself. */
+export function interactionChipText(verb: InteractVerb, name: string, value: string): ChipText {
+>>>>>>> 8a35abe (Add a page state, a prior floor per level, the page scroll and the next-step prompt section)
   switch (verb) {
     case 'click':
       if (site) return { verb: 'Open', value: name, tail: ` on ${site}` };
       return { verb: role === 'option' ? 'Select' : 'Click', value: name, tail: '' };
     case 'scroll':
-      return { verb: 'Scroll to', value: name, tail: '' };
+      return name === '' ? { verb: 'Scroll down', value: '', tail: '' } : { verb: 'Scroll to', value: name, tail: '' };
     case 'check':
       return { verb: 'Check', value: name, tail: '' };
     case 'uncheck':

@@ -98,6 +98,12 @@ describe('SuggestionListSchema', () => {
     expect(SuggestionListSchema.safeParse({ suggestions: [{ ...interact, value: '' }] }).success).toBe(false);
   });
 
+  it('accepts a scroll with no element as the page scroll, and no other verb without one', () => {
+    const page = { ...interact, verb: 'scroll', value: '', elementId: '', sourceContextId: 'page' };
+    expect(SuggestionListSchema.parse({ suggestions: [page] }).suggestions[0]).toMatchObject({ kind: 'interact', elementId: '', verb: 'scroll', value: '' });
+    expect(SuggestionListSchema.safeParse({ suggestions: [{ ...page, verb: 'click', value: 'x' }] }).success).toBe(false);
+  });
+
   it('rejects out-of-range confidence and wrong types', () => {
     const bad = { ...fill, confidence: 1.4 };
     expect(SuggestionListSchema.safeParse({ suggestions: [bad] }).success).toBe(false);

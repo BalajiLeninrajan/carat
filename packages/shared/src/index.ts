@@ -12,13 +12,15 @@ export type {
   InteractSuggestion,
   InteractVerb,
   NavSuggestion,
+  PageKind,
   PageMeta,
+  PageState,
   RequestContext,
   SuggestRequest,
   Suggestion,
   Settings,
 } from './types';
-export { DEFAULT_SETTINGS, INTENTS, LIMITS, isIntentName } from './types';
+export { DEFAULT_SETTINGS, INTENTS, LIMITS, PAGE_KINDS, PAGE_SOURCE, isIntentName, isPageKind } from './types';
 export {
   SuggestionSchema,
   SuggestionListSchema,
@@ -38,21 +40,25 @@ export type { PayContext } from './destructive';
 export {
   CONTROL_ROLES,
   ELEMENT_ROLES,
+  PAGE_SCROLL_DONE,
+  PAGE_SCROLL_NAME,
+  PAGE_SCROLL_ROLE,
   VERBS_BY_ROLE,
   clickAllowed,
   elementKey,
   isPrimaryActionName,
   impliedVerb,
   interactionChipText,
+  isContinueName,
   isElementRole,
   isInteractVerb,
   isOffScreen,
+  isPageScroll,
   verbFits,
 } from './interact';
 export type { ChipText, ClickGate } from './interact';
 export {
   PAGE_QUERY_CONFIDENCE,
-  PAGE_SOURCE,
   QUERY_MAX,
   domainLabel,
   firstMatchingLink,

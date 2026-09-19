@@ -1,11 +1,5 @@
 import type { ElementDescriptor, FieldDescriptor, InteractSuggestion, PageMeta } from './types';
-
-/**
- * The `sourceContextId` of a click that the page's own query justifies. The
- * page's text is never a fill source, so this never names a context item;
- * the validators accept it only on a link, only while the page has a query.
- */
-export const PAGE_SOURCE = 'page';
+import { PAGE_SOURCE } from './types';
 
 /** Confidence of a click on the link whose site or title is what the user searched for. Above every level's floor. */
 export const PAGE_QUERY_CONFIDENCE = 0.8;

@@ -76,4 +76,18 @@ describe('buildMessages', () => {
       expect(SuggestionListSchema.safeParse(JSON.parse(m.content)).success).toBe(true);
     }
   });
+
+  it('describes the page state and the next-step priors, and shows the results page as a few-shot with no context', () => {
+    const p = systemPrompt('balanced');
+    expect(p).toContain('`state` (the page as a whole');
+    expect(p).toContain('Next step. Text from other tabs is one input, not a precondition');
+    expect(p).toContain('- serp: `click` the result link whose host or title matches `q`');
+    expect(p).toContain('`elementId` "" move the page one viewport down');
+    const serp = FEW_SHOTS.findIndex((m) => m.role === 'user' && JSON.parse(m.content).state?.kind === 'serp');
+    expect(serp).toBeGreaterThan(0);
+    expect(JSON.parse(FEW_SHOTS[serp]!.content).context).toEqual([]);
+    expect(JSON.parse(FEW_SHOTS[serp + 1]!.content).suggestions).toEqual([
+      expect.objectContaining({ kind: 'interact', elementId: 'e0', verb: 'click', sourceContextId: 'page' }),
+    ]);
+  });
 });
