@@ -1,9 +1,9 @@
-import type { FillSuggestion, SuggestRequest, Suggestion } from '@carat/shared';
-import { LIMITS } from '@carat/shared';
+import type { FillSuggestion, InteractSuggestion, SuggestRequest, Suggestion } from '@carat/shared';
+import { LIMITS, verbFits } from '@carat/shared';
 import type { Provider } from './provider';
 import { sameSite } from './same-site';
 import { CANDIDATE_LABEL } from './local/candidates';
-import { GATE_QUESTION, NONE, buildJevRequest, questionKey, sourceLabel, type JevRequest } from './jev/request';
+import { GATE_QUESTION, INTERACT_QUESTION, NONE, buildJevRequest, questionKey, sourceLabel, type JevRequest } from './jev/request';
 import { choice, noul, parseJevResponse, type Answers } from './jev/response';
 
 export const JEV_MODEL = 'typesafe/jev';
@@ -20,8 +20,10 @@ export interface JevOptions {
 
 /**
  * TypeSafe Jev on Cloudflare Workers AI: a classifier, not a writer. The regex
- * candidates are the only values it can return, so on a page with no
- * candidate it returns [] and the caller moves on to an LLM.
+ * candidates are the only fill values it can return, and a click, check or
+ * uncheck on a described element is the only interaction. On a page with
+ * neither it returns [] and the caller moves on to an LLM. Actions (open Maps,
+ * Calendar, Gmail) are never asked about; those stay with the other providers.
  *
  * Failure policy matches OpenAICompatProvider: an abort, a body we cannot
  * read, or a Cloudflare error envelope resolves to []; a transport or HTTP
@@ -76,8 +78,17 @@ function isErrorEnvelope(body: unknown): boolean {
   return typeof body === 'object' && body !== null && (body as { success?: unknown }).success === false;
 }
 
-/** Jev is calibrated, so the chosen option's probability is the confidence as-is. */
+/**
+ * Jev is calibrated, so the chosen option's probability is the confidence
+ * as-is. The `relevant` gate covers the fills only; the interaction question
+ * gates itself with `none`.
+ */
 export function decide(built: JevRequest, answers: Answers): Suggestion[] {
+  return [...fills(built, answers), ...interaction(built, answers)];
+}
+
+function fills(built: JevRequest, answers: Answers): FillSuggestion[] {
+  if (built.askedFields.length === 0 || built.options.length === 0) return [];
   const gate = noul(answers, GATE_QUESTION);
   if (gate === null || gate < GATE_MIN) return [];
 
@@ -100,4 +111,17 @@ export function decide(built: JevRequest, answers: Answers): Suggestion[] {
     });
   }
   return out.sort((a, b) => b.confidence - a.confidence).slice(0, LIMITS.maxSuggestions);
+}
+
+function interaction(built: JevRequest, answers: Answers): InteractSuggestion[] {
+  if (built.interactOptions.length === 0) return [];
+  const answer = choice(answers, INTERACT_QUESTION);
+  if (!answer || answer.choice === NONE) return [];
+  const option = built.interactOptions.find((o) => o.key === answer.choice);
+  if (!option) return [];
+  const confidence = answer.probabilities[answer.choice] ?? answer.confidence;
+  if (confidence < LIMITS.minConfidence) return [];
+  const { element, verb } = option;
+  if (!verbFits(element, verb, element.nm)) return [];
+  return [{ kind: 'interact', elementId: element.i, verb, value: element.nm, confidence, reason: option.reason, sourceContextId: option.sourceContextId }];
 }

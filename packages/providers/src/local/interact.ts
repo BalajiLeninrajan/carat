@@ -73,6 +73,11 @@ function namePattern(name: string): RegExp {
   return new RegExp(`(?<![a-z0-9])${words}(?![a-z0-9])`, 'gi');
 }
 
+/** The name appears as whole words in the text, negated or not. */
+export function mentions(text: string, name: string): boolean {
+  return namePattern(name).test(text);
+}
+
 /** The name appears as whole words in the text and the clause before it carries no negation. */
 export function affirms(text: string, name: string): boolean {
   for (const m of text.matchAll(namePattern(name))) {

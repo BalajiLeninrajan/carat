@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { FillSuggestion, SuggestRequest, Suggestion } from '@carat/shared';
+import type { FillSuggestion, InteractSuggestion, SuggestRequest, Suggestion } from '@carat/shared';
 import { JevProvider, GATE_MIN } from '../src/jev';
 import { buildJevRequest } from '../src/jev/request';
 
 const signal = () => new AbortController().signal;
 const fills = (out: Suggestion[]): FillSuggestion[] => out.filter((s): s is FillSuggestion => s.kind === 'fill');
+const interactions = (out: Suggestion[]): InteractSuggestion[] => out.filter((s): s is InteractSuggestion => s.kind === 'interact');
 
 const discord = {
   id: 'c1',
@@ -35,6 +36,36 @@ const calendar: SuggestRequest = {
   context: [maps, discord],
   now: '2026-09-16T14:06:00-04:00',
   locale: 'en-CA',
+};
+
+// Title and location already filled from c2 and c1, so no field is asked about; the Save button is the next step.
+const afterFills: SuggestRequest = {
+  page: calendar.page,
+  fields: [{ i: 'f0', t: 'input:text', al: 'Add title', v: 'Dinner at Seven Shores Cafe' }],
+  elements: [
+    { i: 'e0', r: 'button', nm: 'Save', p: 1 },
+    { i: 'e1', r: 'button', nm: 'Delete event' },
+    { i: 'e2', r: 'button', nm: 'More options' },
+    { i: 'e3', r: 'slider', nm: 'Reminder minutes', v: '10', min: 0, max: 60 },
+    { i: 'e4', r: 'select', nm: 'Show as', v: 'Busy', op: ['Busy', 'Free'] },
+    { i: 'e5', r: 'switch', nm: 'All day', st: 'on' },
+    { i: 'e6', r: 'checkbox', nm: 'Private', st: 'off' },
+  ],
+  filled: ['c2', 'c1'],
+  context: [maps, { ...discord, text: 'dinner at Seven Shores Cafe, Friday at 6? not an all day thing' }],
+  now: calendar.now,
+};
+
+const rsvp: SuggestRequest = {
+  page: { host: 'forms.example.org', title: 'Team offsite RSVP', path: '/rsvp' },
+  fields: [{ i: 'f0', t: 'textarea', nm: 'notes', lb: 'Anything else?' }],
+  elements: [
+    { i: 'e0', r: 'checkbox', nm: 'Vegetarian', st: 'off' },
+    { i: 'e1', r: 'checkbox', nm: 'Vegan', st: 'off' },
+    { i: 'e2', r: 'button', nm: 'Submit RSVP', p: 1 },
+  ],
+  context: [{ id: 'c1', origin: 'https://app.slack.com', title: 'Slack', kind: 'page', text: "I'm a vegetarian, no other restrictions", capturedAt: 1 }],
+  now: calendar.now,
 };
 
 type Answers = Record<string, unknown>;
@@ -94,6 +125,28 @@ describe('buildJevRequest', () => {
     const plain = { ...discord, text: 'ok so who is around this weekend' };
     expect(buildJevRequest({ ...calendar, context: [plain] }, [plain])).toBeNull();
     expect(buildJevRequest({ ...calendar, fields: [calendar.fields[3]!, calendar.fields[4]!] }, calendar.context)).toBeNull();
+  });
+
+  it('asks one choice over the elements: buttons only after fills, toggles only when a context item names them', () => {
+    const b = buildJevRequest(afterFills, afterFills.context)!;
+    expect(Object.keys(b.questions)).toEqual(['interact']);
+    expect(b.state).not.toHaveProperty('fields');
+    expect(b.state.filled).toEqual(['c2', 'c1']);
+    expect(b.interactOptions.map((o) => [o.key, o.verb, o.sourceContextId])).toEqual([
+      ['e0', 'click', 'c2'],
+      ['e2', 'click', 'c2'],
+      ['e5', 'uncheck', 'c1'],
+    ]);
+    const criteria = b.questions.interact!.criteria as Record<string, unknown>;
+    expect(Object.keys(criteria)).toEqual(['e0', 'e2', 'e5', 'none']);
+    expect(criteria.e0).toMatchObject({ action: 'click "Save"', role: 'button', primary: true });
+
+    // Without a fill there is no button to ask about, and a slider or select never is.
+    const noFill = buildJevRequest({ ...afterFills, filled: undefined }, afterFills.context)!;
+    expect(noFill.interactOptions.map((o) => o.key)).toEqual(['e5']);
+    const vegetarian = buildJevRequest(rsvp, rsvp.context)!;
+    expect(Object.keys(vegetarian.questions)).toEqual(['interact']);
+    expect(vegetarian.interactOptions.map((o) => [o.key, o.verb, o.sourceContextId])).toEqual([['e0', 'check', 'c1']]);
   });
 });
 
@@ -260,5 +313,46 @@ describe('JevProvider', () => {
       return Promise.resolve(envelope({ relevant: noul(0.9), field_f1: pick(keyOf('10 Regina St N, Waterloo, ON N2J 2Z8'), 0.9, keys) }));
     } as unknown as typeof fetch;
     expect(fills(await provider(strict).suggest(calendar, { signal: signal() })).map((s) => s.fieldId)).toEqual(['f1']);
+  });
+
+  it('turns the interaction choice into one interact suggestion with the element name as value', async () => {
+    const fetchImpl = vi.fn(async () => envelope({ interact: pick('e0', 0.9, ['e0', 'e2', 'e5', 'none']) }));
+    const out = await provider(fetchImpl).suggest(afterFills, { signal: signal() });
+    expect(out).toEqual([
+      { kind: 'interact', elementId: 'e0', verb: 'click', value: 'Save', confidence: 0.9, reason: 'carat just filled fields on this page', sourceContextId: 'c2' },
+    ]);
+    const { body } = sent(fetchImpl);
+    expect(body.input.questions.interact!.type).toBe('choice');
+    expect(body.input.questions).not.toHaveProperty('relevant');
+
+    const check = vi.fn(async () => envelope({ interact: pick('e0', 0.8, ['e0', 'none']) }));
+    expect(interactions(await provider(check).suggest(rsvp, { signal: signal() }))).toEqual([
+      expect.objectContaining({ elementId: 'e0', verb: 'check', value: 'Vegetarian', confidence: 0.8, sourceContextId: 'c1' }),
+    ]);
+  });
+
+  it('offers no interaction on none, under threshold, or for an element it never asked about', async () => {
+    for (const answer of [pick('none', 0.95, ['e0', 'e2', 'e5', 'none']), pick('e0', 0.69, ['e0', 'e2', 'e5', 'none']), pick('e1', 0.99, ['e1'])]) {
+      const fetchImpl = vi.fn(async () => envelope({ interact: answer }));
+      expect(await provider(fetchImpl).suggest(afterFills, { signal: signal() })).toEqual([]);
+    }
+  });
+
+  it('answers fills and the interaction from one call, each gated on its own', async () => {
+    const mixed: SuggestRequest = { ...calendar, elements: rsvp.elements, filled: ['c1'] };
+    const b = buildJevRequest(mixed, mixed.context)!;
+    const ikeys = [...b.interactOptions.map((o) => o.key), 'none'];
+    // Buttons after a fill, plus nothing for the checkboxes: no context names them.
+    expect(ikeys).toEqual(['e2', 'none']);
+    const fetchImpl = vi.fn(async () =>
+      envelope({
+        relevant: noul(0.2),
+        field_f1: pick(keyOf('10 Regina St N, Waterloo, ON N2J 2Z8'), 0.95, keys),
+        interact: pick('e2', 0.85, ikeys),
+      }),
+    );
+    const out = await provider(fetchImpl).suggest(mixed, { signal: signal() });
+    expect(fills(out)).toEqual([]);
+    expect(interactions(out).map((s) => [s.elementId, s.verb, s.sourceContextId])).toEqual([['e2', 'click', 'c1']]);
   });
 });
