@@ -1,8 +1,14 @@
-import { DEFAULT_SETTINGS } from '@carat/shared';
+import { DEFAULT_SETTINGS, EAGERNESS_HELP, EAGERNESS_LEVELS } from '@carat/shared';
 import { describe, expect, it } from 'vitest';
-import { normalizeSettings } from './settings-form';
+import {
+  EAGERNESS_NAMES,
+  eagernessAt,
+  eagernessNote,
+  eagernessPosition,
+  normalizeSettings,
+} from './settings-form';
 
-const base = { enabled: true, provider: 'openai', baseURL: '', apiKey: '', model: '', statusLine: false, cfAccountId: '', cfApiToken: '', smartModel: '', screenshots: false };
+const base = { enabled: true, provider: 'openai', baseURL: '', apiKey: '', model: '', statusLine: false, cfAccountId: '', cfApiToken: '', smartModel: '', screenshots: false, eagerness: 'eager', allowPayments: false };
 
 describe('normalizeSettings', () => {
   it('fills blank baseURL and model with the defaults', () => {
@@ -51,6 +57,49 @@ describe('normalizeSettings', () => {
     expect(s.cfApiToken).toBe('cf-x');
     expect(normalizeSettings(base).cfAccountId).toBe('');
     expect(normalizeSettings(base).cfApiToken).toBe('');
+  });
+
+  it('saves the level the slider is on, whatever the thumb reports', () => {
+    // The page hands normalizeSettings what the range input is on, as main.ts does.
+    const atPosition = (v: string) => normalizeSettings({ ...base, eagerness: eagernessAt(v) }).eagerness;
+    expect(atPosition('0')).toBe('conservative');
+    expect(atPosition('1')).toBe('balanced');
+    expect(atPosition('2')).toBe('eager');
+    expect(atPosition('7')).toBe(DEFAULT_SETTINGS.eagerness);
+    expect(atPosition('nope')).toBe(DEFAULT_SETTINGS.eagerness);
+  });
+
+  it('still rejects a level string that is not one of the three', () => {
+    expect(normalizeSettings(base).eagerness).toBe('eager');
+    expect(normalizeSettings({ ...base, eagerness: '' }).eagerness).toBe(DEFAULT_SETTINGS.eagerness);
+    expect(normalizeSettings({ ...base, eagerness: 'Eager' }).eagerness).toBe(DEFAULT_SETTINGS.eagerness);
+  });
+
+  it('maps the slider to a level and back, and names the line under the track', () => {
+    expect(EAGERNESS_LEVELS.map(eagernessPosition)).toEqual([0, 1, 2]);
+    for (const level of EAGERNESS_LEVELS) {
+      const position = eagernessPosition(level);
+      expect(eagernessAt(position)).toBe(level);
+      expect(eagernessAt(String(position))).toBe(level);
+      // What the thumb moving onto that stop puts under the track and into aria-valuetext.
+      expect(eagernessNote(position)).toBe(EAGERNESS_HELP[level]);
+      expect(EAGERNESS_NAMES[level].toLowerCase()).toBe(level);
+    }
+    // Dragging left to right walks the three notes in order, longest last.
+    expect([0, 1, 2].map(eagernessNote)).toEqual([
+      EAGERNESS_HELP.conservative,
+      EAGERNESS_HELP.balanced,
+      EAGERNESS_HELP.eager,
+    ]);
+    // A level the slider never had still lands the thumb on the default.
+    expect(eagernessPosition('reckless')).toBe(EAGERNESS_LEVELS.indexOf(DEFAULT_SETTINGS.eagerness));
+  });
+
+  it('keeps payments off unless the box is ticked, and only a real true turns them on', () => {
+    expect(normalizeSettings(base).allowPayments).toBe(false);
+    expect(DEFAULT_SETTINGS.allowPayments).toBe(false);
+    expect(normalizeSettings({ ...base, allowPayments: true }).allowPayments).toBe(true);
+    expect(normalizeSettings({ ...base, allowPayments: 'on' as unknown as boolean }).allowPayments).toBe(false);
   });
 
   it('carries the status line toggle through', () => {

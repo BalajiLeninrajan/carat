@@ -1,12 +1,16 @@
 import type { ElementDescriptor, FieldDescriptor } from '@carat/shared';
 import { interactionChipText, mergeSuggestions } from '@carat/shared';
-import type { Chip } from '../chip';
-import { isTextEntry } from '../chip/keys';
-import { fillElement, resolveTarget } from '../fill';
+import type { AcceptKey, Chip } from '../chip';
+import { deepActiveElement, isTextEntry } from '../chip/keys';
+import type { FillOutcome } from '../fill';
+import { performFill, resolveTarget } from '../fill';
 import { relativeAge } from '../format/age';
+import type { FrameHub, KnownFrame, MergeInput } from '../frames';
+import { createFrameHub, mergeElements, mergeFields } from '../frames';
 import type { ElementEntry } from '../interact';
 import { enumerateElements, performInteraction, stillFits } from '../interact';
-import type { InteractionView, NavigationView, SuggestionSource, SuggestionView } from '../messaging';
+import type { InteractionView, NavigationView, RefineResponse, SuggestionSource, SuggestionView } from '../messaging';
+import { inViewport, scrollToTarget } from '../scroll';
 import type { FieldEntry } from '../snapshot';
 import { enumerateFields, valueOf } from '../snapshot';
 import type { ScriptContext } from './context';
@@ -47,7 +51,22 @@ const EMPTY: Answer = { suggestions: [], navigation: [], interactions: [] };
 type Shown =
   | { kind: 'fill'; id: string; suggestion: SuggestionView; interceptFrom: Element | null }
   | { kind: 'interact'; id: string; suggestion: InteractionView; interceptFrom: Element | null }
+  | { kind: 'scroll'; id: string }
   | { kind: 'nav' };
+
+/** What the scroll banner says and does; the chip for the suggestion follows once the page has settled. */
+interface ScrollOffer {
+  target: Element;
+  /** What goes in quotes: the field's label or the element's accessible name. */
+  name: string;
+  detail?: string;
+  reason?: string;
+  interceptFrom: Element | null;
+  /** Show the chip for the same suggestion; `from` is what had focus when Tab was pressed. */
+  then: (from: Element | null) => void;
+  /** Esc, or typing, on the banner: drop the suggestion for this page load, telling nobody. */
+  forget: () => void;
+}
 
 interface PresentOptions {
   /** Keep the chip on this field or element rather than picking afresh; used when only its value changes. */
@@ -73,6 +92,8 @@ export interface RequestObserver {
 export interface SuggestOptions extends RequestObserver {
   /** Shared with the capture scheduler: the first chip here marks this the page being filled. */
   page?: PageState;
+  /** The top frame's hub for cross-origin child frames; built here when not given. */
+  hub?: FrameHub;
 }
 
 export function startSuggestions(
@@ -81,23 +102,67 @@ export function startSuggestions(
   doc: Document = document,
   opts: SuggestOptions = {},
 ): SuggestionsHandle {
-  const win = doc.defaultView;
-  if (!win) return NO_HANDLE;
+  const maybeWin = doc.defaultView;
+  if (!maybeWin) return NO_HANDLE;
+  const win: Window = maybeWin;
   const { page } = opts;
   const observer: RequestObserver = opts;
 
   let last: LastSnapshot | null = null;
   let seq = 0;
+  let gen = 0;
   // The field carat just filled keeps focus; the next chip must still take Tab from it.
   let justFilled: Element | null = null;
   let shown: Shown | null = null;
   // Elements already acted on in this page load (`role|name`); never offered twice.
   const done = new Set<string>();
+  // The descriptors and registries the current answer was presented against, so Esc can move on to the next chip in it.
+  let view: { descriptors: FieldDescriptor[]; registries: Registries } | null = null;
+  // A ticket is open, so every chip shown from this answer carries the indicator.
+  let pending = false;
+
+  /** The ticket is done: the chip's value is final and the status line stops saying "thinking". */
+  const settle = (): void => {
+    if (!pending) return;
+    pending = false;
+    chip.settle();
+    observer.onAnswer?.();
+  };
+  // Whether money controls may be described at all; read from the redacted settings before each snapshot.
+  let allowPayments = false;
+  // Child frames that reported through the protocol, by token, for the current snapshot.
+  let frames = new Map<string, KnownFrame>();
+
+  const hub: FrameHub =
+    opts.hub ??
+    createFrameHub(ctx, doc, {
+      onReport: () => snapshotSoon(),
+      onKey: (key) => chip.relay(key),
+    });
+
+  const locale = (): string | undefined => doc.documentElement.lang || (typeof navigator !== 'undefined' ? navigator.language : undefined) || undefined;
 
   const snapshot = async (force = false): Promise<void> => {
     if (!ctx.isValid || doc.visibilityState === 'hidden') return;
-    const fields = enumerateFields(doc, win);
-    const elements = enumerateElements(doc, win);
+    // Two short waits before the page is read: the payments setting, and any child frame's fresh report.
+    const g = ++gen;
+    const settings = await send('getSettings', undefined);
+    allowPayments = settings?.allowPayments === true;
+    await hub.refresh();
+    if (g !== gen || !ctx.isValid) return;
+    const merged = hub.frames().map(
+      (frame): MergeInput => ({
+        frame,
+        num: hub.numberOf(frame),
+        onScreen: (id) => {
+          const rect = hub.anchor(frame, id);
+          return !!rect && rect.bottom > 0 && rect.top < win.innerHeight && rect.right > 0 && rect.left < win.innerWidth;
+        },
+      }),
+    );
+    frames = new Map(merged.map((m) => [m.frame.token, m.frame] as const));
+    const fields = mergeFields(enumerateFields(doc, win), merged);
+    const elements = mergeElements(enumerateElements(doc, win, { allowPayments }), merged);
     const descriptors = fields.descriptors;
     const registries: Registries = { fields: fields.registry, elements: elements.registry };
     if (descriptors.length === 0 && elements.descriptors.length === 0) {
@@ -118,8 +183,9 @@ export function startSuggestions(
       ...(elements.descriptors.length > 0 ? { elements: elements.descriptors } : {}),
       ...(force ? { force: true } : {}),
     });
-    // The fast answer is the answer as far as the status line is concerned; the smart pass is silent.
-    observer.onAnswer?.();
+    // A ticket means a better answer may still land, so the status line keeps saying "thinking" until it closes.
+    const open = res?.ticket !== undefined && mine === seq && ctx.isValid;
+    if (!open) observer.onAnswer?.();
     // A newer snapshot owns the chip now; this answer describes fields that may be gone.
     if (mine !== seq || !ctx.isValid) return;
     const current: LastSnapshot = {
@@ -132,6 +198,7 @@ export function startSuggestions(
       shown: false,
     };
     last = current;
+    pending = open;
     present(current, descriptors, registries);
     // The smart answer is fetched after the chip is up, never before.
     if (res?.ticket) void refine(res.ticket, current, mine, descriptors, registries);
@@ -139,7 +206,7 @@ export function startSuggestions(
   const snapshotSoon = debounce(ctx, () => void snapshot(), SNAPSHOT_TIMING.debounceMs);
 
   /**
-   * Fold a late smart answer in without a visible step backwards. A chip that
+   * Fold a later answer in without a visible step backwards. A chip that
    * is up only ever changes value, to something the model was surer of, and
    * never jumps to another field or element; a corner chip is left alone. A
    * chip appears from a smart answer only when the fast one showed nothing at
@@ -154,8 +221,20 @@ export function startSuggestions(
     descriptors: FieldDescriptor[],
     registries: Registries,
   ): Promise<void> {
-    const res = await send('suggestRefine', { ticket });
-    if (!ctx.isValid || mine !== seq || last !== snap) return;
+    // A ticket answers as often as something better lands; `more` says to poll it again.
+    for (;;) {
+      const res = await send('suggestRefine', { ticket });
+      // A newer request owns the indicator and the status line now; leave both to it.
+      if (!ctx.isValid || mine !== seq || last !== snap) return;
+      fold(res, snap, descriptors, registries);
+      if (!res?.more) {
+        settle();
+        return;
+      }
+    }
+  }
+
+  function fold(res: RefineResponse | undefined, snap: LastSnapshot, descriptors: FieldDescriptor[], registries: Registries): void {
     const fills = (res?.suggestions ?? []).filter((s) => !snap.settled.has(`f|${s.fieldId}`));
     const interactions = (res?.interactions ?? []).filter((s) => !snap.settled.has(`e|${s.elementId}`));
     if (fills.length === 0 && interactions.length === 0) return;
@@ -163,6 +242,7 @@ export function startSuggestions(
     snap.interactions = mergeSuggestions(snap.interactions, interactions);
     const cur = shown;
     if (chip.visible && cur) {
+      // A scroll banner names no value; the chip after the scroll reads the merged answer.
       if (cur.kind === 'fill') {
         const better = snap.suggestions.find((s) => s.fieldId === cur.id);
         if (better && better !== cur.suggestion) {
@@ -181,9 +261,20 @@ export function startSuggestions(
 
   // A field chip wins, then a chip on an element; the corner chip only appears when there is nothing on the page to act on.
   function present(answer: Answer, descriptors: FieldDescriptor[], registries: Registries): void {
+    view = { descriptors, registries };
     if (presentFill(answer.suggestions, descriptors, registries)) return;
     if (presentInteract(answer.interactions, registries.elements)) return;
     presentNav(answer.navigation);
+  }
+
+  /**
+   * After Esc, the next chip from the same answer: the dismissed one is
+   * already out of `last`, so this lands on the next field, element or
+   * offer, or on nothing. Esc costs one suggestion, never the whole answer.
+   */
+  function advance(): void {
+    if (!last || !view) return;
+    present(last, view.descriptors, view.registries);
   }
 
   /** From here on this is the page being filled: no picture of it, ever. */
@@ -193,6 +284,18 @@ export function startSuggestions(
       page.filling = true;
       void send('vision', { action: 'filling', url: doc.location.href, title: doc.title, bodyChars: 0 });
     }
+  }
+
+  /** The frame a registry entry lives in, when it is one the hub knows; a frame that has gone quiet cannot perform. */
+  function frameOf(entry: { frame?: { token: string } }): KnownFrame | null {
+    return entry.frame ? (frames.get(entry.frame.token) ?? null) : null;
+  }
+
+  /** Keys for a chip on a frame's field are heard by that frame, not here; tell it which key, and stop telling it once the chip is gone. */
+  function armFrame(frame: KnownFrame | null, key: AcceptKey): () => void {
+    if (!frame) return () => undefined;
+    hub.arm(frame, key);
+    return () => hub.disarm();
   }
 
   function presentFill(
@@ -211,47 +314,79 @@ export function startSuggestions(
     if (!pick || !entry || !entry.el.isConnected) return false;
     const suggestion = byField.get(pick.i)!;
     const host = doc.location.host;
-    const target = resolveTarget(host, entry.el, doc.location.pathname) ?? entry.el;
+    const frame = frameOf(entry);
+    if (entry.frame && !frame) return false;
+    const target = frame ? entry.el : (resolveTarget(host, entry.el, doc.location.pathname) ?? entry.el);
     // The snapshot saw an empty field; the user (or a Maps redirect) may have filled it since.
-    if (valueOf(target)) return false;
+    if (!frame && valueOf(target)) return false;
     const forget = (): void => {
       if (!last) return;
       last.suggestions = last.suggestions.filter((s) => s !== suggestion);
       last.settled.add(`f|${suggestion.fieldId}`);
     };
-    const feedback = (accepted: boolean): void => {
+    const feedback = (accepted: boolean, outcome?: FillOutcome): void => {
       void send('feedback', {
         fieldId: suggestion.fieldId,
         fingerprint: entry.fingerprint,
         contextId: suggestion.sourceContextId,
         accepted,
         host,
+        ...(outcome === 'partial' ? { outcome } : {}),
       });
     };
     const interceptFrom = 'interceptFrom' in opts ? (opts.interceptFrom ?? null) : justFilled;
+    const view = {
+      ...(suggestion.source ? { detail: describeSource(suggestion.source, host) } : {}),
+      ...(suggestion.reason ? { reason: suggestion.reason } : {}),
+    };
 
+    const onScreen = frame ? hub.anchor(frame, entry.frame!.remoteId) !== null && inViewport(target, win) : inViewport(target, win);
+    if (!onScreen) {
+      presentScroll(pick.i, {
+        target,
+        name: fieldName(pick),
+        ...view,
+        interceptFrom,
+        then: (from) => presentFill(last?.suggestions ?? suggestions, descriptors, registries, { prefer: pick.i, interceptFrom: from }),
+        forget,
+      });
+      return true;
+    }
+
+    const disarm = armFrame(frame, 'Tab');
     chip.show({
       target,
       value: suggestion.value,
-      ...(suggestion.source ? { detail: describeSource(suggestion.source, doc.location.host) } : {}),
-      ...(suggestion.reason ? { reason: suggestion.reason } : {}),
+      ...view,
+      pending,
       interceptFrom,
-      onAccept() {
+      ...(frame ? { anchor: () => hub.anchor(frame, entry.frame!.remoteId) } : {}),
+      async onAccept() {
+        disarm();
         justFilled = null;
-        if (valueOf(target) || !fillElement(target, suggestion.value, host)) return;
-        justFilled = target;
+        const outcome = frame
+          ? await hub.perform(frame, { kind: 'fill', id: entry.frame!.remoteId, value: suggestion.value, host, ...(locale() ? { locale: locale()! } : {}) }).then((r) => (r.ok ? (r.outcome ?? 'done') : null))
+          : valueOf(target)
+            ? null
+            : await performFill(target, suggestion.value, host, { ...(locale() ? { locale: locale()! } : {}) });
+        if (!ctx.isValid || outcome === null) return;
+        // A partial fill leaves the user to finish the field, so their next Tab is theirs; a whole one keeps Tab for the next chip.
+        justFilled = outcome === 'done' && !frame ? target : null;
         forget();
-        feedback(true);
+        feedback(true, outcome);
         // The answer that named this field usually named the next one too; a
         // fresh round trip would only rediscover it after the user's next Tab.
         present(last ?? EMPTY, descriptors, registries);
         if (!chip.visible) snapshotSoon();
       },
       onDismiss(reason) {
+        disarm();
         // A timeout or a vanished target says nothing about the suggestion; Esc and typing over it do.
         if (reason !== 'escape' && reason !== 'typed') return;
         forget();
         feedback(false);
+        // Typing means the user is busy in this field; Esc means "not that one", so the next one gets its turn.
+        if (reason === 'escape') advance();
       },
     });
     shown = { kind: 'fill', id: pick.i, suggestion, interceptFrom };
@@ -262,8 +397,11 @@ export function startSuggestions(
 
   /**
    * One element, one verb, one Tab. The chip sits on the element and reads
-   * `Click "Save"?`; Tab performs it once and asks for a fresh snapshot, since
-   * the page usually changes. Nothing is chained onto it.
+   * `Click "Save"?`, or `Open "…" on doordash.com?` for a real link, where it
+   * sits on the result's title and Tab clicks the anchor around it. Tab
+   * performs it once and asks for a fresh snapshot, since the page usually
+   * changes. Nothing is chained onto it. A money control takes Enter instead,
+   * and its accept is reported as such.
    */
   function presentInteract(
     interactions: InteractionView[],
@@ -272,7 +410,9 @@ export function startSuggestions(
   ): boolean {
     const fits = (s: InteractionView): boolean => {
       const entry = registry.get(s.elementId);
-      return !!entry && !done.has(entry.key) && stillFits(entry.el, s.verb);
+      if (!entry || done.has(entry.key)) return false;
+      if (entry.frame) return frameOf(entry) !== null && entry.el.isConnected;
+      return stillFits(entry.el, s.verb, entry.role);
     };
     const pick =
       (opts.prefer !== undefined ? interactions.find((s) => s.elementId === opts.prefer && fits(s)) : undefined) ??
@@ -280,43 +420,137 @@ export function startSuggestions(
     const entry = pick && registry.get(pick.elementId);
     if (!pick || !entry) return false;
     const host = doc.location.host;
-    const text = interactionChipText(pick.verb, entry.name, pick.value);
+    const frame = frameOf(entry);
+    // A result link is clicked on its anchor but the chip sits on the title inside it.
+    const at = entry.at ?? entry.el;
+    const text = interactionChipText(pick.verb, entry.name, pick.value, entry.role, entry.site);
+    const key: AcceptKey = entry.money ? 'Enter' : 'Tab';
     const forget = (): void => {
       if (!last) return;
       last.interactions = last.interactions.filter((s) => s !== pick);
       last.settled.add(`e|${pick.elementId}`);
     };
     const feedback = (accepted: boolean): void => {
-      void send('feedback', { kind: 'interact', host, role: entry.role, name: entry.name, accepted });
+      void send('feedback', {
+        kind: 'interact',
+        host,
+        role: entry.role,
+        name: entry.name,
+        accepted,
+        ...(entry.money && accepted ? { money: true as const } : {}),
+      });
     };
     const interceptFrom = 'interceptFrom' in opts ? (opts.interceptFrom ?? null) : justFilled;
+    const view = {
+      ...(pick.source ? { detail: describeSource(pick.source, host) } : {}),
+      ...(pick.reason ? { reason: pick.reason } : {}),
+    };
+    const accepted = (): void => {
+      done.add(entry.key);
+      feedback(true);
+      snapshotSoon();
+    };
 
+    const onScreen = frame ? hub.anchor(frame, entry.frame!.remoteId) !== null && inViewport(at, win) : inViewport(at, win);
+    if (!onScreen) {
+      presentScroll(pick.elementId, {
+        target: at,
+        name: entry.name,
+        ...view,
+        interceptFrom,
+        then: (from) => {
+          if (pick.verb !== 'scroll') {
+            presentInteract(last?.interactions ?? interactions, registry, { prefer: pick.elementId, interceptFrom: from });
+            return;
+          }
+          // A bare scroll was the whole interaction. The element is in view now, which the
+          // memoised answer knows nothing about, so the next snapshot asks afresh.
+          forget();
+          done.add(entry.key);
+          feedback(true);
+          last = null;
+          snapshotSoon();
+        },
+        forget,
+      });
+      return true;
+    }
+
+    const disarm = armFrame(frame, key);
     chip.show({
-      target: entry.el,
+      target: at,
       verb: text.verb,
       value: text.value,
       tail: text.tail,
-      ...(pick.source ? { detail: describeSource(pick.source, host) } : {}),
-      ...(pick.reason ? { reason: pick.reason } : {}),
+      key,
+      ...view,
+      pending,
       interceptFrom,
-      onAccept() {
+      ...(frame ? { anchor: () => hub.anchor(frame, entry.frame!.remoteId) } : {}),
+      async onAccept() {
+        disarm();
         justFilled = null;
         forget();
-        if (!stillFits(entry.el, pick.verb) || !performInteraction(entry.el, pick.verb, pick.value)) return;
-        done.add(entry.key);
-        feedback(true);
-        snapshotSoon();
+        const ok = frame
+          ? (await hub.perform(frame, { kind: 'interact', id: entry.frame!.remoteId, verb: pick.verb, value: pick.value })).ok
+          : stillFits(entry.el, pick.verb, entry.role) && performInteraction(entry.el, pick.verb, pick.value, entry.role);
+        if (!ctx.isValid || !ok) return;
+        accepted();
       },
       onDismiss(reason) {
+        disarm();
         if (reason !== 'escape' && reason !== 'typed') return;
         forget();
         feedback(false);
+        if (reason === 'escape') advance();
       },
     });
     shown = { kind: 'interact', id: pick.elementId, suggestion: pick, interceptFrom };
     justFilled = null;
     markFilling();
     return true;
+  }
+
+  /**
+   * The suggestion's target is scrolled out of view, so the field chip would
+   * be invisible. Offer the scroll instead, as a banner: `Scroll to "Add
+   * location"? Tab`. Tab brings the element to the middle of the viewport
+   * and, once the page has settled, the normal chip for the same suggestion
+   * appears, taking Tab from wherever focus was. A scroll is not a fill: it
+   * sends no feedback, no filling cue, and consumes nothing. Esc drops the
+   * offer for this page load, says nothing to the background, and moves on
+   * to the answer's next item.
+   */
+  function presentScroll(id: string, offer: ScrollOffer): void {
+    const { target } = offer;
+    chip.showCorner({
+      label: 'Scroll to',
+      bare: true,
+      value: offer.name,
+      ...(offer.detail ? { detail: offer.detail } : {}),
+      ...(offer.reason ? { reason: offer.reason } : {}),
+      pending,
+      target,
+      interceptFrom: offer.interceptFrom,
+      onAccept() {
+        const from = deepActiveElement(doc);
+        const snap = last;
+        void scrollToTarget(target, win).then(() => {
+          // A newer answer, or a page that moved on, owns the chip now.
+          if (!ctx.isValid || last !== snap || !target.isConnected) return;
+          offer.then(from);
+        });
+      },
+      onDismiss(reason) {
+        if (reason !== 'escape' && reason !== 'typed') return;
+        offer.forget();
+        // Declining a scroll is "not that one" as much as Esc on a chip is: the answer's next item gets its turn.
+        if (reason === 'escape') advance();
+      },
+    });
+    shown = { kind: 'scroll', id };
+    justFilled = null;
+    if (last) last.shown = true;
   }
 
   // A corner chip does not make this the page being filled: it is the source page, and may still be photographed.
@@ -337,6 +571,7 @@ export function startSuggestions(
       value: nav.value,
       ...(nav.source ? { detail: describeSource(nav.source, doc.location.host) } : {}),
       ...(nav.reason ? { reason: nav.reason } : {}),
+      pending,
       onAccept() {
         forget();
         feedback(true);
@@ -347,6 +582,7 @@ export function startSuggestions(
         if (reason !== 'escape' && reason !== 'typed') return;
         forget();
         feedback(false);
+        if (reason === 'escape') advance();
       },
     });
     shown = { kind: 'nav' };
@@ -366,12 +602,16 @@ export function startSuggestions(
   });
   ctx.addEventListener(win, 'wxt:locationchange', () => {
     last = null;
+    settle();
     done.clear();
     if (page) page.filling = false;
     chip.hide();
     snapshotSoon();
   });
-  ctx.onInvalidated(() => chip.destroy());
+  ctx.onInvalidated(() => {
+    chip.destroy();
+    hub.destroy();
+  });
 
   return {
     refresh() {
@@ -381,6 +621,7 @@ export function startSuggestions(
     },
     force() {
       last = null;
+      settle();
       chip.hide();
       void snapshot(true);
     },
@@ -393,6 +634,11 @@ function describeSource(source: SuggestionSource, here: string): string {
   return `from ${where} · ${relativeAge(source.capturedAt)}`;
 }
 
+/** What the scroll banner calls a field: its label, aria-label, placeholder or name, whichever the page gave it. */
+function fieldName(d: FieldDescriptor): string {
+  return d.lb || d.al || d.ph || d.nm || 'the field';
+}
+
 function isField(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
   if (isTextEntry(target)) return true;
@@ -400,7 +646,7 @@ function isField(target: EventTarget | null): boolean {
   return role !== null && FIELD_ROLES.has(role);
 }
 
-// Focus moves without changing what is worth suggesting; the rest of the descriptor does.
+// Focus and scrolling move without changing what is worth suggesting; the rest of the descriptor does.
 function snapshotKey(descriptors: FieldDescriptor[], elements: ElementDescriptor[]): string {
-  return JSON.stringify([descriptors.map(({ f: _f, ...d }) => d), elements]);
+  return JSON.stringify([descriptors.map(({ f: _f, o: _o, ...d }) => d), elements.map(({ o: _o, ...e }) => e)]);
 }

@@ -85,6 +85,19 @@ describe('SuggestionListSchema', () => {
     if (!res.success) expect(res.error.issues[0]?.path).toEqual(['suggestions', 0, 'verb']);
   });
 
+  it('accepts a bare scroll and rejects one that carries a value', () => {
+    const scroll = { ...interact, verb: 'scroll', value: '' };
+    expect(SuggestionListSchema.parse({ suggestions: [scroll] })).toEqual({
+      suggestions: [{ kind: 'interact', elementId: 'e0', verb: 'scroll', value: '', confidence: 0.85, reason: 'commits the fills', sourceContextId: 'c1' }],
+    });
+    const res = SuggestionListSchema.safeParse({ suggestions: [{ ...scroll, value: 'Save' }] });
+    expect(res.success).toBe(false);
+    if (!res.success) expect(res.error.issues[0]?.path).toEqual(['suggestions', 0, 'value']);
+    // Every other kind still needs one.
+    expect(SuggestionListSchema.safeParse({ suggestions: [{ ...fill, value: '' }] }).success).toBe(false);
+    expect(SuggestionListSchema.safeParse({ suggestions: [{ ...interact, value: '' }] }).success).toBe(false);
+  });
+
   it('rejects out-of-range confidence and wrong types', () => {
     const bad = { ...fill, confidence: 1.4 };
     expect(SuggestionListSchema.safeParse({ suggestions: [bad] }).success).toBe(false);

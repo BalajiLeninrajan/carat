@@ -1,13 +1,15 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { SuggestRequest } from '@carat/shared';
+import { EAGERNESS_LEVELS } from '@carat/shared';
 import { LocalProvider } from '../src/local';
 import { classifyField } from '../src/local/fields';
 import { affirms, amountFor } from '../src/local/interact';
-import { extractAddress, extractEmailRequest, extractPhone, extractPlace, extractWhen } from '../src/local/extract';
-import { judge, loadFixtures, type Fixture } from '../eval/fixtures';
+import { extractAddress, extractEmailRequest, extractName, extractPhone, extractPlace, extractWhen } from '../src/local/extract';
+import { expectationsAt, judge, loadFixtures, type Fixture } from '../eval/fixtures';
 
 const signal = new AbortController().signal;
 const local = new LocalProvider();
+const at = (level: (typeof EAGERNESS_LEVELS)[number]) => new LocalProvider(level);
 let fixtures: Map<string, Fixture>;
 
 beforeAll(async () => {
@@ -41,12 +43,63 @@ describe('LocalProvider', () => {
     expect(out).toEqual([expect.objectContaining({ kind: 'fill', fieldId: 'f0', value: 'maya.chen@northbrookstudio.com' })]);
   });
 
-  it('returns [] on every negative fixture', async () => {
-    for (const f of fixtures.values()) {
-      if (f.expect.length > 0) continue;
-      const out = await local.suggest(f.request, { signal });
-      expect(judge(f, out), f.name).toEqual({ pass: true, detail: '[]' });
+  it('defaults to eager', () => {
+    expect(local.eagerness).toBe('eager');
+  });
+
+  it('returns [] on every negative fixture below eager, and at eager only a weak chip where the fixture allows one', async () => {
+    for (const level of ['conservative', 'balanced'] as const) {
+      for (const f of fixtures.values()) {
+        if (expectationsAt(f, level).length > 0) continue;
+        const out = await at(level).suggest(f.request, { signal });
+        expect(judge(f, out, level), `${f.name} at ${level}`).toEqual({ pass: true, detail: '[]' });
+      }
     }
+    const weak: string[] = [];
+    for (const f of fixtures.values()) {
+      if (expectationsAt(f, 'eager').length > 0) continue;
+      const out = await at('eager').suggest(f.request, { signal });
+      const verdict = judge(f, out, 'eager');
+      expect(verdict.pass, `${f.name} at eager: ${verdict.detail}`).toBe(true);
+      if (verdict.weak) weak.push(f.name);
+      for (const s of out) expect(s.confidence, f.name).toBeLessThan(0.55);
+    }
+    // The documented cost of eager on this fixture set: two bare names from prose, one Esc each.
+    expect(weak).toEqual(['neg-news-search', 'neg-recipe-comment']);
+  });
+
+  it('passes every positive fixture at every level, the eager-only ones at eager alone', async () => {
+    for (const level of EAGERNESS_LEVELS) {
+      for (const f of fixtures.values()) {
+        if (expectationsAt(f, level).length === 0) continue;
+        const out = await at(level).suggest(f.request, { signal });
+        expect(judge(f, out, level).pass, `${f.name} at ${level}`).toBe(true);
+      }
+    }
+    const eagerOnly = [...fixtures.values()].filter((f) => f.expect.length === 0 && f.expectAt?.eager);
+    expect(eagerOnly.map((f) => f.name)).toEqual([
+      'eager-discord-bare-name-search',
+      'eager-selection-single-name-maps',
+      'eager-slack-quoted-issue-title',
+      'neg-same-tab',
+    ]);
+  });
+
+  it('marks an eager-only value with a confidence under the balanced floor and a reason that says why', async () => {
+    const out = await at('eager').suggest(fixture('eager-discord-bare-name-search').request, { signal });
+    expect(out).toEqual([
+      { kind: 'fill', fieldId: 'f0', value: 'Lazeez Shawarma', confidence: 0.45, reason: 'capitalised name in recent text, no cue around it', sourceContextId: 'c1' },
+    ]);
+    // A cued place still wins over a bare name for the same field, at full confidence.
+    const both = { ...fixture('eager-discord-bare-name-search').request, context: [fixture('discord-maps-search').request.context[0]!, ...fixture('eager-discord-bare-name-search').request.context] };
+    expect((await at('eager').suggest(both, { signal })).map((s) => [s.value, s.confidence])).toEqual([['Seven Shores Cafe', 0.75]]);
+  });
+
+  it('reads another tab on the page\'s own site at eager and nowhere else', async () => {
+    const req = fixture('neg-same-tab').request;
+    expect((await at('eager').suggest(req, { signal })).map((s) => s.value)).toEqual(['Seven Shores Cafe']);
+    expect(await at('balanced').suggest(req, { signal })).toEqual([]);
+    expect(await at('conservative').suggest(req, { signal })).toEqual([]);
   });
 
   it('returns [] when the signal is already aborted', async () => {
@@ -172,6 +225,47 @@ describe('LocalProvider interactions', () => {
   });
 });
 
+describe('LocalProvider page query links', () => {
+  const serp = () => fixture('serp-doordash-link').request;
+
+  it('offers the first result the page query names, with no context and nothing filled', async () => {
+    expect(await local.suggest(serp(), { signal })).toEqual([
+      {
+        kind: 'interact',
+        elementId: 'e1',
+        verb: 'click',
+        value: 'Order Now | Quick and Easy Food Delivery',
+        confidence: 0.8,
+        reason: expect.stringContaining('"doordash"'),
+        sourceContextId: 'page',
+      },
+    ]);
+    // The same at every level: the query is on the page, so there is nothing to be unsure about.
+    for (const level of EAGERNESS_LEVELS) expect((await at(level).suggest(serp(), { signal })).map((s) => s.confidence)).toEqual([0.8]);
+  });
+
+  it('reads the query off a filled search field when the page carries none', async () => {
+    const req = serp();
+    const { query: _q, ...page } = req.page;
+    const out = await local.suggest({ ...req, page }, { signal });
+    expect(out.map((s) => s.kind === 'interact' && s.elementId)).toEqual(['e1']);
+  });
+
+  it('offers nothing for a query no link answers, for a link with no destination, or with no query at all', async () => {
+    const req = serp();
+    const { query: _q, ...page } = req.page;
+    expect(await local.suggest(fixture('neg-serp-weather').request, { signal })).toEqual([]);
+    expect(await local.suggest({ ...req, elements: req.elements!.map(({ h: _h, ...e }) => e) }, { signal })).toEqual([]);
+    expect(await local.suggest({ ...req, page, fields: [{ i: 'f0', t: 'input:text', al: 'Add title', v: 'doordash' }] }, { signal })).toEqual([]);
+  });
+
+  it('never follows a short link named like an action, even when the query names it', async () => {
+    const req = serp();
+    const elements = [req.elements![0]!, { i: 'e1', r: 'link' as const, nm: 'Unsubscribe', h: 'doordash.com' }];
+    expect(await local.suggest({ ...req, elements }, { signal })).toEqual([]);
+  });
+});
+
 describe('affirms and amountFor', () => {
   it('matches whole words without negation nearby', () => {
     expect(affirms("I'm a vegetarian", 'Vegetarian')).toBe(true);
@@ -244,6 +338,36 @@ describe('extract', () => {
     expect(extractEmailRequest('send the deck to sam@example.com when done')).toBe('sam@example.com');
     expect(extractEmailRequest('Contact the newsroom: tips@cbc.ca')).toBeNull();
     expect(extractEmailRequest('Unsubscribe: no-reply@example.com')).toBeNull();
+  });
+});
+
+describe('extractName', () => {
+  it('takes the most recent run of capitalised words, skipping sentence openers and author stamps', () => {
+    expect(extractName('alex 7:02 PM anyone been to Lazeez Shawarma? sam 7:03 PM not yet')).toBe('Lazeez Shawarma');
+    expect(extractName('we could do Lazeez Shawarma or maybe Kinkaku Izakaya instead')).toBe('Kinkaku Izakaya');
+    expect(extractName('Regional Headquarters hosts the meeting. Staff said so.')).toBeNull();
+    expect(extractName('Maya Chen 3:12 PM can you email the deck')).toBeNull();
+    expect(extractName('The chair will be at Parliament Hill on Monday')).toBe('Parliament Hill');
+  });
+
+  it('ignores page chrome, street parts and short capitals, and does not cross a full stop', () => {
+    expect(extractName('Seven Shores Cafe 4.6 (312) Cafe 10 Regina St N, Waterloo, ON N2J 2Z8 Open Closes 9 p.m. Directions Save Share')).toBeNull();
+    expect(extractName('native to regions from Central Africa to Southeast Asia. In temperate climates')).toBe('Southeast Asia');
+    expect(extractName('meet at The Sunset Grill later')).toBe('The Sunset Grill');
+    expect(extractName('nothing capitalised here at all')).toBeNull();
+  });
+
+  it('accepts a single capitalised word only from a selection', () => {
+    expect(extractName('has anyone tried Vincenzos for lunch', 'selection')).toBe('Vincenzos');
+    expect(extractName('Vincenzos', 'selection')).toBe('Vincenzos');
+    expect(extractName('has anyone tried Vincenzos for lunch', 'page')).toBeNull();
+    expect(extractName('Anyone around Tuesday', 'selection')).toBeNull();
+  });
+
+  it('takes a lowercase quoted string as a place only when loose', () => {
+    expect(extractPlace('open an issue called "flaky login test on ci" please', true)).toEqual({ name: 'flaky login test on ci' });
+    expect(extractPlace('open an issue called "flaky login test on ci" please')).toBeNull();
+    expect(extractPlace('"this is unacceptable," she said', true)).toBeNull();
   });
 });
 

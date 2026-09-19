@@ -1,14 +1,24 @@
 import type { ImageInput, Settings, SuggestRequest, Suggestion } from '@carat/shared';
-import { FastThenSmartProvider } from './fast-then-smart';
 import { JevProvider } from './jev';
 import { LocalProvider } from './local';
 import { OpenAICompatProvider } from './openai-compat';
 import type { ReasoningEffort } from './openai-compat';
+import { RaceProvider } from './race';
+
+export interface SuggestOptions {
+  signal: AbortSignal;
+  /**
+   * Called for each otherwise valid suggestion the provider dropped for
+   * sitting under the eagerness level's confidence floor, so the popup can
+   * say "2 candidates under the eager floor" rather than "answered with 0".
+   */
+  onUnderFloor?: (s: Suggestion) => void;
+}
 
 /** The fast path: text in, suggestions out. Swapping providers only ever means implementing this. */
 export interface Provider {
   readonly id: Settings['provider'];
-  suggest(req: SuggestRequest, opts: { signal: AbortSignal }): Promise<Suggestion[]>;
+  suggest(req: SuggestRequest, opts: SuggestOptions): Promise<Suggestion[]>;
 }
 
 /** The smart path: the same text-only suggest on a bigger model, plus reading a screenshot into text. */
@@ -17,21 +27,24 @@ export interface VisionProvider extends Provider {
 }
 
 /**
- * local: regex only. openai/baseten: the chat model when a key is set, else
- * regex. cloudflare: Jev first when an account id and token are set, then the
- * chat model at baseURL when a key is set too; without Cloudflare credentials
- * it behaves like openai. The chat model runs with no reasoning: the chip
- * has a 6s budget and the prompt carries the few-shots it needs.
+ * local: regex only. Anything else is a race between every source the
+ * settings allow, regex always among them: openai/baseten add the chat model
+ * when a key is set; cloudflare adds Jev when an account id and token are set
+ * and the chat model at baseURL when a key is set too. Without Cloudflare
+ * credentials it behaves like openai; with no key at all it is regex alone.
+ * The chat model runs with no reasoning: the chip has a 6s budget and the
+ * prompt carries the few-shots it needs. Start order is also rank on a tie:
+ * chat beats Jev beats regex.
  */
 export function createProvider(settings: Settings, fetchImpl: typeof fetch = fetch): Provider {
-  if (settings.provider === 'local') return new LocalProvider();
+  if (settings.provider === 'local') return new LocalProvider(settings.eagerness);
+  const sources: Provider[] = [new LocalProvider(settings.eagerness)];
+  const jev = settings.provider === 'cloudflare' && settings.cfAccountId && settings.cfApiToken;
+  if (jev) sources.push(new JevProvider({ accountId: settings.cfAccountId, apiToken: settings.cfApiToken, eagerness: settings.eagerness }, fetchImpl));
   const llm = chatProvider(settings, settings.model, 'none', fetchImpl);
-
-  if (settings.provider === 'cloudflare' && settings.cfAccountId && settings.cfApiToken) {
-    const jev = new JevProvider({ accountId: settings.cfAccountId, apiToken: settings.cfApiToken }, fetchImpl);
-    return llm ? new FastThenSmartProvider(jev, llm) : jev;
-  }
-  return llm ?? new LocalProvider();
+  if (llm) sources.push(llm);
+  if (sources.length === 1) return sources[0]!;
+  return new RaceProvider(sources, { id: jev ? 'cloudflare' : llm!.id });
 }
 
 /**
@@ -58,6 +71,7 @@ function chatProvider(settings: Settings, model: string, effort: ReasoningEffort
       apiKey: settings.apiKey,
       model,
       mode: chat === 'openai' ? 'json_schema' : 'json_object',
+      eagerness: settings.eagerness,
       // Only OpenAI's own endpoint is known to take reasoning_effort; a vLLM or Baseten server may 400 on it.
       ...(isOpenAI(settings.baseURL) ? { reasoningEffort: effort } : {}),
     },

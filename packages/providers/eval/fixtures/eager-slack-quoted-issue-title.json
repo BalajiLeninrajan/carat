@@ -1,0 +1,26 @@
+{
+  "name": "eager-slack-quoted-issue-title",
+  "request": {
+    "page": { "host": "github.com", "title": "New Issue · carat", "path": "/balaji/carat/issues/new" },
+    "fields": [
+      { "i": "f0", "t": "input:text", "nm": "issue[title]", "ph": "Title", "al": "Add a title", "f": 1, "w": "l" },
+      { "i": "f1", "t": "textarea", "nm": "issue[body]", "ph": "Type your description here...", "al": "Markdown value", "w": "l" }
+    ],
+    "context": [
+      {
+        "id": "c1",
+        "origin": "https://app.slack.com",
+        "title": "Slack | #eng",
+        "kind": "page",
+        "text": "Slack app.slack.com #eng priya 10:41 AM can someone open an issue called \"flaky login test on ci\" so we track it? you 10:42 AM on it",
+        "capturedAt": 1758033720000
+      }
+    ],
+    "now": "2026-09-16T10:43:00-04:00",
+    "locale": "en-CA"
+  },
+  "expect": [],
+  "expectAt": {
+    "eager": [{ "fieldId": "f0", "valueIncludes": "flaky login test on ci" }]
+  }
+}

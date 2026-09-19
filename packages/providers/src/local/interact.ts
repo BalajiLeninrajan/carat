@@ -1,7 +1,9 @@
-import type { ElementDescriptor, InteractSuggestion, RequestContext } from '@carat/shared';
-import { isDestructiveName, verbFits } from '@carat/shared';
+import type { ClickGate, ElementDescriptor, FieldDescriptor, InteractSuggestion, PageMeta, RequestContext } from '@carat/shared';
+import { clickAllowed, firstMatchingLink, isDestructiveElement, isDestructiveName, isPrimaryActionName, pageIntent, pageQueryClick, verbFits } from '@carat/shared';
 
 const CONFIDENCE = 0.75;
+// A primary button pressed with no fill behind it is a guess about where the user is heading: under the balanced floor.
+const PRIMARY_CONFIDENCE = 0.5;
 
 // Buttons that commit what was just typed: one verb, at most one object word.
 // "Save & close" and "Save and continue" do a second thing and are not offered offline.
@@ -20,22 +22,41 @@ const AMOUNT_BEFORE = /(-?\d+(?:\.\d+)?)\s*(%)\s*$/;
 
 type Ctx = RequestContext[number];
 
+/** What the regex provider needs besides the elements to decide about a button. */
+export interface InteractInput {
+  filled: string[];
+  /** The rest of the click gate: the level, whether a flow is on, whether the page still has an empty field. */
+  gate: Omit<ClickGate, 'filled'>;
+}
+
 /**
  * Offline interactions, all narrow. A Save-like button is offered only after
- * carat itself filled fields on the page (`filled`). A checkbox, switch or
- * radio is offered when a context sentence contains its name unnegated. A
- * slider is offered when a context sentence names it with a number. Nothing
- * else is clicked: a missed chip costs nothing, a wrong click costs trust.
+ * carat itself filled fields on the page (`filled`). The page's primary
+ * continue-style button (Search, Continue, Next) is offered without a fill
+ * only where `clickAllowed` says so: a flow, or the eager level with nothing
+ * left to fill, at a confidence that says it is a guess. A checkbox, switch
+ * or radio is offered when a context sentence contains its name unnegated.
+ * A slider is offered when a context sentence names it with a number.
+ * Nothing else is clicked: a missed chip costs nothing, a wrong click costs
+ * trust. Money controls (`m: 1`) are never clicked offline.
  */
-export function interactions(elements: ElementDescriptor[], context: Ctx[], filled: string[]): InteractSuggestion[] {
+export function interactions(elements: ElementDescriptor[], context: Ctx[], input: InteractInput): InteractSuggestion[] {
+  const { filled } = input;
   const out: InteractSuggestion[] = [];
-  const safe = elements.filter((e) => !isDestructiveName(e.nm));
+  const safe = elements.filter((e) => !isDestructiveName(e.nm) && e.m !== 1);
 
   const commit = filled[0];
   if (commit !== undefined) {
     const candidates = safe.filter((e) => (e.r === 'button' || e.r === 'link') && COMMIT_NAME.test(e.nm.trim()));
     const button = candidates.find((e) => e.p === 1) ?? candidates[0];
     if (button) out.push(suggest(button, 'click', button.nm, commit, 'carat just filled fields on this page; this button commits them'));
+  } else if (context[0]) {
+    const gate: ClickGate = { ...input.gate, filled: false };
+    const primary = safe.find((e) => (e.r === 'button' || e.r === 'link') && e.p === 1 && isPrimaryActionName(e.nm) && clickAllowed(e, gate));
+    if (primary) {
+      const reason = gate.flow ? 'this page is a step in the flow under way; this is its primary action' : 'nothing left to fill here; this is the page\'s primary action';
+      out.push({ ...suggest(primary, 'click', primary.nm, context[0].id, reason), confidence: PRIMARY_CONFIDENCE });
+    }
   }
 
   for (const e of safe) {
@@ -103,4 +124,20 @@ export function amountFor(text: string, e: ElementDescriptor): string | null {
     return String(Number(n.toFixed(4)));
   }
   return null;
+}
+
+/**
+ * The one click the page's own text justifies: the first described link, in
+ * page order, whose site or title is what the user just searched for. It
+ * needs no prior fill and no model, because the query is on the page and the
+ * match is exact. A fuzzy query matches nothing here and goes to the model.
+ */
+export function linkForQuery(page: PageMeta, fields: FieldDescriptor[], elements: ElementDescriptor[]): InteractSuggestion[] {
+  const intent = pageIntent(page, fields);
+  if (!intent) return [];
+  const link = firstMatchingLink(
+    elements.filter((e) => !isDestructiveElement(e)),
+    intent,
+  );
+  return link ? [pageQueryClick(link, intent)] : [];
 }

@@ -268,7 +268,25 @@ describe('settings store', () => {
       statusLine: false,
       screenshots: false,
       smartModel: '',
+      eagerness: 'eager',
+      allowPayments: false,
     });
+  });
+
+  it('keeps payments off unless a real true was stored', async () => {
+    const area = new FakeArea();
+    const settings = createSettingsStore(area);
+    expect((await settings.set({ allowPayments: true })).allowPayments).toBe(true);
+    expect((await settings.set({ allowPayments: 'true' as unknown as boolean })).allowPayments).toBe(false);
+    expect((await settings.set({ allowPayments: undefined })).allowPayments).toBe(false);
+  });
+
+  it('keeps eagerness to the three levels and defaults it to eager', async () => {
+    const settings = createSettingsStore(new FakeArea());
+    expect((await settings.set({ eagerness: 'balanced' })).eagerness).toBe('balanced');
+    expect((await settings.set({ eagerness: 'conservative' })).eagerness).toBe('conservative');
+    expect((await settings.set({ eagerness: 'reckless' as never })).eagerness).toBe('eager');
+    expect((await settings.set({ eagerness: 3 as never })).eagerness).toBe('eager');
   });
 
   it('keeps screenshots off unless stored as true and keeps a blank smart model blank', async () => {

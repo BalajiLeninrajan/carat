@@ -6,6 +6,7 @@ import type { ContextStore, ShotStore } from '../store';
 import { isSiteOff, parseLocation } from '../store';
 import type { VisionDiag, VisionVerdict } from './diag';
 import { downscale } from './downscale';
+import type { PredictPipeline } from './predict';
 import type { Requester } from './requester';
 
 /**
@@ -37,6 +38,8 @@ export interface VisionDeps {
   timeoutMs?: number;
   /** Told what became of each cue, for the popup's debug line. */
   onDiag?: (tabId: number, diag: VisionDiag) => void;
+  /** Told about each transcript stored, so its entities are predicted like a page's. */
+  predict?: Pick<PredictPipeline, 'onCapture'>;
 }
 
 export interface VisionPipeline {
@@ -121,6 +124,7 @@ export function createVisionPipeline(deps: VisionDeps): VisionPipeline {
     if (text.length < MIN_TRANSCRIPT_CHARS) return note('short');
     const header = [shot.title, host].filter(Boolean).join(' · ');
     const item = await deps.store.upsertVision({ tabId, url: shot.url, title: shot.title, text: `${header}\n${text}` });
+    if (item) deps.predict?.onCapture(item);
     note(item ? 'transcribed' : 'pinned');
   }
 

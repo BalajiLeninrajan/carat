@@ -6,10 +6,11 @@ import { isInteractVerb } from './interact';
 // One flat object carries all three kinds: OpenAI strict mode rejects unions
 // and optional properties, so a field that does not apply travels as ''. Models
 // in json_object or prompt mode sometimes drop the empty ones, hence defaults.
+// `value` is checked per kind below: every suggestion but a scroll needs one.
 const WireSuggestionSchema = z.strictObject({
   kind: z.enum(['fill', 'action', 'interact']).default('fill'),
   fieldId: z.string().default(''),
-  value: z.string().min(1),
+  value: z.string(),
   confidence: z.number().min(0).max(1),
   reason: z.string(),
   sourceContextId: z.string().min(1),
@@ -22,6 +23,9 @@ const WireSuggestionSchema = z.strictObject({
 
 export const SuggestionSchema = WireSuggestionSchema.transform((w, ctx): Suggestion => {
   const base = { value: w.value, confidence: w.confidence, reason: w.reason, sourceContextId: w.sourceContextId };
+  const scroll = w.kind === 'interact' && w.verb === 'scroll';
+  if (scroll && w.value !== '') ctx.addIssue({ code: 'custom', path: ['value'], message: 'a scroll carries no value' });
+  if (!scroll && w.value.length === 0) ctx.addIssue({ code: 'custom', path: ['value'], message: 'value must not be empty' });
   if (w.kind === 'fill') {
     if (w.fieldId === '') ctx.addIssue({ code: 'custom', path: ['fieldId'], message: 'a fill needs a fieldId' });
     return { kind: 'fill', fieldId: w.fieldId, ...base };

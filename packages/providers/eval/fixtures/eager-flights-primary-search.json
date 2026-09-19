@@ -1,0 +1,26 @@
+{
+  "name": "eager-flights-primary-search",
+  "request": {
+    "page": { "host": "www.google.com", "title": "Flights from Toronto to Vancouver - Google Flights", "path": "/travel/flights" },
+    "fields": [],
+    "elements": [
+      { "i": "e0", "r": "button", "nm": "Search", "p": 1 },
+      { "i": "e1", "r": "button", "nm": "More filters" },
+      { "i": "e2", "r": "button", "nm": "Explore destinations" }
+    ],
+    "context": [
+      {
+        "id": "c1",
+        "origin": "https://discord.com",
+        "title": "Discord | #trips | Waterloo Friends",
+        "kind": "page",
+        "text": "Discord | #trips | Waterloo Friends discord.com #trips Today alex 9:14 AM flying Toronto to Vancouver on the 26th, back on the 30th? sam 9:15 AM works for me, book whatever is cheapest Message #trips",
+        "capturedAt": 1758046800000
+      }
+    ],
+    "now": "2026-09-16T14:07:00-04:00",
+    "locale": "en-CA"
+  },
+  "expect": [{ "elementId": "e0", "verb": "click", "valueIncludes": "Search" }],
+  "expectAt": { "balanced": [], "conservative": [] }
+}

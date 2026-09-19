@@ -1,18 +1,35 @@
 export { gate, explainGate, hasWork } from './gate';
 export type { GateInput } from './gate';
-export { DiagLog } from './diag';
-export type { CaptureDiag, CaptureVerdict, GateVerdict, ProviderAttempt, SuggestDiag, TabDiag, VisionDiag, VisionVerdict } from './diag';
+export { DiagLog, MAX_PERFORMS } from './diag';
+export type {
+  AnswerOrigin,
+  CaptureDiag,
+  CaptureVerdict,
+  GateVerdict,
+  PerformDiag,
+  ProviderAttempt,
+  SuggestDiag,
+  TabDiag,
+  VisionDiag,
+  VisionVerdict,
+} from './diag';
+export { flowActive } from './flow';
 export { eligibleContext, FRESH_MS } from './eligible';
 export { scoreAndPickContext, scoreItem, ownContext, CONTEXT_LIMITS, OWN_LIMITS } from './score';
 export { orchestrate } from './orchestrate';
 export type { OrchestrateDeps, SuggestInput } from './orchestrate';
 export { RefineQueue } from './refine';
+export type { RefineTicket } from './refine';
+export { createPredictPipeline, PREDICT_DEBOUNCE_MS } from './predict';
+export type { PredictDeps, PredictOutcome, PredictPipeline } from './predict';
+export { createPrewarmer, lookupPrewarmed, prewarmKey, adoptFills } from './prewarm';
+export type { PrewarmDeps, PrewarmDiag, PrewarmVerdict, Prewarmer, WebNavigationApi, CommitDetails } from './prewarm';
 export { createVisionPipeline } from './vision';
 export type { ScreenApi, VisionCue, VisionDeps, VisionPipeline } from './vision';
 export { downscale, MAX_EDGE } from './downscale';
 export type { ImageEnv } from './downscale';
 export { handleFeedback } from './feedback';
-export type { FeedbackInput, FillFeedback, InteractFeedback, NavFeedback } from './feedback';
+export type { FeedbackInput, FeedbackSinks, FillFeedback, InteractFeedback, NavFeedback, PerformOutcome } from './feedback';
 export { chromeTabsApi, openTabs, performNavigation, resolveNavigation } from './navigation';
 export type { OpenTab, TabsApi } from './navigation';
 export { getKnown, clearKnown, setPinned } from './known';

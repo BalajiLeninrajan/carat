@@ -1,0 +1,18 @@
+{
+  "name": "serp-doordash-link",
+  "request": {
+    "page": { "host": "www.google.com", "title": "doordash - Google Search", "path": "/search", "query": "doordash" },
+    "fields": [{ "i": "f0", "t": "textarea", "nm": "q", "al": "Search", "v": "doordash", "f": 1, "w": "l" }],
+    "elements": [
+      { "i": "e0", "r": "button", "nm": "Search", "p": 1 },
+      { "i": "e1", "r": "link", "nm": "Order Now | Quick and Easy Food Delivery", "h": "doordash.com" },
+      { "i": "e2", "r": "link", "nm": "DoorDash - Wikipedia", "h": "wikipedia.org" },
+      { "i": "e3", "r": "link", "nm": "Best restaurants near you", "h": "yelp.com" },
+      { "i": "e4", "r": "button", "nm": "Tools" }
+    ],
+    "context": [],
+    "now": "2026-09-16T18:20:00-04:00",
+    "locale": "en-CA"
+  },
+  "expect": [{ "elementId": "e1", "verb": "click", "valueIncludes": "Order Now" }]
+}

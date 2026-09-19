@@ -1,5 +1,7 @@
-// Regex extraction for the offline provider. Every pattern is deliberately
-// narrow: a missed suggestion costs nothing, a wrong one costs trust.
+// Regex extraction for the offline provider. The patterns that run at every
+// eagerness level are narrow: they only fire on a cue (an activity before
+// "at", a street suffix, a place noun). The loose ones at the bottom run at
+// `eager` only and trade a wrong chip, one Esc, for a missed one.
 
 export interface Place {
   name: string;
@@ -90,19 +92,74 @@ export function extractPlan(text: string): Plan | null {
   return null;
 }
 
-/** Best place-name candidate: planned "at <Place>" first, then a short quoted name, then "<Title Case> <place noun>". */
-export function extractPlace(text: string): Place | null {
+/**
+ * Best place-name candidate: planned "at <Place>" first, then a short quoted
+ * name, then "<Title Case> <place noun>". A quoted string needs a capital
+ * letter unless `loose`: at eager, 'call it "q3 roadmap draft"' is a title too.
+ */
+export function extractPlace(text: string, loose = false): Place | null {
   const plan = extractPlan(text);
   if (plan) return { name: plan.name, activity: plan.activity };
   for (const m of text.matchAll(QUOTED)) {
     const q = m[1]!.trim();
     const words = q.split(/\s+/);
     // Quoted dialogue ends in sentence punctuation or a comma before "said"; a name does not.
-    if (words.length <= 6 && /[A-Z]/.test(q) && !/[.!?,;:]$/.test(q)) return { name: q };
+    if (words.length <= 6 && (loose || /[A-Z]/.test(q)) && !/[.!?,;:]$/.test(q)) return { name: q };
   }
   const place = TITLE_CASE_PLACE.exec(text);
   TITLE_CASE_PLACE.lastIndex = 0;
   return place ? { name: place[1]!.trim() } : null;
+}
+
+// A run of two to five capitalised words, not opening the text or a sentence
+// (that capital is grammar, not a name), not the tail of a longer run, and
+// not crossing a full stop. A chat page lists messages oldest first, so the
+// last run is the most recent thing named.
+const NAME_WORD = "[A-Z][\\w'&-]*";
+const PROPER_RUN = new RegExp(
+  `(?<!^)(?<![.!?]\\s)(?<!${NAME_WORD}\\s)\\b(${NAME_WORD}(?:\\s+(?:${NAME_WORD}|of|the|and|&|de|du|la|le)){1,4})\\b`,
+  'g',
+);
+// "Maya Chen 3:12 PM" is a message author stamp, not a place.
+const AUTHOR_STAMP = /^\s*\d{1,2}:\d{2}/;
+const SINGLE_CAP = /\b[A-Z][a-z]{2,}\b/g;
+// Sentence openers, pronouns, chat filler, page chrome and street words that
+// happen to be capitalised. A run has to be made of words outside this list.
+const NOT_A_NAME = new Set(
+  (
+    'this that these those a an i we you he she it they me us him her them my our your his their its but or so if when what who how why where which ' +
+    'anyone someone everyone nobody yes no ok okay hi hey hello thanks thank please also just maybe sure yeah nope let lets today tonight tomorrow yesterday ' +
+    'monday tuesday wednesday thursday friday saturday sunday january february march april may june july august september october november december ' +
+    'am pm here there now then open closes closed save share directions nearby send phone edit suggest hours menu home search sign log login logout ' +
+    'view more about contact help settings privacy terms next back close cancel submit reply like follow subscribe download read watch new all ' +
+    'st street ave avenue rd road blvd boulevard dr drive ln lane ct court pl cres crescent pkwy parkway hwy highway'
+  ).split(' '),
+);
+const CONNECTOR = new Set(['of', 'the', 'and', '&', 'de', 'du', 'la', 'le']);
+
+// "ON", "N", "PM": a province, a compass point, a meridiem, never a name.
+const nameWord = (w: string): boolean =>
+  CONNECTOR.has(w.toLowerCase()) || (!NOT_A_NAME.has(w.toLowerCase()) && !(w.length <= 2 && w === w.toUpperCase()));
+
+/**
+ * Eager only. The most recent bare proper noun in the text: the last run of
+ * capitalised words that is not a sentence opener, not an author stamp and
+ * not page chrome. For a selection, the user pointed at the text, so a single
+ * capitalised word ("Vincenzos") counts too.
+ */
+export function extractName(text: string, kind: 'page' | 'selection' | 'vision' = 'page'): string | null {
+  let last: string | null = null;
+  for (const m of text.matchAll(PROPER_RUN)) {
+    if (AUTHOR_STAMP.test(text.slice(m.index + m[0].length, m.index + m[0].length + 8))) continue;
+    const name = cleanName(m[1]!);
+    const words = name.split(/\s+/);
+    if (words.length < 2 || !words.every(nameWord) || words.every((w) => CONNECTOR.has(w.toLowerCase()))) continue;
+    last = name;
+  }
+  if (last) return last;
+  if (kind !== 'selection') return null;
+  const singles = [...text.matchAll(SINGLE_CAP)].map((m) => m[0]).filter((w) => !NOT_A_NAME.has(w.toLowerCase()) && !CONNECTOR.has(w.toLowerCase()));
+  return singles.at(-1) ?? null;
 }
 
 /** A named event ("Waterloo Busker Carnival", "Oktoberfest 2026") for title fields. */

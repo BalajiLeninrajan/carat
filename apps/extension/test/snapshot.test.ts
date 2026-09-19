@@ -1,7 +1,43 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { FieldDescriptor } from '@carat/shared';
 import { fingerprintMatchesDescriptor } from '../src/background';
-import { enumerateFields, fingerprintOf, serializeFields } from '../src/snapshot';
+import { pageMeta } from '../src/content';
+import { enumerateFields, fingerprintOf, pageQuery, serializeFields } from '../src/snapshot';
+
+describe('pageQuery', () => {
+  afterEach(() => window.history.pushState({}, '', '/'));
+
+  it('reads q, query or search off the URL, else a search field, clipped and whitespace-folded', () => {
+    document.body.innerHTML = '';
+    window.history.pushState({}, '', '/search?hl=en&q=door%20%20dash');
+    expect(pageQuery(document)).toBe('door dash');
+    window.history.pushState({}, '', '/?query=weather');
+    expect(pageQuery(document)).toBe('weather');
+    window.history.pushState({}, '', `/?search=${'x'.repeat(100)}`);
+    expect(pageQuery(document)).toHaveLength(80);
+    window.history.pushState({}, '', '/?q=&page=2');
+    expect(pageQuery(document)).toBe('');
+    document.body.innerHTML = '<input type="text" name="q" value="doordash">';
+    expect(pageQuery(document)).toBe('doordash');
+    document.body.innerHTML = '<textarea name="q"> pesto  recipe </textarea>';
+    expect(pageQuery(document)).toBe('pesto recipe');
+    document.body.innerHTML = '<input type="text" aria-label="Search recipes" value="basil">';
+    expect(pageQuery(document)).toBe('basil');
+    document.body.innerHTML = '<input type="text" name="title" value="doordash">';
+    expect(pageQuery(document)).toBe('');
+  });
+
+  it('is empty on a page with a visible password field, and lands in the page meta', () => {
+    window.history.pushState({}, '', '/search?q=doordash');
+    document.body.innerHTML = '';
+    expect(pageMeta(document).query).toBe('doordash');
+    document.body.innerHTML = '<input type="password">';
+    expect(pageQuery(document)).toBe('');
+    expect(pageMeta(document).query).toBeUndefined();
+    document.body.innerHTML = '<input type="password" hidden>';
+    expect(pageQuery(document)).toBe('doordash');
+  });
+});
 
 function lay(el: Element, width: number, top = 100, height = 32): void {
   el.getBoundingClientRect = () => new DOMRect(0, top, width, height);
@@ -107,13 +143,35 @@ describe('enumerateFields', () => {
     expect(document.querySelectorAll('[data-carat-id]')).toHaveLength(12);
   });
 
-  it('skips fields outside the vertical window', () => {
-    document.body.innerHTML = '<input id="above"><input id="near"><input id="far">';
+  it('describes fields anywhere on the page, flags the off-screen ones and ranks them after those in view', () => {
+    document.body.innerHTML = '<input id="above"><input id="far"><input id="near"><input id="focused">';
     const vh = window.innerHeight;
-    lay(document.getElementById('above')!, 200, -vh - 1);
-    lay(document.getElementById('near')!, 200, 2 * vh);
-    lay(document.getElementById('far')!, 200, 2 * vh + 1);
-    expect(enumerateFields(document).descriptors.map((d) => d.nm)).toEqual(['near']);
+    lay(document.getElementById('above')!, 600, -vh - 1);
+    lay(document.getElementById('far')!, 600, 5 * vh);
+    lay(document.getElementById('near')!, 200, 100);
+    lay(document.getElementById('focused')!, 100, 3 * vh);
+    document.getElementById('focused')!.focus();
+    const { descriptors } = enumerateFields(document);
+    // Focus still wins, even off-screen; then the viewport; then width.
+    expect(descriptors.map((d) => [d.nm, d.o])).toEqual([
+      ['focused', 1],
+      ['near', undefined],
+      ['above', 1],
+      ['far', 1],
+    ]);
+  });
+
+  it('drops off-screen fields before on-screen ones when the budget is tight', () => {
+    const big = (id: string) => `<input id="${id}" placeholder="${'p'.repeat(60)}" aria-label="${'a'.repeat(60)}"><span>${'n'.repeat(80)}</span>`;
+    document.body.innerHTML = Array.from({ length: 12 }, (_, i) => big(i % 2 ? `on${i}` : `off${i}`)).join('');
+    const vh = window.innerHeight;
+    for (const el of document.querySelectorAll('input')) lay(el, el.id.startsWith('off') ? 600 : 200, el.id.startsWith('off') ? 3 * vh : 100);
+    const { descriptors } = enumerateFields(document);
+    expect(descriptors.length).toBeLessThan(12);
+    // Every on-screen field survives; only off-screen ones were cut, wide as they are.
+    expect(descriptors.filter((d) => d.o === undefined).map((d) => d.nm)).toEqual(['on1', 'on3', 'on5', 'on7', 'on9', 'on11']);
+    expect(descriptors.findIndex((d) => d.o === 1)).toBe(6);
+    expect(new TextEncoder().encode(JSON.stringify(descriptors)).byteLength).toBeLessThanOrEqual(2048);
   });
 
   it('clears stale ids from a previous enumeration', () => {

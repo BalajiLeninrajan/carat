@@ -1,5 +1,15 @@
-import type { ElementDescriptor, FieldDescriptor, InteractVerb, SuggestRequest } from '@carat/shared';
-import { isDestructiveName } from '@carat/shared';
+import type { ClickGate, Eagerness, ElementDescriptor, FieldDescriptor, InteractVerb, PageIntent, SuggestRequest } from '@carat/shared';
+import {
+  DEFAULT_EAGERNESS,
+  EAGERNESS,
+  PAGE_SOURCE,
+  clickAllowed,
+  isDestructiveElement,
+  isPrimaryActionName,
+  isSiteLink,
+  linkRelatesToQuery,
+  pageIntent,
+} from '@carat/shared';
 import { isNeverFill } from '../local/fields';
 import { CANDIDATE_LABEL, extractCandidates, type Candidate } from '../local/candidates';
 import { mentions } from '../local/interact';
@@ -51,16 +61,26 @@ export interface JevRequest {
 
 export const questionKey = (fieldId: string): string => `field_${fieldId}`;
 
-const RULES = [
+const RULES_HEAD = [
   'Only pick a candidate when its value clearly matches the purpose of the field. A vague topical match is `none`.',
   'A street address belongs in a location field. A place, plan or event name belongs in a title or search field. An email belongs in a recipient field. A phone number belongs in a phone field. Do not swap them.',
   'A comment box, description, message body, guest list or anything free-form takes `none`.',
   'The candidates were found by pattern matching and may be noise from an unrelated page; pick one only when the recent text shows the user is about to use it.',
-  'When unsure, pick `none`. No suggestion beats a wrong one.',
 ];
 
+// The last fill rule follows the eagerness level, like rule 11 of the chat
+// prompt. The interaction rules do not: Esc undoes a chip, not a click.
+const UNSURE_RULE: Record<Eagerness, string> = {
+  conservative: 'When unsure, pick `none`. No suggestion beats a wrong one.',
+  balanced: 'When unsure between candidates, pick the likelier one. Pick `none` when nothing specific fits.',
+  eager: 'Lean toward picking: a wrong pick costs the user one keypress, a missed one a retype. Pick `none` only when no candidate relates to the field at all.',
+};
+
+export const fillRules = (eagerness: Eagerness): string[] => [...RULES_HEAD, UNSURE_RULE[eagerness]];
+
 const INTERACT_RULES = [
-  'A button or link is pressed only to commit fields carat itself just filled on this page (`filled` names their sources). Save, Create, Done and Apply are typical. A button that does anything else is `none`.',
+  'A button is pressed only to commit fields carat itself just filled on this page (`filled` names their sources), or when it is the page\'s primary action with a continue-style name (Search, Continue, Next) and the option says so. Save, Create, Done and Apply are typical. A button that does anything else is `none`.',
+  'A real link (it has a `site`) is followed only when `page.query` says what the user searched for and the link is the result that answers it, judged by its site and its title. Pick the first such result. Any other link is `none`.',
   'A checkbox, switch or radio is changed only when a sentence in `context` states the user\'s own preference or fact in those words ("I\'m a vegetarian"), not negated and not about someone else.',
   'Never anything that sends, pays, orders, deletes or signs out. Nothing is chained: one control, pressed once.',
   'When unsure, pick `none`. No chip beats a wrong click.',
@@ -70,16 +90,18 @@ const INTERACT_RULES = [
  * Null when there is nothing to ask: no fillable field with a candidate and no
  * element worth a question. `context` must already exclude the page being filled.
  */
-export function buildJevRequest(req: SuggestRequest, context: Ctx[]): JevRequest | null {
+export function buildJevRequest(req: SuggestRequest, context: Ctx[], eagerness: Eagerness = DEFAULT_EAGERNESS): JevRequest | null {
+  const rules = fillRules(eagerness);
   const askedFields = req.fields.filter((f) => !f.v && !isNeverFill(f));
   const byId = new Map(context.map((c) => [c.id, c]));
   const options: JevOption[] =
     askedFields.length === 0
       ? []
-      : extractCandidates(context)
+      : extractCandidates(context, EAGERNESS[eagerness].looseNames)
           .slice(0, MAX_OPTIONS)
           .map((candidate, i) => ({ key: `k${i}`, candidate, source: byId.get(candidate.sourceContextId)! }));
-  const interactOptions = interactionOptions(req.elements ?? [], context, req.filled ?? []);
+  const gate: ClickGate = { filled: (req.filled?.length ?? 0) > 0, flow: req.flow === true, eagerness, fillable: askedFields.length > 0 };
+  const interactOptions = interactionOptions(req.elements ?? [], context, req.filled ?? [], gate, pageIntent(req.page, req.fields));
   if (options.length === 0 && interactOptions.length === 0) return null;
 
   const state: Record<string, unknown> = {
@@ -113,7 +135,7 @@ export function buildJevRequest(req: SuggestRequest, context: Ctx[]): JevRequest
       type: 'noul',
       instructions: {
         question: 'The user is on `page` with the empty `fields` listed. Is there a specific value in `context` (something in `candidates`) that they are about to type into one of these fields?',
-        rules: RULES,
+        rules,
       },
       criteria: {
         true: 'At least one candidate is exactly what the user would type into one of the fields on this page',
@@ -126,7 +148,7 @@ export function buildJevRequest(req: SuggestRequest, context: Ctx[]): JevRequest
         instructions: {
           task: 'Pick the candidate whose value the user is about to type into this field, or `none`.',
           field: describeField(field),
-          rules: RULES,
+          rules,
         },
         criteria,
       };
@@ -157,19 +179,29 @@ export function buildJevRequest(req: SuggestRequest, context: Ctx[]): JevRequest
 }
 
 /**
- * Elements Jev may be asked about: a button or link only after carat filled
- * something (it cites the fill's source), a toggle only when a context item
- * names it (it cites that item). Destructive names never appear. Whether the
- * sentence affirms or negates the toggle is Jev's call.
+ * Elements Jev may be asked about: a button (or an anchor acting as one)
+ * after carat filled something (it cites the fill's source), or the primary
+ * action when the click gate lets it through without one (it cites the newest
+ * context item); a real link only while the page has a query the link has
+ * something to do with (it cites the page); a toggle only when a context item
+ * names it (it cites that item). Destructive names never appear, nor do money
+ * controls: Jev is not asked about paying. Whether the sentence affirms or
+ * negates the toggle is Jev's call.
  */
-function interactionOptions(elements: ElementDescriptor[], context: Ctx[], filled: string[]): JevInteractOption[] {
+function interactionOptions(elements: ElementDescriptor[], context: Ctx[], filled: string[], gate: ClickGate, intent: PageIntent | null): JevInteractOption[] {
   const out: JevInteractOption[] = [];
   for (const element of elements) {
-    if (isDestructiveName(element.nm)) continue;
-    if (element.r === 'button' || element.r === 'link') {
+    if (isDestructiveElement(element) || element.m === 1) continue;
+    if (isSiteLink(element)) {
+      if (!intent || !linkRelatesToQuery(element, intent)) continue;
+      out.push({ key: element.i, element, verb: 'click', sourceContextId: PAGE_SOURCE, reason: `the page's own query is "${intent.query}"` });
+    } else if (element.r === 'button' || element.r === 'link') {
       const source = filled[0];
-      if (source === undefined) continue;
-      out.push({ key: element.i, element, verb: 'click', sourceContextId: source, reason: 'carat just filled fields on this page' });
+      if (source !== undefined) {
+        out.push({ key: element.i, element, verb: 'click', sourceContextId: source, reason: 'carat just filled fields on this page' });
+      } else if (context[0] && element.p === 1 && isPrimaryActionName(element.nm) && clickAllowed(element, gate)) {
+        out.push({ key: element.i, element, verb: 'click', sourceContextId: context[0].id, reason: gate.flow ? 'the primary action of a step in the flow under way' : 'the primary action, with nothing left to fill' });
+      }
     } else if (element.r === 'checkbox' || element.r === 'switch' || element.r === 'radio') {
       if (element.r === 'radio' && element.st === 'on') continue;
       const named = context.find((c) => mentions(c.text, element.nm));
@@ -202,6 +234,7 @@ function describeElement(e: ElementDescriptor): Record<string, unknown> {
     name: e.nm,
     ...(e.st ? { state: e.st } : {}),
     ...(e.nb ? { nearby_text: e.nb } : {}),
+    ...(e.h ? { site: e.h } : {}),
     ...(e.p ? { primary: true } : {}),
   };
 }

@@ -1,6 +1,6 @@
-import type { FillSuggestion, InteractSuggestion, SuggestRequest, Suggestion } from '@carat/shared';
-import { LIMITS, verbFits } from '@carat/shared';
-import type { Provider } from './provider';
+import type { Eagerness, EagernessKnobs, FillSuggestion, InteractSuggestion, SuggestRequest, Suggestion } from '@carat/shared';
+import { DEFAULT_EAGERNESS, EAGERNESS, verbFits } from '@carat/shared';
+import type { Provider, SuggestOptions } from './provider';
 import { sameSite } from './same-site';
 import { CANDIDATE_LABEL } from './local/candidates';
 import { GATE_QUESTION, INTERACT_QUESTION, NONE, buildJevRequest, questionKey, sourceLabel, type JevRequest } from './jev/request';
@@ -9,13 +9,12 @@ import { choice, noul, parseJevResponse, type Answers } from './jev/response';
 export const JEV_MODEL = 'typesafe/jev';
 export const CLOUDFLARE_API = 'https://api.cloudflare.com/client/v4';
 
-/** Below this, the request-level "is any of this relevant" answer says no and every field is skipped. */
-export const GATE_MIN = 0.5;
-
 export interface JevOptions {
   accountId: string;
   apiToken: string;
   model?: string;
+  /** Sets the `relevant` gate, the choice floor, the per-answer cap and the candidate set. Defaults to the product default. */
+  eagerness?: Eagerness;
 }
 
 /**
@@ -38,10 +37,11 @@ export class JevProvider implements Provider {
     readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
-  async suggest(req: SuggestRequest, opts: { signal: AbortSignal }): Promise<Suggestion[]> {
+  async suggest(req: SuggestRequest, opts: SuggestOptions): Promise<Suggestion[]> {
     if (opts.signal.aborted) return [];
-    const context = req.context.filter((c) => !sameSite(c.origin, req.page.host));
-    const built = buildJevRequest(req, context);
+    const eagerness = this.options.eagerness ?? DEFAULT_EAGERNESS;
+    const context = EAGERNESS[eagerness].sameOriginContext ? req.context : req.context.filter((c) => !sameSite(c.origin, req.page.host));
+    const built = buildJevRequest(req, context, eagerness);
     if (!built) return [];
 
     let body: unknown;
@@ -70,7 +70,7 @@ export class JevProvider implements Provider {
 
     const parsed = parseJevResponse(body);
     if (!parsed.ok) return [];
-    return decide(built, parsed.answers);
+    return decide(built, parsed.answers, eagerness, opts.onUnderFloor);
   }
 }
 
@@ -78,19 +78,22 @@ function isErrorEnvelope(body: unknown): boolean {
   return typeof body === 'object' && body !== null && (body as { success?: unknown }).success === false;
 }
 
+type Drop = ((s: Suggestion) => void) | undefined;
+
 /**
  * Jev is calibrated, so the chosen option's probability is the confidence
  * as-is. The `relevant` gate covers the fills only; the interaction question
- * gates itself with `none`.
+ * gates itself with `none`. Both thresholds come from the eagerness table.
  */
-export function decide(built: JevRequest, answers: Answers): Suggestion[] {
-  return [...fills(built, answers), ...interaction(built, answers)];
+export function decide(built: JevRequest, answers: Answers, eagerness: Eagerness = DEFAULT_EAGERNESS, onUnderFloor?: Drop): Suggestion[] {
+  const knobs = EAGERNESS[eagerness];
+  return [...fills(built, answers, knobs, onUnderFloor), ...interaction(built, answers, knobs, onUnderFloor)];
 }
 
-function fills(built: JevRequest, answers: Answers): FillSuggestion[] {
+function fills(built: JevRequest, answers: Answers, knobs: EagernessKnobs, onUnderFloor: Drop): FillSuggestion[] {
   if (built.askedFields.length === 0 || built.options.length === 0) return [];
   const gate = noul(answers, GATE_QUESTION);
-  if (gate === null || gate < GATE_MIN) return [];
+  if (gate === null || gate < knobs.jevGateMin) return [];
 
   const byKey = new Map(built.options.map((o) => [o.key, o]));
   const out: FillSuggestion[] = [];
@@ -100,28 +103,36 @@ function fills(built: JevRequest, answers: Answers): FillSuggestion[] {
     const option = byKey.get(answer.choice);
     if (!option) continue;
     const confidence = answer.probabilities[answer.choice] ?? answer.confidence;
-    if (confidence < LIMITS.minConfidence) continue;
-    out.push({
+    const fill: FillSuggestion = {
       kind: 'fill',
       fieldId: field.i,
       value: option.candidate.value,
       confidence,
       reason: `${CANDIDATE_LABEL[option.candidate.kind]} in ${option.source.title || sourceLabel(option.source)}`,
       sourceContextId: option.source.id,
-    });
+    };
+    if (confidence < knobs.minConfidence) {
+      onUnderFloor?.(fill);
+      continue;
+    }
+    out.push(fill);
   }
-  return out.sort((a, b) => b.confidence - a.confidence).slice(0, LIMITS.maxSuggestions);
+  return out.sort((a, b) => b.confidence - a.confidence).slice(0, knobs.maxSuggestions);
 }
 
-function interaction(built: JevRequest, answers: Answers): InteractSuggestion[] {
+function interaction(built: JevRequest, answers: Answers, knobs: EagernessKnobs, onUnderFloor: Drop): InteractSuggestion[] {
   if (built.interactOptions.length === 0) return [];
   const answer = choice(answers, INTERACT_QUESTION);
   if (!answer || answer.choice === NONE) return [];
   const option = built.interactOptions.find((o) => o.key === answer.choice);
   if (!option) return [];
   const confidence = answer.probabilities[answer.choice] ?? answer.confidence;
-  if (confidence < LIMITS.minConfidence) return [];
   const { element, verb } = option;
   if (!verbFits(element, verb, element.nm)) return [];
-  return [{ kind: 'interact', elementId: element.i, verb, value: element.nm, confidence, reason: option.reason, sourceContextId: option.sourceContextId }];
+  const interact: InteractSuggestion = { kind: 'interact', elementId: element.i, verb, value: element.nm, confidence, reason: option.reason, sourceContextId: option.sourceContextId };
+  if (confidence < knobs.minConfidence) {
+    onUnderFloor?.(interact);
+    return [];
+  }
+  return [interact];
 }

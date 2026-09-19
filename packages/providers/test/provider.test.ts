@@ -3,39 +3,62 @@ import type { Settings } from '@carat/shared';
 import { DEFAULT_SETTINGS } from '@carat/shared';
 import { createProvider, createSmartProvider } from '../src/provider';
 import { OpenAICompatProvider } from '../src/openai-compat';
-import { FastThenSmartProvider } from '../src/fast-then-smart';
+import { RaceProvider } from '../src/race';
 import { JevProvider } from '../src/jev';
+import { LocalProvider } from '../src/local';
 
 const cf = { cfAccountId: 'acct', cfApiToken: 'tok' };
 
+/** The sources a race was built from, by class. */
+function inside<T>(p: unknown, cls: new (...args: never[]) => T): T {
+  expect(p).toBeInstanceOf(RaceProvider);
+  const found = (p as RaceProvider).providers.find((x) => x instanceof cls);
+  expect(found).toBeInstanceOf(cls);
+  return found as T;
+}
+
 describe('createProvider', () => {
+  it('hands the eagerness setting to whichever provider it builds', () => {
+    expect((createProvider({ ...DEFAULT_SETTINGS, provider: 'local', eagerness: 'balanced' }) as LocalProvider).eagerness).toBe('balanced');
+    expect((createProvider({ ...DEFAULT_SETTINGS, apiKey: '' }) as LocalProvider).eagerness).toBe('eager');
+    expect(inside(createProvider({ ...DEFAULT_SETTINGS, apiKey: 'sk-x', eagerness: 'conservative' }), OpenAICompatProvider).options.eagerness).toBe('conservative');
+    const both = createProvider({ ...DEFAULT_SETTINGS, provider: 'cloudflare', ...cf, apiKey: 'sk-x', eagerness: 'balanced' });
+    expect(inside(both, LocalProvider).eagerness).toBe('balanced');
+    expect(inside(both, JevProvider).options.eagerness).toBe('balanced');
+    expect(inside(both, OpenAICompatProvider).options.eagerness).toBe('balanced');
+    expect((createSmartProvider({ ...DEFAULT_SETTINGS, apiKey: 'sk-x', eagerness: 'conservative' }) as OpenAICompatProvider).options.eagerness).toBe('conservative');
+  });
+
   it('falls back to local when there is no key', () => {
-    expect(createProvider({ ...DEFAULT_SETTINGS, apiKey: '' }).id).toBe('local');
+    const p = createProvider({ ...DEFAULT_SETTINGS, apiKey: '' });
+    expect(p.id).toBe('local');
+    expect(p).toBeInstanceOf(LocalProvider);
   });
 
   it('honours an explicit local provider even with a key', () => {
     expect(createProvider({ ...DEFAULT_SETTINGS, provider: 'local', apiKey: 'sk-x' }).id).toBe('local');
   });
 
-  it('selects openai or baseten when a key is present', () => {
-    expect(createProvider({ ...DEFAULT_SETTINGS, apiKey: 'sk-x' }).id).toBe('openai');
+  it('races regex against openai or baseten when a key is present', () => {
+    const openai = createProvider({ ...DEFAULT_SETTINGS, apiKey: 'sk-x' });
+    expect(openai.id).toBe('openai');
+    expect((openai as RaceProvider).providers.map((p) => p.constructor)).toEqual([LocalProvider, OpenAICompatProvider]);
     expect(createProvider({ ...DEFAULT_SETTINGS, provider: 'baseten', apiKey: 'sk-x' }).id).toBe('baseten');
   });
 
-  it('runs Jev alone for cloudflare without a chat key, and Jev then the chat model with one', () => {
+  it('races regex and Jev for cloudflare without a chat key, and the chat model too with one', () => {
     const alone = createProvider({ ...DEFAULT_SETTINGS, provider: 'cloudflare', ...cf });
-    expect(alone).toBeInstanceOf(JevProvider);
     expect(alone.id).toBe('cloudflare');
+    expect((alone as RaceProvider).providers.map((p) => p.constructor)).toEqual([LocalProvider, JevProvider]);
 
     const both = createProvider({ ...DEFAULT_SETTINGS, provider: 'cloudflare', ...cf, apiKey: 'sk-x' });
-    expect(both).toBeInstanceOf(FastThenSmartProvider);
     expect(both.id).toBe('cloudflare');
-    const { fast, smart } = both as FastThenSmartProvider;
-    expect(fast).toBeInstanceOf(JevProvider);
-    expect((smart as OpenAICompatProvider).options.mode).toBe('json_schema');
+    // Start order is rank on a tie: the chat model last, so it wins one.
+    expect((both as RaceProvider).providers.map((p) => p.constructor)).toEqual([LocalProvider, JevProvider, OpenAICompatProvider]);
+    expect(inside(both, OpenAICompatProvider).options.mode).toBe('json_schema');
 
     const other = createProvider({ ...DEFAULT_SETTINGS, provider: 'cloudflare', ...cf, apiKey: 'sk-x', baseURL: 'https://model.api.baseten.co/sync/v1' });
-    expect(((other as FastThenSmartProvider).smart as OpenAICompatProvider).options.mode).toBe('json_object');
+    expect(inside(other, OpenAICompatProvider).options.mode).toBe('json_object');
   });
 
   it('treats cloudflare without an account id or token like openai', () => {
@@ -48,18 +71,18 @@ describe('createProvider', () => {
 describe('createProvider transport', () => {
   it('hands the injected fetch and defaults to the OpenAI-compatible modes', () => {
     const fetchImpl = (() => Promise.reject(new Error('unused'))) as unknown as typeof fetch;
-    const openai = createProvider({ ...DEFAULT_SETTINGS, apiKey: 'sk-x' }, fetchImpl);
-    const baseten = createProvider({ ...DEFAULT_SETTINGS, provider: 'baseten', apiKey: 'sk-x' }, fetchImpl);
-    expect((openai as OpenAICompatProvider).fetchImpl).toBe(fetchImpl);
-    expect((openai as OpenAICompatProvider).options.mode).toBe('json_schema');
-    expect((baseten as OpenAICompatProvider).options.mode).toBe('json_object');
+    const openai = inside(createProvider({ ...DEFAULT_SETTINGS, apiKey: 'sk-x' }, fetchImpl), OpenAICompatProvider);
+    const baseten = inside(createProvider({ ...DEFAULT_SETTINGS, provider: 'baseten', apiKey: 'sk-x' }, fetchImpl), OpenAICompatProvider);
+    expect(openai.fetchImpl).toBe(fetchImpl);
+    expect(openai.options.mode).toBe('json_schema');
+    expect(baseten.options.mode).toBe('json_object');
   });
 
   it('hands the injected fetch to Jev and to the chat model behind it', () => {
     const fetchImpl = (() => Promise.reject(new Error('unused'))) as unknown as typeof fetch;
-    const both = createProvider({ ...DEFAULT_SETTINGS, provider: 'cloudflare', ...cf, apiKey: 'sk-x' }, fetchImpl) as FastThenSmartProvider;
-    expect((both.fast as JevProvider).fetchImpl).toBe(fetchImpl);
-    expect((both.smart as OpenAICompatProvider).fetchImpl).toBe(fetchImpl);
+    const both = createProvider({ ...DEFAULT_SETTINGS, provider: 'cloudflare', ...cf, apiKey: 'sk-x' }, fetchImpl);
+    expect(inside(both, JevProvider).fetchImpl).toBe(fetchImpl);
+    expect(inside(both, OpenAICompatProvider).fetchImpl).toBe(fetchImpl);
   });
 });
 
@@ -81,7 +104,7 @@ describe('createSmartProvider', () => {
 
   it('asks OpenAI for no reasoning on the fast path and a little on the smart path, and asks other servers for nothing', () => {
     const openai = { ...DEFAULT_SETTINGS, apiKey: 'sk-x' };
-    const fast = createProvider(openai) as OpenAICompatProvider;
+    const fast = inside(createProvider(openai), OpenAICompatProvider);
     const smart = createSmartProvider(openai) as OpenAICompatProvider;
     expect(fast.options.reasoningEffort).toBe('none');
     expect(smart.options.reasoningEffort).toBe('low');
@@ -89,11 +112,11 @@ describe('createSmartProvider', () => {
     expect(smart.options.model).toBe(fast.options.model);
 
     const baseten: Settings = { ...openai, provider: 'baseten', baseURL: 'https://model.api.baseten.co/sync/v1' };
-    expect((createProvider(baseten) as OpenAICompatProvider).options.reasoningEffort).toBeUndefined();
+    expect(inside(createProvider(baseten), OpenAICompatProvider).options.reasoningEffort).toBeUndefined();
     expect((createSmartProvider(baseten) as OpenAICompatProvider).options.reasoningEffort).toBeUndefined();
     // A proxy under the openai setting is not api.openai.com either.
     const proxy: Settings = { ...openai, baseURL: 'https://proxy.example/v1' };
-    expect((createProvider(proxy) as OpenAICompatProvider).options.reasoningEffort).toBeUndefined();
+    expect(inside(createProvider(proxy), OpenAICompatProvider).options.reasoningEffort).toBeUndefined();
   });
 
   it('is the chat model behind Jev for cloudflare, never Jev itself, and nothing when there is no chat key', () => {
@@ -105,7 +128,7 @@ describe('createSmartProvider', () => {
   });
 
   it('leaves the fast provider on the fast model', () => {
-    const fast = createProvider({ ...DEFAULT_SETTINGS, apiKey: 'sk-x', model: 'fast', smartModel: 'smart' }) as OpenAICompatProvider;
+    const fast = inside(createProvider({ ...DEFAULT_SETTINGS, apiKey: 'sk-x', model: 'fast', smartModel: 'smart' }), OpenAICompatProvider);
     expect(fast.options.model).toBe('fast');
   });
 });

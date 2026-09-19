@@ -1,3 +1,6 @@
+import type { Eagerness } from './eagerness';
+import { DEFAULT_EAGERNESS } from './eagerness';
+
 /** `vision` is text a model read off a screenshot of the tab; it is stored and scored like `page`. */
 export type ContextKind = 'page' | 'selection' | 'vision';
 
@@ -26,6 +29,8 @@ export interface FieldDescriptor {
   v?: string; // current value, <= 40
   f?: 1; // focused
   w?: 's' | 'm' | 'l'; // width bucket
+  o?: 1; // off-screen: outside the viewport when the snapshot was taken
+  fr?: number; // inside a child frame: the top frame's number for it
 }
 
 /** Roles carat can act on. Derived from the tag, the input type or an explicit ARIA role; nothing else is described. */
@@ -39,7 +44,8 @@ export type ElementRole =
   | 'select'
   | 'tab'
   | 'menuitem'
-  | 'disclosure';
+  | 'disclosure'
+  | 'option';
 
 /**
  * One interactive element, as the model sees it. No coordinates, no DOM: a
@@ -58,6 +64,11 @@ export interface ElementDescriptor {
   op?: string[]; // select options, <= 8 x 20 chars
   nb?: string; // nearby text, <= 80
   p?: 1; // the page's primary action (submit button, or styled as primary)
+  o?: 1; // off-screen: outside the viewport when the snapshot was taken
+  sel?: 1; // an option card that is already the chosen one
+  m?: 1; // moves money (Pay, Book now): described only when payments are allowed, accepted with Enter
+  fr?: number; // inside a child frame: the top frame's number for it
+  h?: string; // links only: the destination site, as a registrable domain ('doordash.com')
 }
 
 export interface PageMeta {
@@ -65,6 +76,8 @@ export interface PageMeta {
   title: string;
   path: string;
   h1?: string;
+  /** What the user searched for on this page: the URL's `q`, `query` or `search` param, else a search field's text. <= 80. */
+  query?: string;
 }
 
 export type RequestContext = Array<Pick<ContextItem, 'id' | 'origin' | 'title' | 'kind' | 'text' | 'capturedAt'>>;
@@ -80,6 +93,8 @@ export interface SuggestRequest {
   context: RequestContext;
   /** Text captured from the requesting tab itself: a source for actions, never for fills. Omitted when empty. */
   own?: RequestContext;
+  /** A stored task marks this page as a step in an ongoing flow, so its primary action may be clicked. Omitted when false. */
+  flow?: true;
   now: string; // ISO
   locale?: string;
 }
@@ -119,13 +134,14 @@ export interface ActionSuggestion {
   sourceContextId: string;
 }
 
-export type InteractVerb = 'click' | 'check' | 'uncheck' | 'set' | 'choose';
+/** `scroll` brings an off-screen element into view and nothing more; it never carries a value. */
+export type InteractVerb = 'click' | 'check' | 'uncheck' | 'set' | 'choose' | 'scroll';
 
 /**
  * One interaction with one element on the current page. `value` is the target
  * for `set` (a number as text) and `choose` (an option label); for `click`,
- * `check` and `uncheck` it repeats the element's name. The content script
- * performs it, once, after a Tab on the chip.
+ * `check` and `uncheck` it repeats the element's name; for `scroll` it is ''.
+ * The content script performs it, once, after a Tab on the chip.
  */
 export interface InteractSuggestion {
   kind: 'interact';
@@ -178,6 +194,16 @@ export interface Settings {
    * must accept images.
    */
   smartModel: string;
+  /**
+   * How readily a chip is offered. `eager` (the default) shows any plausible
+   * value; `conservative` only sure ones. See EAGERNESS for what each moves.
+   */
+  eagerness: Eagerness;
+  /**
+   * Controls that pay, buy or book may be offered. Off by default. When on,
+   * their chip is accepted with Enter, never Tab. See `mayPay`.
+   */
+  allowPayments: boolean;
 }
 
 /**
@@ -210,14 +236,15 @@ export const DEFAULT_SETTINGS: Settings = {
   statusLine: false,
   screenshots: false,
   smartModel: '',
+  eagerness: DEFAULT_EAGERNESS,
+  allowPayments: false,
 };
 
 export const LIMITS = {
   titleChars: 80,
   pageTextChars: 4000,
   selectionTextChars: 1000,
-  minConfidence: 0.7,
-  maxSuggestions: 2,
+  /** The confidence floor and the per-answer cap depend on the eagerness setting; see EAGERNESS. */
   maxNavigations: 2,
   providerTimeoutMs: 6000,
   /** Body text under this many chars marks a source tab as thin enough to screenshot. */

@@ -1,0 +1,25 @@
+{
+  "name": "eager-discord-bare-name-search",
+  "request": {
+    "page": { "host": "www.google.com", "title": "Google", "path": "/" },
+    "fields": [
+      { "i": "f0", "t": "textarea", "nm": "q", "al": "Search", "ac": "off", "f": 1, "w": "l" }
+    ],
+    "context": [
+      {
+        "id": "c1",
+        "origin": "https://discord.com",
+        "title": "Discord | #food | Waterloo Friends",
+        "kind": "page",
+        "text": "Discord discord.com #food alex 7:02 PM anyone been to Lazeez Shawarma? heard the late night line is wild sam 7:03 PM not yet, is it the one on King? alex 7:04 PM yeah",
+        "capturedAt": 1758064920000
+      }
+    ],
+    "now": "2026-09-16T19:06:00-04:00",
+    "locale": "en-CA"
+  },
+  "expect": [],
+  "expectAt": {
+    "eager": [{ "fieldId": "f0", "valueIncludes": "Lazeez Shawarma" }]
+  }
+}

@@ -4,7 +4,8 @@ export default defineConfig({
   manifest: {
     name: 'Carat',
     description: 'Fills a field, presses a control or opens the next tab from what you just read. One Tab each.',
-    permissions: ['storage', 'alarms', 'tabs'],
+    // webNavigation needs no host permission of its own; <all_urls> below already covers the URLs its events carry.
+    permissions: ['storage', 'alarms', 'tabs', 'webNavigation'],
     host_permissions: ['<all_urls>', 'https://api.openai.com/*', 'https://api.cloudflare.com/*'],
     commands: {
       'carat-suggest': {

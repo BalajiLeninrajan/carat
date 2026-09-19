@@ -56,8 +56,8 @@ function joinedText(sources: Element[], own: Element): string | undefined {
   return nonEmpty(parts.filter(Boolean).join(' '));
 }
 
-/** Text of `container` skipping everything inside `excluded` (a wrapping label's own control). */
-function textExcluding(container: Element, excluded: Element): string {
+/** Text of `container` skipping everything inside `excluded` (a wrapping label's own control, a card's Select button). */
+export function textExcluding(container: Element, excluded: Element): string {
   const doc = container.ownerDocument;
   const walker = doc.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
     acceptNode: (n) => (excluded.contains(n) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),

@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { FillSuggestion, InteractSuggestion, SuggestRequest, Suggestion } from '@carat/shared';
-import { JevProvider, GATE_MIN } from '../src/jev';
-import { buildJevRequest } from '../src/jev/request';
+import type { Eagerness, FillSuggestion, InteractSuggestion, SuggestRequest, Suggestion } from '@carat/shared';
+import { EAGERNESS, EAGERNESS_LEVELS } from '@carat/shared';
+import { JevProvider } from '../src/jev';
+import { buildJevRequest, fillRules } from '../src/jev/request';
 
 const signal = () => new AbortController().signal;
 const fills = (out: Suggestion[]): FillSuggestion[] => out.filter((s): s is FillSuggestion => s.kind === 'fill');
@@ -85,8 +86,8 @@ function envelope(answers: Answers, status = 200): Response {
   );
 }
 
-function provider(fetchImpl: typeof fetch) {
-  return new JevProvider({ accountId: 'acct-1', apiToken: 'cf-token' }, fetchImpl);
+function provider(fetchImpl: typeof fetch, eagerness?: Eagerness) {
+  return new JevProvider({ accountId: 'acct-1', apiToken: 'cf-token', ...(eagerness ? { eagerness } : {}) }, fetchImpl);
 }
 
 function sent(fetchImpl: ReturnType<typeof vi.fn>) {
@@ -141,12 +142,40 @@ describe('buildJevRequest', () => {
     expect(Object.keys(criteria)).toEqual(['e0', 'e2', 'e5', 'none']);
     expect(criteria.e0).toMatchObject({ action: 'click "Save"', role: 'button', primary: true });
 
-    // Without a fill there is no button to ask about, and a slider or select never is.
+    // Without a fill, only the primary action is asked about, and only at eager with nothing left to fill (the title has a value);
+    // it cites the newest context item. Below eager no button is asked about, and a slider or select never is.
     const noFill = buildJevRequest({ ...afterFills, filled: undefined }, afterFills.context)!;
-    expect(noFill.interactOptions.map((o) => o.key)).toEqual(['e5']);
+    expect(noFill.interactOptions.map((o) => [o.key, o.sourceContextId])).toEqual([['e0', 'c2'], ['e5', 'c1']]);
+    const noFillBalanced = buildJevRequest({ ...afterFills, filled: undefined }, afterFills.context, 'balanced')!;
+    expect(noFillBalanced.interactOptions.map((o) => o.key)).toEqual(['e5']);
+    const noFillWithField = buildJevRequest({ ...afterFills, filled: undefined, fields: [{ i: 'f0', t: 'input:text', al: 'Add title' }] }, afterFills.context)!;
+    expect(noFillWithField.interactOptions.map((o) => o.key)).toEqual(['e5']);
     const vegetarian = buildJevRequest(rsvp, rsvp.context)!;
     expect(Object.keys(vegetarian.questions)).toEqual(['interact']);
     expect(vegetarian.interactOptions.map((o) => [o.key, o.verb, o.sourceContextId])).toEqual([['e0', 'check', 'c1']]);
+  });
+
+  it('asks about a real link only while the page has a query it relates to, and tells Jev the destination site', () => {
+    const serp: SuggestRequest = {
+      page: { host: 'www.google.com', title: 'food delivery near me - Google Search', path: '/search', query: 'food delivery near me' },
+      fields: [],
+      elements: [
+        { i: 'e0', r: 'button', nm: 'Search', p: 1 },
+        { i: 'e1', r: 'link', nm: 'Order Now | Quick and Easy Food Delivery', h: 'doordash.com' },
+        { i: 'e2', r: 'link', nm: 'Waterloo weather', h: 'weathernetwork.com' },
+        { i: 'e3', r: 'link', nm: 'Sign out' },
+      ],
+      context: [],
+      now: calendar.now,
+    };
+    const b = buildJevRequest(serp, [])!;
+    expect(b.interactOptions.map((o) => [o.key, o.verb, o.sourceContextId])).toEqual([['e1', 'click', 'page']]);
+    expect((b.questions.interact!.criteria as Record<string, unknown>).e1).toMatchObject({ action: 'click "Order Now | Quick and Easy Food Delivery"', site: 'doordash.com' });
+
+    // No query on the page: a real link is no one's to follow, however much carat filled. The Search button still is.
+    const { query: _q, ...page } = serp.page;
+    expect(buildJevRequest({ ...serp, page }, [])).toBeNull();
+    expect(buildJevRequest({ ...serp, page, filled: ['c1'] }, [])!.interactOptions.map((o) => o.key)).toEqual(['e0']);
   });
 });
 
@@ -207,24 +236,44 @@ describe('JevProvider', () => {
     expect(fills(out).map((s) => s.fieldId)).toEqual(['f1']);
   });
 
-  it('drops a chosen candidate under 0.7 and everything when the gate is under the minimum', async () => {
-    const low = vi.fn(async () =>
-      envelope({
-        relevant: noul(0.9),
-        field_f0: pick(keyOf('Dinner at Seven Shores Cafe'), 0.69, keys),
-        field_f1: pick(keyOf('10 Regina St N, Waterloo, ON N2J 2Z8'), 0.7, keys),
-        field_f2: pick('none', 0.99, keys),
-      }),
-    );
-    expect(fills(await provider(low).suggest(calendar, { signal: signal() })).map((s) => [s.fieldId, s.confidence])).toEqual([['f1', 0.7]]);
+  it('drops a chosen candidate under the level\'s floor, reporting it, and everything when the gate is under the level\'s minimum', async () => {
+    for (const level of EAGERNESS_LEVELS) {
+      const { minConfidence: floor, jevGateMin } = EAGERNESS[level];
+      const low = vi.fn(async () =>
+        envelope({
+          relevant: noul(jevGateMin),
+          field_f0: pick(keyOf('Dinner at Seven Shores Cafe'), floor - 0.01, keys),
+          field_f1: pick(keyOf('10 Regina St N, Waterloo, ON N2J 2Z8'), floor, keys),
+          field_f2: pick('none', 0.99, keys),
+        }),
+      );
+      const dropped: Suggestion[] = [];
+      const out = await provider(low, level).suggest(calendar, { signal: signal(), onUnderFloor: (s) => void dropped.push(s) });
+      expect(fills(out).map((s) => [s.fieldId, s.confidence]), level).toEqual([['f1', floor]]);
+      expect(dropped.map((s) => s.kind === 'fill' && s.fieldId), level).toEqual(['f0']);
 
-    const gated = vi.fn(async () =>
-      envelope({
-        relevant: noul(GATE_MIN - 0.01),
-        field_f1: pick(keyOf('10 Regina St N, Waterloo, ON N2J 2Z8'), 0.99, keys),
-      }),
-    );
-    expect(await provider(gated).suggest(calendar, { signal: signal() })).toEqual([]);
+      const gated = vi.fn(async () =>
+        envelope({
+          relevant: noul(jevGateMin - 0.01),
+          field_f1: pick(keyOf('10 Regina St N, Waterloo, ON N2J 2Z8'), 0.99, keys),
+        }),
+      );
+      expect(await provider(gated, level).suggest(calendar, { signal: signal() }), level).toEqual([]);
+    }
+    expect(EAGERNESS.eager.jevGateMin).toBe(0.25);
+    expect(EAGERNESS.balanced.jevGateMin).toBe(0.5);
+    expect(EAGERNESS.conservative.jevGateMin).toBe(0.6);
+  });
+
+  it('asks with the fill rule of its level: quiet when conservative, leaning in when eager', async () => {
+    expect(fillRules('conservative').at(-1)).toBe('When unsure, pick `none`. No suggestion beats a wrong one.');
+    expect(fillRules('eager').at(-1)).toMatch(/^Lean toward picking/);
+    expect(fillRules('eager').slice(0, -1)).toEqual(fillRules('conservative').slice(0, -1));
+    const fetchImpl = vi.fn(async () => envelope({ relevant: noul(0.9), field_f1: pick(keyOf('10 Regina St N, Waterloo, ON N2J 2Z8'), 0.9, keys) }));
+    await provider(fetchImpl, 'eager').suggest(calendar, { signal: signal() });
+    const { body } = sent(fetchImpl);
+    const rules = (body.input.questions.relevant as unknown as { instructions: { rules: string[] } }).instructions.rules;
+    expect(rules.at(-1)).toMatch(/^Lean toward picking/);
   });
 
   it('ignores a choice key it never offered and a probability map that is missing the choice', async () => {
@@ -239,7 +288,7 @@ describe('JevProvider', () => {
     expect(fills(out).map((s) => [s.fieldId, s.confidence])).toEqual([['f1', 0.75]]);
   });
 
-  it('keeps at most two suggestions, highest confidence first', async () => {
+  it('keeps at most two suggestions below eager and four at eager, highest confidence first', async () => {
     const wide: SuggestRequest = {
       ...calendar,
       fields: [
@@ -248,16 +297,19 @@ describe('JevProvider', () => {
         { i: 'f2', t: 'input:tel', al: 'Phone' },
       ],
     };
-    const fetchImpl = vi.fn(async () =>
-      envelope({
-        relevant: noul(0.9),
-        field_f0: pick(keyOf('Dinner at Seven Shores Cafe'), 0.8, keys),
-        field_f1: pick(keyOf('10 Regina St N, Waterloo, ON N2J 2Z8'), 0.9, keys),
-        field_f2: pick(keyOf('(519) 555-0142'), 0.85, keys),
-      }),
-    );
-    const out = await provider(fetchImpl).suggest(wide, { signal: signal() });
-    expect(fills(out).map((s) => s.fieldId)).toEqual(['f1', 'f2']);
+    const reply = () =>
+      vi.fn(async () =>
+        envelope({
+          relevant: noul(0.9),
+          field_f0: pick(keyOf('Dinner at Seven Shores Cafe'), 0.8, keys),
+          field_f1: pick(keyOf('10 Regina St N, Waterloo, ON N2J 2Z8'), 0.9, keys),
+          field_f2: pick(keyOf('(519) 555-0142'), 0.85, keys),
+        }),
+      );
+    expect(fills(await provider(reply(), 'balanced').suggest(wide, { signal: signal() })).map((s) => s.fieldId)).toEqual(['f1', 'f2']);
+    expect(fills(await provider(reply(), 'conservative').suggest(wide, { signal: signal() })).map((s) => s.fieldId)).toEqual(['f1', 'f2']);
+    expect(fills(await provider(reply(), 'eager').suggest(wide, { signal: signal() })).map((s) => s.fieldId)).toEqual(['f1', 'f2', 'f0']);
+    expect(EAGERNESS.eager.maxSuggestions).toBe(4);
   });
 
   it('returns [] on a Cloudflare error envelope, whatever the status', async () => {
@@ -298,13 +350,19 @@ describe('JevProvider', () => {
     expect(never).not.toHaveBeenCalled();
   });
 
-  it('does not call Cloudflare at all when the regexes found no candidate or every source is the page itself', async () => {
+  it('does not call Cloudflare at all when the regexes found no candidate or, below eager, every source is on the page\'s own site', async () => {
     const fetchImpl = vi.fn();
     const plain = { ...discord, text: 'ok so who is around this weekend' };
     expect(await provider(fetchImpl as unknown as typeof fetch).suggest({ ...calendar, context: [plain] }, { signal: signal() })).toEqual([]);
     const self = { ...maps, origin: 'https://calendar.google.com' };
-    expect(await provider(fetchImpl as unknown as typeof fetch).suggest({ ...calendar, context: [self] }, { signal: signal() })).toEqual([]);
+    for (const level of ['conservative', 'balanced'] as const) {
+      expect(await provider(fetchImpl as unknown as typeof fetch, level).suggest({ ...calendar, context: [self] }, { signal: signal() })).toEqual([]);
+    }
     expect(fetchImpl).not.toHaveBeenCalled();
+    // At eager, another Calendar tab is a source; the orchestrator never lists the requesting tab itself under context.
+    const eager = vi.fn(async () => envelope({ relevant: noul(0.9) }));
+    await provider(eager, 'eager').suggest({ ...calendar, context: [self] }, { signal: signal() });
+    expect(eager).toHaveBeenCalledTimes(1);
   });
 
   it('never calls fetch as a method of the provider', async () => {
@@ -331,11 +389,14 @@ describe('JevProvider', () => {
     ]);
   });
 
-  it('offers no interaction on none, under threshold, or for an element it never asked about', async () => {
+  it('offers no interaction on none, under the level\'s threshold, or for an element it never asked about', async () => {
     for (const answer of [pick('none', 0.95, ['e0', 'e2', 'e5', 'none']), pick('e0', 0.69, ['e0', 'e2', 'e5', 'none']), pick('e1', 0.99, ['e1'])]) {
       const fetchImpl = vi.fn(async () => envelope({ interact: answer }));
-      expect(await provider(fetchImpl).suggest(afterFills, { signal: signal() })).toEqual([]);
+      expect(await provider(fetchImpl, 'conservative').suggest(afterFills, { signal: signal() })).toEqual([]);
     }
+    // The same 0.69 click clears the eager floor.
+    const eager = vi.fn(async () => envelope({ interact: pick('e0', 0.69, ['e0', 'e2', 'e5', 'none']) }));
+    expect(interactions(await provider(eager, 'eager').suggest(afterFills, { signal: signal() })).map((s) => s.confidence)).toEqual([0.69]);
   });
 
   it('answers fills and the interaction from one call, each gated on its own', async () => {

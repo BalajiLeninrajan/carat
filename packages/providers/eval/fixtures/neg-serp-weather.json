@@ -1,0 +1,17 @@
+{
+  "name": "neg-serp-weather",
+  "request": {
+    "page": { "host": "duckduckgo.com", "title": "weather at DuckDuckGo", "path": "/", "query": "weather" },
+    "fields": [{ "i": "f0", "t": "input:search", "al": "Search with DuckDuckGo", "v": "weather", "f": 1, "w": "l" }],
+    "elements": [
+      { "i": "e0", "r": "button", "nm": "Search", "p": 1 },
+      { "i": "e1", "r": "link", "nm": "Waterloo, Ontario - 7 day forecast", "h": "canada.ca" },
+      { "i": "e2", "r": "link", "nm": "Hourly forecast and radar for Waterloo", "h": "windy.com" },
+      { "i": "e3", "r": "link", "nm": "Best restaurants near you", "h": "yelp.com" }
+    ],
+    "context": [],
+    "now": "2026-09-16T18:20:00-04:00",
+    "locale": "en-CA"
+  },
+  "expect": []
+}

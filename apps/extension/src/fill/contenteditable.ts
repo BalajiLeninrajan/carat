@@ -1,5 +1,7 @@
+import { isHtml } from '../dom/tags';
+
 export function isContentEditable(el: Element | null): el is HTMLElement {
-  if (!(el instanceof HTMLElement)) return false;
+  if (!isHtml(el)) return false;
   const attr = el.getAttribute('contenteditable');
   if (attr !== null) return attr !== 'false';
   const role = el.getAttribute('role');

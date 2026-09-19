@@ -1,4 +1,5 @@
 import { normalizeWhitespace } from '@carat/shared';
+import { isInput } from '../dom/tags';
 import { labelOf } from '../snapshot/labels';
 
 const FORM_CONTROLS = 'input,select';
@@ -17,10 +18,10 @@ export function accessibleName(el: Element, doc: Document): string {
   if (el.matches(FORM_CONTROLS)) {
     const label = labelOf(el, doc);
     if (label) return label;
-    if (el instanceof HTMLInputElement && (el.type === 'button' || el.type === 'submit' || el.type === 'reset')) {
+    if (isInput(el) && (el.type === 'button' || el.type === 'submit' || el.type === 'reset')) {
       return normalizeWhitespace(el.value);
     }
-    return el instanceof HTMLInputElement && el.type === 'image' ? normalizeWhitespace(el.alt) : '';
+    return isInput(el) && el.type === 'image' ? normalizeWhitespace(el.alt) : '';
   }
   const own = normalizeWhitespace(el.textContent ?? '');
   if (own) return own;

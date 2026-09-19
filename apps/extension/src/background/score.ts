@@ -1,5 +1,5 @@
-import type { ContextItem, RequestContext } from '@carat/shared';
-import { truncate } from '@carat/shared';
+import type { ContextItem, Eagerness, RequestContext } from '@carat/shared';
+import { DEFAULT_EAGERNESS, truncate } from '@carat/shared';
 import { FRESH_MS, eligibleContext } from './eligible';
 import type { Requester } from './requester';
 
@@ -53,9 +53,14 @@ function rank(items: ContextItem[], now: number, max: number): ContextItem[] {
     .map(({ item }) => item);
 }
 
-/** Top 3 eligible items by score, clipped to fit 3600 chars of text in total. */
-export function scoreAndPickContext(items: ContextItem[], requester: Requester, now: number = Date.now()): RequestContext {
-  return clip(rank(eligibleContext(items, requester, now), now, CONTEXT_LIMITS.maxItems), CONTEXT_LIMITS.maxChars);
+/** Top 3 eligible items by score, clipped to fit 3600 chars of text in total. What counts as eligible follows the eagerness level. */
+export function scoreAndPickContext(
+  items: ContextItem[],
+  requester: Requester,
+  now: number = Date.now(),
+  eagerness: Eagerness = DEFAULT_EAGERNESS,
+): RequestContext {
+  return clip(rank(eligibleContext(items, requester, now, eagerness), now, CONTEXT_LIMITS.maxItems), CONTEXT_LIMITS.maxChars);
 }
 
 /**

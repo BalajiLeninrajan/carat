@@ -1,10 +1,13 @@
-export type { Provider, VisionProvider } from './provider';
+export type { Provider, SuggestOptions, VisionProvider } from './provider';
 export { createProvider, createSmartProvider } from './provider';
 export { LocalProvider } from './local';
 export { OpenAICompatProvider } from './openai-compat';
 export type { OpenAICompatOptions, OutputMode, ReasoningEffort } from './openai-compat';
-export { JevProvider, JEV_MODEL, GATE_MIN } from './jev';
+export { JevProvider, JEV_MODEL } from './jev';
 export type { JevOptions } from './jev';
-export { FastThenSmartProvider } from './fast-then-smart';
+export { RaceProvider } from './race';
+export type { RaceAnswer, RaceAttempt, RaceOptions } from './race';
 export { extractCandidates, candidatesFrom } from './local/candidates';
 export type { Candidate, CandidateKind } from './local/candidates';
+export { EntityPredictor, PREDICT_TIMEOUT_MS, createEntityPredictor, entitiesFromCandidates, matchEntities } from './predict';
+export type { EntityPredictorOptions, EntitySource, Predictor } from './predict';

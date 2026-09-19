@@ -1,3 +1,4 @@
+import { isIframe, isInput, isTextArea } from '../dom/tags';
 import { isContentEditable } from '../fill/contenteditable';
 
 const NON_TEXT_INPUT_TYPES = new Set([
@@ -15,19 +16,33 @@ const NON_TEXT_INPUT_TYPES = new Set([
 
 export function isTextEntry(el: Element | null): boolean {
   if (!el) return false;
-  if (el instanceof HTMLInputElement) return !NON_TEXT_INPUT_TYPES.has(el.type);
-  if (el instanceof HTMLTextAreaElement) return true;
+  if (isInput(el)) return !NON_TEXT_INPUT_TYPES.has(el.type);
+  if (isTextArea(el)) return true;
   return isContentEditable(el);
 }
 
 /**
- * `document.activeElement` stops at a shadow host; the field the user is
- * typing in may sit inside it (open roots only, which is what sites ship).
+ * `document.activeElement` stops at a shadow host or a frame element; the
+ * field the user is typing in may sit inside either (open roots and
+ * same-origin frames only; a cross-origin frame stays opaque and is returned
+ * as the iframe itself).
  */
 export function deepActiveElement(doc: Document): Element | null {
   let el = doc.activeElement;
-  while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement;
+  for (let hops = 0; el && hops < 16; hops++) {
+    if (el.shadowRoot?.activeElement) el = el.shadowRoot.activeElement;
+    else if (isIframe(el) && innerActive(el)) el = innerActive(el);
+    else break;
+  }
   return el;
+}
+
+function innerActive(frame: HTMLIFrameElement): Element | null {
+  try {
+    return frame.contentDocument?.activeElement ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /**

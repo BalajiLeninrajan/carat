@@ -1,7 +1,10 @@
 import type { FieldDescriptor } from '@carat/shared';
 import { normalizeWhitespace, truncate } from '@carat/shared';
 import { isVisible } from '../capture/visibility';
+import type { FrameRef } from '../frames/merge';
+import { inViewport, viewportRect } from '../scroll';
 import { fingerprintOf, placeholderOf } from './fingerprint';
+import { childDocuments } from './frames';
 import { labelOf, nearbyText } from './labels';
 import { serializeFields } from './serialize';
 
@@ -24,6 +27,8 @@ const SELECTOR = [
 export interface FieldEntry {
   el: Element;
   fingerprint: string;
+  /** Set when the field lives in a cross-origin frame: `el` is the frame element and the child performs. */
+  frame?: FrameRef;
 }
 
 export interface FieldSnapshot {
@@ -31,49 +36,70 @@ export interface FieldSnapshot {
   registry: Map<string, FieldEntry>;
 }
 
+export interface EnumerateFieldsOptions {
+  /** This document is a child frame whose agent reports to the top frame; enumerate it anyway. */
+  frame?: boolean;
+}
+
 interface Candidate {
   el: Element;
   rect: DOMRect;
   focused: boolean;
+  inViewport: boolean;
   value: string;
   order: number;
+  /** The frame number when the field sits in a same-origin child frame. */
+  fr?: number;
 }
 
 /**
- * Fillable fields on the page, ranked focused first, then widest, then DOM
- * order; capped at MAX_FIELDS and at the serialized byte budget. Each kept
- * element gets a `data-carat-id` matching its descriptor id.
+ * Fillable fields anywhere on the page, and in same-origin child frames,
+ * ranked focused first, then those in the viewport, then widest, then DOM
+ * order; capped at MAX_FIELDS and at the serialized byte budget, so
+ * off-screen fields are the first to go. Each kept element gets a
+ * `data-carat-id` matching its descriptor id; an off-screen one is flagged
+ * `o: 1` so the model knows carat would have to scroll to it, one in a
+ * child frame `fr`.
  */
-export function enumerateFields(doc: Document, win: Window | null = doc.defaultView): FieldSnapshot {
+export function enumerateFields(doc: Document, win: Window | null = doc.defaultView, opts: EnumerateFieldsOptions = {}): FieldSnapshot {
   const registry = new Map<string, FieldEntry>();
-  // Sub-frames are never snapshotted; only the top document gets a chip.
-  if (!win || win.self !== win.top) return { descriptors: [], registry };
+  // A child frame reports to the top through its agent; only the top (or that agent) snapshots.
+  if (!win || (!opts.frame && win.self !== win.top)) return { descriptors: [], registry };
 
-  for (const stale of doc.querySelectorAll(`[${FIELD_ID_ATTR}]`)) stale.removeAttribute(FIELD_ID_ATTR);
-
-  const vh = win.innerHeight;
-  const active = doc.activeElement;
+  const documents = [{ doc, num: undefined as number | undefined }, ...childDocuments(doc).map((c) => ({ doc: c.doc, num: c.num }))];
   const candidates: Candidate[] = [];
-  Array.from(doc.querySelectorAll(SELECTOR)).forEach((el, order) => {
-    const rect = el.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return;
-    if (rect.top < -vh || rect.top > 2 * vh) return;
-    if (!isVisible(el, win)) return;
-    if (isInert(el) || el.closest('[aria-hidden="true"]')) return;
-    // Radix/shadcn-style `<button role="combobox">` and `<select role=...>` hold no text to fill.
-    if (!isNativeControl(el) && !isEditableHost(el) && el.matches(NON_TEXT_HOSTS)) return;
-    const focused = el === active;
-    const value = valueOf(el);
-    // A field the user already filled is theirs; only a focused one is still described.
-    if (value && !focused) return;
-    candidates.push({ el, rect, focused, value, order });
-  });
+  let order = 0;
+  for (const { doc: d, num } of documents) {
+    for (const stale of d.querySelectorAll(`[${FIELD_ID_ATTR}]`)) stale.removeAttribute(FIELD_ID_ATTR);
+    const active = d.activeElement;
+    const ownWin = d.defaultView ?? win;
+    for (const el of d.querySelectorAll(SELECTOR)) {
+      order++;
+      const rect = viewportRect(el, win);
+      if (rect.width <= 0 || rect.height <= 0) continue;
+      if (!isVisible(el, ownWin)) continue;
+      if (isInert(el) || el.closest('[aria-hidden="true"]')) continue;
+      // Radix/shadcn-style `<button role="combobox">` and `<select role=...>` hold no text to fill.
+      if (!isNativeControl(el) && !isEditableHost(el) && el.matches(NON_TEXT_HOSTS)) continue;
+      const focused = el === active;
+      const value = valueOf(el);
+      // A field the user already filled is theirs; only a focused one is still described.
+      if (value && !focused) continue;
+      candidates.push({ el, rect, focused, inViewport: inViewport(el, win), value, order, ...(num !== undefined ? { fr: num } : {}) });
+    }
+  }
 
   const ranked = dropRoleWrappers(candidates)
-    .sort((a, b) => Number(b.focused) - Number(a.focused) || b.rect.width - a.rect.width || a.order - b.order)
+    .sort(
+      (a, b) =>
+        Number(b.focused) - Number(a.focused) ||
+        Number(b.inViewport) - Number(a.inViewport) ||
+        b.rect.width - a.rect.width ||
+        a.order - b.order,
+    )
     .slice(0, MAX_FIELDS);
 
-  const descriptors = ranked.map((c, idx) => describe(c, `f${idx}`, doc));
+  const descriptors = ranked.map((c, idx) => describe(c, `f${idx}`));
   const kept = serializeFields(descriptors).descriptors;
   kept.forEach((d, idx) => {
     const { el } = ranked[idx]!;
@@ -83,8 +109,9 @@ export function enumerateFields(doc: Document, win: Window | null = doc.defaultV
   return { descriptors: kept, registry };
 }
 
-function describe(c: Candidate, id: string, doc: Document): FieldDescriptor {
+function describe(c: Candidate, id: string): FieldDescriptor {
   const { el } = c;
+  const doc = el.ownerDocument;
   const d: FieldDescriptor = { i: id, t: typeOf(el) };
   const nm = el.getAttribute('name') || el.id;
   const ph = placeholderOf(el);
@@ -101,6 +128,8 @@ function describe(c: Candidate, id: string, doc: Document): FieldDescriptor {
   if (c.value) d.v = truncate(c.value, 40);
   if (c.focused) d.f = 1;
   d.w = c.rect.width < 160 ? 's' : c.rect.width < 400 ? 'm' : 'l';
+  if (!c.inViewport) d.o = 1;
+  if (c.fr !== undefined) d.fr = c.fr;
   return d;
 }
 

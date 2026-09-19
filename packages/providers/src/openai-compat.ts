@@ -1,17 +1,20 @@
-import type { ChatMessage, ElementDescriptor, ImageInput, InteractSuggestion, SuggestRequest, Suggestion } from '@carat/shared';
+import type { ChatMessage, ClickGate, Eagerness, ElementDescriptor, ImageInput, InteractSuggestion, SuggestRequest, Suggestion } from '@carat/shared';
 import {
+  DEFAULT_EAGERNESS,
+  EAGERNESS,
   LIMITS,
   SUGGESTION_RESPONSE_FORMAT,
   SuggestionListSchema,
   TRANSCRIBE_PROMPT,
   buildMessages,
+  clickAllowed,
   isDestructiveName,
   isIntentDestination,
   normalizeWhitespace,
   truncate,
   verbFits,
 } from '@carat/shared';
-import type { VisionProvider } from './provider';
+import type { SuggestOptions, VisionProvider } from './provider';
 import { sameSite } from './same-site';
 
 export type OutputMode = 'json_schema' | 'json_object' | 'prompt';
@@ -28,6 +31,8 @@ export interface OpenAICompatOptions {
   mode: OutputMode;
   /** Sent as `reasoning_effort` on every call when set. Left unset for servers that reject unknown parameters. */
   reasoningEffort?: ReasoningEffort;
+  /** Picks the prompt's last rule and the confidence floor. Defaults to the product default. */
+  eagerness?: Eagerness;
 }
 
 type Parsed = { ok: true; suggestions: Suggestion[] } | { ok: false; error: string };
@@ -60,15 +65,16 @@ export class OpenAICompatProvider implements VisionProvider {
   // An unparseable reply (twice in a row) or an abort is "nothing to suggest"
   // and resolves to []. A transport or HTTP failure rejects so the caller can
   // tell "the model said no" from "the model was never reached" and fall back.
-  async suggest(req: SuggestRequest, opts: { signal: AbortSignal }): Promise<Suggestion[]> {
+  async suggest(req: SuggestRequest, opts: SuggestOptions): Promise<Suggestion[]> {
     if (opts.signal.aborted) return [];
-    const messages = buildMessages(req);
+    const eagerness = this.options.eagerness ?? DEFAULT_EAGERNESS;
+    const messages = buildMessages(req, eagerness);
     try {
       const first = await this.complete(messages, opts.signal);
-      if (first.ok) return finalize(first.suggestions, req);
+      if (first.ok) return finalize(first.suggestions, req, eagerness, opts.onUnderFloor);
       if (opts.signal.aborted) return [];
       const second = await this.complete(withParseError(messages, first.error), opts.signal);
-      return second.ok ? finalize(second.suggestions, req) : [];
+      return second.ok ? finalize(second.suggestions, req, eagerness, opts.onUnderFloor) : [];
     } catch (e) {
       if (opts.signal.aborted) return [];
       throw e;
@@ -177,48 +183,61 @@ function withParseError(messages: ChatMessage[], error: string): ChatMessage[] {
   return [...messages.slice(0, -1), { role: last.role, content: last.content + note }];
 }
 
-function finalize(suggestions: Suggestion[], req: SuggestRequest): Suggestion[] {
+function finalize(suggestions: Suggestion[], req: SuggestRequest, eagerness: Eagerness, onUnderFloor?: (s: Suggestion) => void): Suggestion[] {
+  const knobs = EAGERNESS[eagerness];
   const fillable = new Set(req.fields.filter((f) => !f.v).map((f) => f.i));
   // Real context ids are never the few-shots' c1/c2/o1, so an unknown source
-  // means the model echoed an example; a same-site fill source breaks rule 7.
-  const fillSources = new Set(req.context.filter((c) => !sameSite(c.origin, req.page.host)).map((c) => c.id));
+  // means the model echoed an example. The orchestrator never lists the
+  // requesting tab's own text under `context`, so a same-site source here is
+  // another tab on the site: shut out below eager, allowed at eager.
+  const fillSources = new Set(
+    req.context.filter((c) => knobs.sameOriginContext || !sameSite(c.origin, req.page.host)).map((c) => c.id),
+  );
   const actionSources = new Set((req.own ?? []).map((c) => c.id));
   const filled = req.filled ?? [];
   const interactSources = new Set([...fillSources, ...filled]);
   const elements = new Map((req.elements ?? []).map((e) => [e.i, e] as const));
   const here = `https://${req.page.host}${req.page.path}`;
+  const gate: ClickGate = { filled: filled.length > 0, flow: req.flow === true, eagerness, fillable: fillable.size > 0 };
   // One winner per field, per element and per intent.
   const best = new Map<string, Suggestion>();
   for (const s of suggestions) {
-    if (s.confidence < LIMITS.minConfidence) continue;
     if (s.kind === 'fill' && (!fillable.has(s.fieldId) || !fillSources.has(s.sourceContextId))) continue;
     if (s.kind === 'action' && (!actionSources.has(s.sourceContextId) || isIntentDestination(s.intent, here))) continue;
-    if (s.kind === 'interact' && !interactionAllowed(s, elements.get(s.elementId), interactSources, filled.length > 0)) continue;
+    if (s.kind === 'interact' && !interactionAllowed(s, elements.get(s.elementId), interactSources, gate)) continue;
+    // Checked last, so what is counted here would have shown at a looser level.
+    if (s.confidence < knobs.minConfidence) {
+      onUnderFloor?.(s);
+      continue;
+    }
     const key = s.kind === 'fill' ? `f:${s.fieldId}` : s.kind === 'interact' ? `e:${s.elementId}` : `a:${s.intent}`;
     const prev = best.get(key);
     if (!prev || s.confidence > prev.confidence) best.set(key, { ...s, value: s.value.trim() });
   }
+  // Every suggestion carries a value except a bare scroll.
   return [...best.values()]
-    .filter((s) => s.value !== '')
+    .filter((s) => s.value !== '' || (s.kind === 'interact' && s.verb === 'scroll'))
     .sort((a, b) => b.confidence - a.confidence);
 }
 
 /**
  * An interaction names a described element, a verb that fits its role and
  * state, and a source the user read. A click on a button or link only stands
- * once carat filled something on the page; the model does not get to press
- * buttons on a page it merely looked at. Destructive names never pass, even
- * if the content script somehow described one.
+ * once carat filled something on the page, or when it is the primary action
+ * and a flow or the level lets that through (`clickAllowed`); the model does
+ * not get to press other buttons on a page it merely looked at. Destructive
+ * names never pass, even if the content script somehow described one. The
+ * service worker applies the money rule; the provider has no settings.
  */
 function interactionAllowed(
   s: InteractSuggestion,
   element: ElementDescriptor | undefined,
   sources: Set<string>,
-  filledSomething: boolean,
+  gate: ClickGate,
 ): boolean {
   if (!element || !sources.has(s.sourceContextId)) return false;
   if (isDestructiveName(element.nm)) return false;
   if (!verbFits(element, s.verb, s.value.trim())) return false;
-  if (s.verb === 'click' && (element.r === 'button' || element.r === 'link') && !filledSomething) return false;
+  if (s.verb === 'click' && !clickAllowed(element, gate)) return false;
   return true;
 }
