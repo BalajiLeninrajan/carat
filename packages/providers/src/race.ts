@@ -87,6 +87,11 @@ export class RaceProvider implements Provider {
     return this.run?.attempts ?? [];
   }
 
+  /** Whether anything in here has a prefix to warm at all: the regex placeholder and Jev have none. */
+  get warms(): boolean {
+    return this.providers.some((p) => p.warm !== undefined);
+  }
+
   /**
    * Warm every provider that has a prefix to warm; the placeholder and Jev
    * have none, so in practice this is the chat model alone. Never rejects,

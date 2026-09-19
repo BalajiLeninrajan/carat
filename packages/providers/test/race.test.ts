@@ -121,7 +121,12 @@ describe('the placeholder before the network', () => {
       },
     });
     const race = new RaceProvider([new Fake('local', null), warms('openai', true), warms('baseten')], { id: 'openai' });
+    expect(race.warms).toBe(true);
     await expect(race.warm(req, { signal: new AbortController().signal })).resolves.toBeUndefined();
     expect(warmed).toEqual(['openai', 'baseten']);
+  });
+
+  it('says it has no prefix to warm when nothing in it does', () => {
+    expect(new RaceProvider([new Fake('local', null), new Fake('cloudflare', null)], { id: 'cloudflare' }).warms).toBe(false);
   });
 });

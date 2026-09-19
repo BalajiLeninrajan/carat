@@ -1,7 +1,7 @@
 import type { NextActionRequest, OpenTab, Settings } from '@carat/shared';
 import { WARMUP_OUTLINE, fnv1a, isDenylisted, renderPrefix } from '@carat/shared';
 import type { Provider } from '@carat/providers';
-import { createProvider } from '@carat/providers';
+import { RaceProvider, createProvider } from '@carat/providers';
 import { isSiteOff } from '../store';
 import type { StorageArea } from '../store/storage-area';
 import type { CommittedDetails, NavigationEvents } from './history';
@@ -101,7 +101,8 @@ export function createWarmer(deps: WarmDeps): Warmer {
       if (notes.length === 0 && history.length === 0) return;
 
       const provider = (deps.createProvider ?? createProvider)(settings);
-      if (!provider.warm) return;
+      // A race of the regex placeholder and Jev has no prefix to put anywhere.
+      if (!provider.warm || (provider instanceof RaceProvider && !provider.warms)) return;
       const req: NextActionRequest = {
         page: { host: page.host, title: '', path: page.path, scroll: { y: 0, pages: 1, more: false } },
         outline: WARMUP_OUTLINE,
