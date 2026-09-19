@@ -6,17 +6,6 @@ import { startHistoryRecorder } from '../src/history';
 import { createStatusLine } from '../src/status';
 import { onMessage } from '../src/messaging';
 
-/**
- * The message the background sends after a clear. It is declared here rather
- * than in the protocol itself so the clear side owns that file; two identical
- * signatures merge as overloads, so both may declare it.
- */
-declare module '../src/messaging' {
-  interface Protocol {
-    contextCleared(): void;
-  }
-}
-
 export default defineContentScript({
   matches: ['<all_urls>'],
   // Payment forms live in cross-origin frames (Stripe, Adyen); the script runs there too, as a frame agent.
