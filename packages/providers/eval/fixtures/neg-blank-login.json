@@ -1,0 +1,13 @@
+{
+  "name": "neg-blank-login",
+  "request": {
+    "page": { "host": "github.com", "title": "Sign in to GitHub", "path": "/login" },
+    "fields": [
+      { "i": "f0", "t": "input:text", "nm": "login", "lb": "Username or email address", "ac": "username", "f": 1, "w": "m" }
+    ],
+    "context": [],
+    "now": "2026-09-16T09:00:00-04:00",
+    "locale": "en-CA"
+  },
+  "expect": []
+}

@@ -1,0 +1,13 @@
+export { gate } from './gate';
+export type { GateInput } from './gate';
+export { eligibleContext, FRESH_MS } from './eligible';
+export { scoreAndPickContext, scoreItem, CONTEXT_LIMITS } from './score';
+export { orchestrate } from './orchestrate';
+export type { OrchestrateDeps, SuggestInput } from './orchestrate';
+export { handleFeedback } from './feedback';
+export type { FeedbackInput } from './feedback';
+export { getKnown, clearKnown } from './known';
+export { requesterFromSender } from './requester';
+export type { Requester } from './requester';
+export { fingerprintMatchesDescriptor } from './fingerprint';
+export { isExtensionPage, redactSettings } from './trusted';

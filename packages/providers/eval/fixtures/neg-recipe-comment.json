@@ -1,0 +1,23 @@
+{
+  "name": "neg-recipe-comment",
+  "request": {
+    "page": { "host": "www.seriouseats.com", "title": "Classic Basil Pesto Recipe", "path": "/classic-basil-pesto-recipe" },
+    "fields": [
+      { "i": "f0", "t": "textarea", "nm": "comment", "lb": "Leave a comment", "ph": "Share your thoughts...", "nb": "Comments (48)", "f": 1, "w": "l" },
+      { "i": "f1", "t": "input:search", "nm": "search", "ph": "Search recipes", "al": "Search", "w": "m" }
+    ],
+    "context": [
+      {
+        "id": "c1",
+        "origin": "https://en.wikipedia.org",
+        "title": "Basil - Wikipedia",
+        "kind": "page",
+        "text": "Basil - Wikipedia en.wikipedia.org Basil, also called great basil, is a culinary herb of the family Lamiaceae. It is a tender plant, used in cuisines worldwide. In Western cuisine, the generic term basil refers to the variety also known as sweet basil or Genovese basil. Basil is native to tropical regions from Central Africa to Southeast Asia. In temperate climates basil is treated as an annual plant. There are many varieties of basil including sweet basil, Thai basil, lemon basil and holy basil.",
+        "capturedAt": 1758041000000
+      }
+    ],
+    "now": "2026-09-16T12:45:00-04:00",
+    "locale": "en-CA"
+  },
+  "expect": []
+}

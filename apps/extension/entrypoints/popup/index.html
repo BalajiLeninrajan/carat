@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>Carat</title>
+    <style>
+      :root {
+        --base: #1e1e2e;
+        --mantle: #181825;
+        --surface0: #313244;
+        --surface1: #45475a;
+        --text: #cdd6f4;
+        --subtext0: #a6adc8;
+        --blue: #89b4fa;
+        --mauve: #cba6f7;
+        --teal: #94e2d5;
+        --red: #f38ba8;
+        color-scheme: dark;
+      }
+      * { box-sizing: border-box; }
+      body {
+        width: 360px;
+        margin: 0;
+        background: var(--base);
+        color: var(--text);
+        font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--surface0);
+      }
+      header h1 { font-size: 14px; font-weight: 600; margin: 0; flex: 1; }
+      .toggle { display: flex; align-items: center; gap: 6px; color: var(--subtext0); cursor: pointer; }
+      .toggle input { width: 14px; height: 14px; margin: 0; accent-color: var(--blue); }
+      #list { list-style: none; margin: 0; padding: 4px 0; max-height: 420px; overflow-y: auto; }
+      #list li { padding: 8px 12px; border-bottom: 1px solid var(--surface0); }
+      #list li:last-child { border-bottom: 0; }
+      .meta { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--subtext0); }
+      .meta .origin { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .chip {
+        padding: 1px 6px;
+        border-radius: 999px;
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+        background: var(--surface0);
+        color: var(--teal);
+      }
+      .chip[data-kind="selection"] { color: var(--mauve); }
+      .title { margin: 2px 0 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .preview { margin: 2px 0 0; color: var(--subtext0); overflow-wrap: anywhere; }
+      .empty, #offline { padding: 24px 12px; text-align: center; color: var(--subtext0); }
+      #offline p { margin: 0 0 10px; }
+      footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 12px;
+        border-top: 1px solid var(--surface0);
+      }
+      footer a { color: var(--blue); text-decoration: none; }
+      footer a:hover { text-decoration: underline; }
+      button {
+        padding: 5px 12px;
+        border-radius: 6px;
+        border: 1px solid var(--surface1);
+        background: var(--surface0);
+        color: var(--text);
+        font: inherit;
+        cursor: pointer;
+      }
+      button:disabled { opacity: 0.5; cursor: default; }
+      button:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+      #offline, .empty { display: none; }
+      main[data-state="offline"] #offline { display: block; }
+      main[data-state="offline"] #list, main[data-state="offline"] footer { display: none; }
+      main[data-state="empty"] .empty { display: block; }
+    </style>
+  </head>
+  <body>
+    <main id="app" data-state="loading">
+      <header>
+        <h1>Carat</h1>
+        <label class="toggle">
+          <input type="checkbox" id="enabled" />
+          <span>Enabled</span>
+        </label>
+      </header>
+
+      <div id="offline">
+        <p>Carat's background worker is not answering.</p>
+        <button type="button" id="retry">Retry</button>
+      </div>
+
+      <p class="empty">Carat has not read anything yet</p>
+      <ul id="list"></ul>
+
+      <footer>
+        <a href="#" id="options">Settings</a>
+        <button type="button" id="clear">Clear</button>
+      </footer>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

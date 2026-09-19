@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>Carat settings</title>
+    <style>
+      :root {
+        --base: #1e1e2e;
+        --mantle: #181825;
+        --surface0: #313244;
+        --surface1: #45475a;
+        --overlay0: #6c7086;
+        --text: #cdd6f4;
+        --subtext0: #a6adc8;
+        --blue: #89b4fa;
+        --green: #a6e3a1;
+        --red: #f38ba8;
+        color-scheme: dark;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 24px 16px 40px;
+        background: var(--base);
+        color: var(--text);
+        font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      main { max-width: 520px; margin: 0 auto; }
+      h1 { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
+      .lede { margin: 0 0 20px; color: var(--subtext0); }
+      form { display: grid; gap: 14px; }
+      label { display: grid; gap: 4px; }
+      label.row { grid-auto-flow: column; justify-content: start; align-items: center; gap: 8px; }
+      .name { font-weight: 500; }
+      .hint { font-size: 12px; color: var(--subtext0); }
+      input:not([type="checkbox"]), select {
+        width: 100%;
+        padding: 8px 10px;
+        border-radius: 6px;
+        border: 1px solid var(--surface1);
+        background: var(--mantle);
+        color: var(--text);
+        font: inherit;
+      }
+      input:focus-visible, select:focus-visible, button:focus-visible {
+        outline: 2px solid var(--blue);
+        outline-offset: 1px;
+      }
+      input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--blue); margin: 0; }
+      .actions { display: flex; align-items: center; gap: 12px; margin-top: 4px; }
+      button {
+        padding: 8px 16px;
+        border-radius: 6px;
+        border: 1px solid var(--surface1);
+        background: var(--surface0);
+        color: var(--text);
+        font: inherit;
+        cursor: pointer;
+      }
+      button.primary { background: var(--blue); border-color: var(--blue); color: var(--mantle); font-weight: 600; }
+      button:disabled { opacity: 0.5; cursor: default; }
+      #status { font-size: 13px; color: var(--green); min-height: 1.5em; }
+      #status.error { color: var(--red); }
+      .note { margin: 20px 0 0; font-size: 12px; color: var(--subtext0); }
+      #offline { display: none; padding: 12px; border-radius: 6px; background: var(--surface0); }
+      #offline p { margin: 0 0 8px; }
+      main[data-state="offline"] #offline { display: block; }
+      main[data-state="offline"] form { display: none; }
+    </style>
+  </head>
+  <body>
+    <main id="app" data-state="loading">
+      <h1>Carat settings</h1>
+      <p class="lede">Fills a field from what you just read. One Tab per field.</p>
+
+      <div id="offline">
+        <p>Carat's background worker is not answering. Reload the extension, then try again.</p>
+        <button type="button" id="retry">Retry</button>
+      </div>
+
+      <form id="form">
+        <label class="row">
+          <input type="checkbox" name="enabled" />
+          <span class="name">Enabled</span>
+        </label>
+
+        <label>
+          <span class="name">Provider</span>
+          <select name="provider">
+            <option value="openai">OpenAI</option>
+            <option value="baseten">Baseten (OpenAI-compatible)</option>
+            <option value="local">Local (regex only, no network)</option>
+          </select>
+          <span class="hint">Local runs when there is no key or the network call fails, whatever you pick here.</span>
+        </label>
+
+        <label>
+          <span class="name">Base URL</span>
+          <input type="url" name="baseURL" placeholder="https://api.openai.com/v1" autocomplete="off" spellcheck="false" />
+        </label>
+
+        <label>
+          <span class="name">API key</span>
+          <input type="password" name="apiKey" autocomplete="off" spellcheck="false" />
+          <span class="hint">Stays in this browser's local extension storage. Only the background worker reads it; pages and content scripts never see it.</span>
+        </label>
+
+        <label>
+          <span class="name">Model</span>
+          <input type="text" name="model" placeholder="gpt-5.6-luna" autocomplete="off" spellcheck="false" />
+        </label>
+
+        <div class="actions">
+          <button type="submit" class="primary" id="save">Save</button>
+          <span id="status" role="status" aria-live="polite"></span>
+        </div>
+      </form>
+
+      <p class="note">Nothing Carat reads is written to disk. Context lives in session storage and is gone when the browser closes.</p>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
