@@ -1,7 +1,8 @@
 import type { ContextStore } from '../store';
-import { suppressionKey } from '../store';
+import { navSuppressionKey, suppressionKey } from '../store';
 
-export interface FeedbackInput {
+export interface FillFeedback {
+  kind?: 'fill';
   fieldId: string;
   fingerprint: string;
   contextId: string;
@@ -9,8 +10,20 @@ export interface FeedbackInput {
   host: string;
 }
 
+export interface NavFeedback {
+  kind: 'nav';
+  intent: string;
+  value: string;
+  accepted: boolean;
+}
+
+export type FeedbackInput = FillFeedback | NavFeedback;
+
 export async function handleFeedback(data: FeedbackInput, store: ContextStore): Promise<void> {
-  const key = suppressionKey(data.contextId, data.host, data.fingerprint);
+  const key =
+    data.kind === 'nav'
+      ? navSuppressionKey(data.intent, data.value)
+      : suppressionKey(data.contextId, data.host, data.fingerprint);
   if (data.accepted) await store.markConsumed(key);
   else await store.markDismissed(key);
 }

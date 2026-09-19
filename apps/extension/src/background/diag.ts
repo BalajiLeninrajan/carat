@@ -36,8 +36,10 @@ export interface SuggestDiag {
   /** Set once the gate passed. */
   cached?: boolean;
   attempts?: ProviderAttempt[];
-  /** Suggestions handed to the content script after suppression. */
+  /** Field fills handed to the content script after suppression. */
   offered?: number;
+  /** Tab offers (open or switch) handed over alongside them. */
+  navigation?: number;
 }
 
 export interface TabDiag {

@@ -153,7 +153,7 @@ describe('ContextStore TTL', () => {
 
   it('expires the suggestion cache after 60s', async () => {
     const { store, tick } = setup();
-    const s = [{ fieldId: 'f0', value: 'v', confidence: 0.9, reason: 'r', sourceContextId: 'c' }];
+    const s = [{ kind: 'fill' as const, fieldId: 'f0', value: 'v', confidence: 0.9, reason: 'r', sourceContextId: 'c' }];
     await store.setCached('k', s);
     expect(await store.getCached('k')).toEqual(s);
     tick(61_000);

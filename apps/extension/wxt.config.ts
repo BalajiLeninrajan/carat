@@ -3,7 +3,7 @@ import { defineConfig } from 'wxt';
 export default defineConfig({
   manifest: {
     name: 'Carat',
-    description: 'Fills a field from what you just read. One Tab per field.',
+    description: 'Fills a field or opens the next tab from what you just read. One Tab each.',
     permissions: ['storage', 'alarms', 'tabs'],
     host_permissions: ['<all_urls>', 'https://api.openai.com/*'],
     commands: {

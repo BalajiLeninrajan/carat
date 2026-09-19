@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { ContextItem, Settings, Suggestion, SuggestRequest } from '@carat/shared';
+import type { ActionSuggestion, ContextItem, FillSuggestion, NavSuggestion, Settings, Suggestion, SuggestRequest } from '@carat/shared';
 import { DEFAULT_SETTINGS } from '@carat/shared';
 import type { Provider } from '@carat/providers';
 import { createProvider } from '@carat/providers';
@@ -14,9 +14,13 @@ import {
   handleFeedback,
   isExtensionPage,
   orchestrate,
+  ownContext,
+  performNavigation,
   redactSettings,
+  resolveNavigation,
   scoreAndPickContext,
 } from '../src/background';
+import type { TabsApi } from '../src/background';
 
 class FakeArea implements StorageArea {
   data: Record<string, unknown> = {};
@@ -64,9 +68,12 @@ describe('gate', () => {
     expect(gate(maps, [item()], enabled, requester, NOW)).toBe(true);
   });
 
-  it('needs a different tab AND a different origin', () => {
-    expect(gate(maps, [item({ tabId: 2 })], enabled, requester, NOW)).toBe(false);
+  it('needs a different tab AND a different origin for fills, or the requesting tab itself for actions', () => {
+    // Same origin from another tab is an echo of what the user is looking at.
     expect(gate(maps, [item({ origin: 'https://www.google.com' })], enabled, requester, NOW)).toBe(false);
+    // The requesting tab's own page is a source for navigation, so it clears the gate on its own.
+    expect(gate(maps, [item({ tabId: 2 })], enabled, requester, NOW)).toBe(true);
+    expect(gate(maps, [item({ tabId: 2, lastSeenAt: NOW - 31 * MIN })], enabled, requester, NOW)).toBe(false);
   });
 
   it('ignores items older than the store TTL', () => {
@@ -98,10 +105,13 @@ describe('explainGate', () => {
     expect(explainGate(bank, [item()], enabled, requester, NOW)).toBe('denylisted');
     expect(explainGate({ ...maps, fields: [] }, [item()], enabled, requester, NOW)).toBe('no-fields');
     expect(explainGate(maps, [], enabled, requester, NOW)).toBe('no-context');
-    expect(explainGate(maps, [item({ tabId: 2 })], enabled, requester, NOW)).toBe('own-context');
+    // Another tab on the same site is an echo; the requesting tab's own text is a source for actions.
+    expect(explainGate(maps, [item({ origin: 'https://www.google.com' })], enabled, requester, NOW)).toBe('own-context');
+    expect(explainGate(maps, [item({ tabId: 2 })], enabled, requester, NOW)).toBe('ok');
     expect(explainGate(maps, [item({ lastSeenAt: NOW - 31 * MIN })], enabled, requester, NOW)).toBe('stale-context');
-    // A stale foreign item plus a fresh own one is still "stale": the own one could never be used.
-    expect(explainGate(maps, [item({ lastSeenAt: NOW - 31 * MIN }), item({ tabId: 2 })], enabled, requester, NOW)).toBe('stale-context');
+    expect(explainGate(maps, [item({ tabId: 2, lastSeenAt: NOW - 31 * MIN })], enabled, requester, NOW)).toBe('stale-context');
+    // A stale foreign item plus a fresh own one still passes: the own one can carry an action.
+    expect(explainGate(maps, [item({ lastSeenAt: NOW - 31 * MIN }), item({ tabId: 2 })], enabled, requester, NOW)).toBe('ok');
   });
 });
 
@@ -192,7 +202,8 @@ function fakeProvider(
   return p;
 }
 
-const suggestion = (over: Partial<Suggestion> = {}): Suggestion => ({
+const suggestion = (over: Partial<FillSuggestion> = {}): FillSuggestion => ({
+  kind: 'fill',
   fieldId: 'f0',
   value: 'Seven Shores Cafe',
   confidence: 0.9,
@@ -246,7 +257,8 @@ describe('orchestrate', () => {
   it('returns nothing when the gate fails and never calls the provider', async () => {
     const { store, now } = await seeded();
     const remote = fakeProvider('openai', async () => [suggestion()]);
-    const res = await orchestrate(maps, { tabId: 1, origin: 'https://discord.com' }, {
+    // Same origin as the only item, from a tab that has captured nothing of its own.
+    const res = await orchestrate(maps, { tabId: 9, origin: 'https://discord.com' }, {
       store,
       settings: async () => enabled,
       createProvider: () => remote,
@@ -353,7 +365,8 @@ describe('orchestrate', () => {
       now,
       onDiag: (d: SuggestDiag) => void reports.push(d),
     };
-    await orchestrate(maps, { tabId: 1, origin: 'https://discord.com' }, deps);
+    // A second Discord tab asking: the only context is the same site's, and not its own.
+    await orchestrate(maps, { tabId: 3, origin: 'https://discord.com' }, deps);
     expect(reports[0]).toMatchObject({ at: NOW, host: 'www.google.com', fields: 1, gate: 'own-context' });
 
     await orchestrate(maps, requester, deps);
@@ -514,6 +527,181 @@ describe('trusted senders', () => {
 
   it('redacts the key and nothing else', () => {
     expect(redactSettings(enabled)).toEqual({ ...enabled, apiKey: '' });
+  });
+});
+
+describe('ownContext', () => {
+  it('returns the requesting tab\'s fresh page and its best selection, clipped to 2000 chars', () => {
+    const items = [
+      item({ id: 'page', tabId: 2, text: 'x'.repeat(3000), lastSeenAt: NOW }),
+      item({ id: 'old', tabId: 2, kind: 'selection', text: 'old', lastSeenAt: NOW - 8 * MIN }),
+      item({ id: 'new', tabId: 2, kind: 'selection', text: 'new', lastSeenAt: NOW - MIN }),
+      item({ id: 'stale', tabId: 2, kind: 'selection', text: 'stale', lastSeenAt: NOW - 31 * MIN }),
+      item({ id: 'other', tabId: 3, text: 'other tab', lastSeenAt: NOW }),
+    ];
+    const own = ownContext(items, requester, NOW);
+    expect(own.map((c) => c.id).sort()).toEqual(['new', 'page']);
+    expect(own.reduce((n, c) => n + c.text.length, 0)).toBeLessThanOrEqual(2000);
+  });
+
+  it('is empty without a tab id', () => {
+    expect(ownContext([item({ tabId: 2 })], { tabId: undefined, origin: 'https://x' }, NOW)).toEqual([]);
+  });
+});
+
+const action = (over: Partial<ActionSuggestion> = {}): ActionSuggestion => ({
+  kind: 'action',
+  intent: 'maps',
+  value: 'Seven Shores Cafe',
+  when: '',
+  location: '',
+  confidence: 0.9,
+  reason: 'r',
+  sourceContextId: 'o1',
+  ...over,
+});
+const discordPage = { host: 'discord.com', title: 'Discord', path: '/channels/1/2' };
+const onDiscord = { tabId: 1, origin: 'https://discord.com' };
+
+describe('resolveNavigation', () => {
+  it('opens a new tab when no tab shows the destination and focuses one that does', () => {
+    const [open] = resolveNavigation([action()], [{ id: 1, url: 'https://discord.com/channels/1/2' }], onDiscord, discordPage);
+    expect(open).toMatchObject({ kind: 'open', label: 'Open in Google Maps', url: 'https://www.google.com/maps/search/?api=1&query=Seven+Shores+Cafe' });
+    expect(open?.tabId).toBeUndefined();
+
+    const tabs = [{ id: 1, url: 'https://discord.com/channels/1/2' }, { id: 7, url: 'https://www.google.com/maps/@43.4,-80.5,12z' }];
+    const [focus] = resolveNavigation([action()], tabs, onDiscord, discordPage);
+    expect(focus).toMatchObject({ kind: 'focus', tabId: 7, label: 'Switch to Google Maps' });
+  });
+
+  it('never focuses the requesting tab, drops the destination the user is on, and drops what it cannot build', () => {
+    const onMaps = { tabId: 7, origin: 'https://www.google.com' };
+    const mapsPage = { host: 'www.google.com', title: 'Maps', path: '/maps' };
+    expect(resolveNavigation([action()], [{ id: 7, url: 'https://www.google.com/maps' }], onMaps, mapsPage)).toEqual([]);
+    const calendar = action({ intent: 'calendar', value: 'Dinner', when: '2026-09-18T18:00:00-04:00', location: 'Seven Shores Cafe' });
+    const [nav] = resolveNavigation([calendar], [{ id: 7, url: 'https://www.google.com/maps' }], onMaps, mapsPage);
+    expect(nav?.url).toContain('dates=20260918T180000%2F20260918T190000');
+    expect(resolveNavigation([action({ intent: 'gmail', value: 'not an email' })], [], onDiscord, discordPage)).toEqual([]);
+  });
+});
+
+function fakeTabs(existing?: { id: number; url: string; windowId?: number }) {
+  const api = {
+    get: vi.fn(async (id: number) => (existing && existing.id === id ? existing : undefined)),
+    update: vi.fn(async () => undefined),
+    create: vi.fn(async () => undefined),
+    focusWindow: vi.fn(async () => undefined),
+  } satisfies TabsApi;
+  return api;
+}
+
+const navOf = (over: Partial<NavSuggestion> = {}): NavSuggestion => ({
+  kind: 'open',
+  intent: 'maps',
+  label: 'Open in Google Maps',
+  value: 'Seven Shores Cafe',
+  when: '',
+  location: '',
+  url: 'https://www.google.com/maps/search/?api=1&query=Seven+Shores+Cafe',
+  confidence: 0.9,
+  reason: 'r',
+  sourceContextId: 'o1',
+  ...over,
+});
+const fromTab = { tab: { id: 1 } };
+
+describe('performNavigation', () => {
+  it('opens a tab next to the sender with a URL rebuilt from the registry, never the one in the message', async () => {
+    const tabs = fakeTabs();
+    expect(await performNavigation(navOf({ url: 'https://evil.test/' }), fromTab, tabs)).toEqual({ ok: true });
+    expect(tabs.create).toHaveBeenCalledWith({ url: 'https://www.google.com/maps/search/?api=1&query=Seven+Shores+Cafe', openerTabId: 1 });
+    expect(tabs.update).not.toHaveBeenCalled();
+  });
+
+  it('focuses an existing destination tab, navigates it, and raises its window', async () => {
+    const tabs = fakeTabs({ id: 7, url: 'https://www.google.com/maps', windowId: 3 });
+    expect(await performNavigation(navOf({ kind: 'focus', tabId: 7 }), fromTab, tabs)).toEqual({ ok: true });
+    expect(tabs.update).toHaveBeenCalledWith(7, { url: 'https://www.google.com/maps/search/?api=1&query=Seven+Shores+Cafe', active: true });
+    expect(tabs.focusWindow).toHaveBeenCalledWith(3);
+    expect(tabs.create).not.toHaveBeenCalled();
+  });
+
+  it('falls back to a new tab when the focus target is gone, has left the destination, or is the sender', async () => {
+    for (const [tabs, tabId] of [
+      [fakeTabs(), 7],
+      [fakeTabs({ id: 7, url: 'https://news.ycombinator.com/' }), 7],
+      [fakeTabs({ id: 1, url: 'https://www.google.com/maps' }), 1],
+    ] as const) {
+      expect(await performNavigation(navOf({ kind: 'focus', tabId }), fromTab, tabs)).toEqual({ ok: true });
+      expect(tabs.update).not.toHaveBeenCalled();
+      expect(tabs.create).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it('refuses a sender that is not a tab, an unknown intent, and an entity the registry cannot use', async () => {
+    const tabs = fakeTabs();
+    expect(await performNavigation(navOf(), {}, tabs)).toEqual({ ok: false });
+    expect(await performNavigation(navOf({ intent: 'uber' as NavSuggestion['intent'] }), fromTab, tabs)).toEqual({ ok: false });
+    expect(await performNavigation(navOf({ intent: 'gmail', value: 'nobody' }), fromTab, tabs)).toEqual({ ok: false });
+    expect(tabs.create).not.toHaveBeenCalled();
+    expect(tabs.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('orchestrate navigation', () => {
+  const composer = { ...discordPage, fields: [{ i: 'f0', t: 'textbox', al: 'Message #general', f: 1 as const }] };
+  const input = { page: discordPage, fields: composer.fields };
+  const local: Settings = { ...DEFAULT_SETTINGS, provider: 'local', apiKey: '' };
+
+  it('offers Maps and Calendar from the page being read, focusing an open Maps tab, and never touches tabs itself', async () => {
+    const { store, now } = await seeded();
+    const tabs = vi.fn(async () => [{ id: 1, url: 'https://discord.com/channels/1/2' }, { id: 7, url: 'https://maps.google.com/' }]);
+    const res = await orchestrate(input, onDiscord, { store, settings: async () => local, now, tabs });
+    expect(res.suggestions).toEqual([]);
+    expect(res.navigation.map((n) => [n.intent, n.kind, n.tabId])).toEqual([
+      ['maps', 'focus', 7],
+      ['calendar', 'open', undefined],
+    ]);
+    expect(res.navigation[0]?.label).toBe('Switch to Google Maps');
+    expect(res.navigation[1]?.url).toContain('calendar.google.com');
+    expect(tabs).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops an action the provider sourced from another tab and a fill sourced from the page itself', async () => {
+    const { store, ctxId, now } = await seeded();
+    await store.upsertPage({ tabId: 3, url: 'https://app.slack.com/c/1', title: 'Slack', text: 'lunch at Vincenzos tomorrow at 12?' });
+    const slackId = (await store.items()).find((i) => i.tabId === 3)!.id;
+    const remote = fakeProvider('openai', async () => [
+      action({ sourceContextId: slackId }),
+      action({ sourceContextId: ctxId, intent: 'calendar', value: 'Dinner' }),
+      suggestion({ sourceContextId: ctxId }),
+    ]);
+    const res = await orchestrate(input, onDiscord, { store, settings: async () => enabled, createProvider: () => remote, now });
+    expect(res.suggestions).toEqual([]);
+    expect(res.navigation.map((n) => n.intent)).toEqual(['calendar']);
+  });
+
+  it('remembers a dismissed or accepted navigation by destination and entity, across page changes', async () => {
+    const { store, now } = await seeded();
+    const deps = { store, settings: async () => local, now };
+    expect((await orchestrate(input, onDiscord, deps)).navigation.map((n) => n.intent)).toEqual(['maps', 'calendar']);
+    await handleFeedback({ kind: 'nav', intent: 'maps', value: 'seven shores  cafe', accepted: false }, store);
+    expect((await orchestrate(input, onDiscord, deps)).navigation.map((n) => n.intent)).toEqual(['calendar']);
+    // The chat scrolls: a new page item, a new context id, the same errand.
+    await store.upsertPage({ tabId: 1, url: 'https://discord.com/channels/1', title: 'Discord', text: 'alex: dinner at Seven Shores Cafe, Friday at 6? sam: in' });
+    expect((await orchestrate(input, onDiscord, deps)).navigation.map((n) => n.intent)).toEqual(['calendar']);
+    await handleFeedback({ kind: 'nav', intent: 'calendar', value: 'Dinner at Seven Shores Cafe', accepted: true }, store);
+    expect((await orchestrate(input, onDiscord, deps)).navigation).toEqual([]);
+  });
+
+  it('does not ask for tabs when there is nothing to navigate to', async () => {
+    const { store, ctxId, now } = await seeded();
+    const tabs = vi.fn(async () => []);
+    const remote = fakeProvider('openai', async () => [suggestion({ sourceContextId: ctxId })]);
+    const res = await orchestrate(maps, requester, { store, settings: async () => enabled, createProvider: () => remote, now, tabs });
+    expect(res.suggestions).toHaveLength(1);
+    expect(res.navigation).toEqual([]);
+    expect(tabs).not.toHaveBeenCalled();
   });
 });
 

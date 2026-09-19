@@ -4,11 +4,14 @@ import { onMessage, sendMessage } from '../src/messaging';
 import { ContextStore, createSettingsStore, isSiteOff, parseLocation } from '../src/store';
 import {
   DiagLog,
+  chromeTabsApi,
   clearKnown,
   getKnown,
   handleFeedback,
   isExtensionPage,
+  openTabs,
   orchestrate,
+  performNavigation,
   redactSettings,
   requesterFromSender,
   setPinned,
@@ -25,6 +28,7 @@ export default defineBackground(() => {
   const settings = createSettingsStore(chrome.storage.local);
   const extensionBase = chrome.runtime.getURL('');
   const trusted = (sender: chrome.runtime.MessageSender) => isExtensionPage(sender, extensionBase);
+  const tabs = chromeTabsApi();
 
   onMessage('capture', async ({ data, sender }) => {
     const tabId = sender.tab?.id;
@@ -51,14 +55,28 @@ export default defineBackground(() => {
       return await orchestrate(data, requesterFromSender(sender, data.page), {
         store,
         settings: () => settings.get(),
+        tabs: openTabs,
         ...(tabId !== undefined ? { onDiag: (d) => void diag.recordSuggest(tabId, d) } : {}),
       });
     } catch {
-      return { suggestions: [] };
+      return { suggestions: [], navigation: [] };
     }
   });
 
   onMessage('feedback', ({ data }) => handleFeedback(data, store));
+
+  // The only place carat ever opens or focuses a tab, and only in answer to a Tab press on a visible chip.
+  onMessage('navigate', async ({ data, sender }) => {
+    const current = await settings.get();
+    if (!current.enabled) return { ok: false };
+    const from = parseLocation(sender.tab?.url ?? '');
+    if (from && isSiteOff(current, new URL(from.origin).host)) return { ok: false };
+    try {
+      return await performNavigation(data, sender, tabs);
+    } catch {
+      return { ok: false };
+    }
+  });
 
   // The key and the cross-tab context stay with the extension's own pages; a content script gets a redacted view.
   onMessage('getKnown', ({ sender }) => (trusted(sender) ? getKnown(store) : { items: [], pinned: false }));

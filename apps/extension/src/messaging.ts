@@ -1,7 +1,8 @@
 import { defineExtensionMessaging } from '@webext-core/messaging';
 import type { GetDataType, GetReturnType } from '@webext-core/messaging';
-import type { ContextItem, FieldDescriptor, PageMeta, Settings, Suggestion } from '@carat/shared';
+import type { ContextItem, FieldDescriptor, FillSuggestion, NavSuggestion, PageMeta, Settings } from '@carat/shared';
 import type { TabDiag } from './background/diag';
+import type { FeedbackInput } from './background/feedback';
 
 export type KnownItem = Pick<ContextItem, 'id' | 'origin' | 'title' | 'kind' | 'capturedAt'> & {
   preview: string;
@@ -13,7 +14,13 @@ export interface SuggestionSource {
   capturedAt: number;
 }
 
-export type SuggestionView = Suggestion & { source?: SuggestionSource };
+export type SuggestionView = FillSuggestion & { source?: SuggestionSource };
+export type NavigationView = NavSuggestion & { source?: SuggestionSource };
+
+export interface SuggestResponse {
+  suggestions: SuggestionView[];
+  navigation: NavigationView[];
+}
 
 // Background handles every message but `forceSuggest`, which it sends to one
 // tab's content script when the keyboard shortcut fires. Content scripts and
@@ -21,17 +28,11 @@ export type SuggestionView = Suggestion & { source?: SuggestionSource };
 export interface Protocol {
   capture(data: { url: string; title: string; text: string; kind: 'page' | 'selection' }): void;
   /** `force` skips the answer cache and the dismissed/consumed filter: the user asked out loud. */
-  suggestRequest(data: { page: PageMeta; fields: FieldDescriptor[]; force?: boolean }): {
-    suggestions: SuggestionView[];
-  };
+  suggestRequest(data: { page: PageMeta; fields: FieldDescriptor[]; force?: boolean }): SuggestResponse;
   forceSuggest(): void;
-  feedback(data: {
-    fieldId: string;
-    fingerprint: string;
-    contextId: string;
-    accepted: boolean;
-    host: string;
-  }): void;
+  feedback(data: FeedbackInput): void;
+  /** Sent only from a navigation chip's Tab press; the background rebuilds the URL before acting. */
+  navigate(data: NavSuggestion): { ok: boolean };
   getKnown(): { items: KnownItem[]; pinned: boolean };
   clearKnown(): void;
   setPinned(data: { pinned: boolean }): { pinned: boolean };

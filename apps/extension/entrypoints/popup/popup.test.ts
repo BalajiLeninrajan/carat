@@ -171,7 +171,7 @@ describe('popup', () => {
     await flush();
     expect(document.getElementById('diag-capture')?.textContent).toBe('page from calendar.google.com 12s ago: stored');
     expect(document.getElementById('diag-suggest')?.textContent).toBe(
-      'checked 15s ago: no request, the only context is from this tab or site',
+      'checked 15s ago: no request, the only context is from another tab on this site',
     );
   });
 

@@ -17,7 +17,7 @@ const GATE: Record<Exclude<GateVerdict, 'ok'>, string> = {
   denylisted: 'host is on the denylist',
   'no-fields': 'no empty field on the page',
   'no-context': 'nothing has been read yet',
-  'own-context': 'the only context is from this tab or site',
+  'own-context': 'the only context is from another tab on this site',
   'stale-context': 'all context is older than 30 min',
 };
 
@@ -33,7 +33,8 @@ export function describeSuggest(d: SuggestDiag, now: number = Date.now()): strin
   const outcome = d.cached
     ? 'answer from cache'
     : (d.attempts ?? []).map(describeAttempt).join('; ') || 'no provider ran';
-  return `${when}: ${outcome}, offered ${d.offered ?? 0}`;
+  const tabs = d.navigation ? `, ${d.navigation} tab ${d.navigation === 1 ? 'offer' : 'offers'}` : '';
+  return `${when}: ${outcome}, offered ${d.offered ?? 0}${tabs}`;
 }
 
 function describeAttempt(a: ProviderAttempt): string {

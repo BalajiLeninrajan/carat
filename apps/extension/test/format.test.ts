@@ -30,7 +30,7 @@ describe('describeSuggest', () => {
 
   it('explains a stopped request', () => {
     expect(describeSuggest({ ...base, gate: 'own-context' }, NOW)).toBe(
-      'checked 15s ago: no request, the only context is from this tab or site',
+      'checked 15s ago: no request, the only context is from another tab on this site',
     );
     expect(describeSuggest({ ...base, gate: 'stale-context' }, NOW)).toBe(
       'checked 15s ago: no request, all context is older than 30 min',

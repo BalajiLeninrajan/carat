@@ -1,9 +1,11 @@
-import type { ContextItem, SuggestRequest } from '@carat/shared';
+import type { ContextItem, RequestContext } from '@carat/shared';
 import { truncate } from '@carat/shared';
-import { eligibleContext } from './eligible';
+import { FRESH_MS, eligibleContext } from './eligible';
 import type { Requester } from './requester';
 
 export const CONTEXT_LIMITS = { maxItems: 3, maxChars: 3600 } as const;
+/** The requesting tab's own text: its page plus at most one selection, in a smaller budget. */
+export const OWN_LIMITS = { maxItems: 2, maxChars: 2000 } as const;
 const HALF_LIFE_MS = 10 * 60_000;
 const SELECTION_WEIGHT = 3;
 
@@ -28,23 +30,12 @@ function shareBudget(lengths: number[], budget: number): number[] {
   return out;
 }
 
-/** Top 3 eligible items by score, clipped to fit 3600 chars of text in total. */
-export function scoreAndPickContext(
-  items: ContextItem[],
-  requester: Requester,
-  now: number = Date.now(),
-): SuggestRequest['context'] {
-  const ranked = eligibleContext(items, requester, now)
-    .map((item) => ({ item, score: scoreItem(item, now) }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, CONTEXT_LIMITS.maxItems)
-    .map(({ item }) => item);
-
+function clip(items: ContextItem[], maxChars: number): RequestContext {
   const budgets = shareBudget(
-    ranked.map((item) => item.text.length),
-    CONTEXT_LIMITS.maxChars,
+    items.map((item) => item.text.length),
+    maxChars,
   );
-  return ranked.map((item, i) => ({
+  return items.map((item, i) => ({
     id: item.id,
     origin: item.origin,
     title: item.title,
@@ -52,4 +43,29 @@ export function scoreAndPickContext(
     text: truncate(item.text, budgets[i]!),
     capturedAt: item.capturedAt,
   }));
+}
+
+function rank(items: ContextItem[], now: number, max: number): ContextItem[] {
+  return items
+    .map((item) => ({ item, score: scoreItem(item, now) }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, max)
+    .map(({ item }) => item);
+}
+
+/** Top 3 eligible items by score, clipped to fit 3600 chars of text in total. */
+export function scoreAndPickContext(items: ContextItem[], requester: Requester, now: number = Date.now()): RequestContext {
+  return clip(rank(eligibleContext(items, requester, now), now, CONTEXT_LIMITS.maxItems), CONTEXT_LIMITS.maxChars);
+}
+
+/**
+ * What the requesting tab itself holds: the fresh page item and the best
+ * selection, clipped to 2000 chars. The only source for actions.
+ */
+export function ownContext(items: ContextItem[], requester: Requester, now: number = Date.now()): RequestContext {
+  if (requester.tabId === undefined) return [];
+  const own = items.filter((i) => i.tabId === requester.tabId && now - i.lastSeenAt < FRESH_MS);
+  const page = own.filter((i) => i.kind === 'page');
+  const selections = rank(own.filter((i) => i.kind === 'selection'), now, 1);
+  return clip(rank([...page, ...selections], now, OWN_LIMITS.maxItems), OWN_LIMITS.maxChars);
 }
