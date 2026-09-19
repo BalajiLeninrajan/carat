@@ -9,6 +9,7 @@ mkdirSync("dist", { recursive: true });
 function copyStatic() {
   cpSync("src/manifest.json", "dist/manifest.json");
   cpSync("src/options/options.html", "dist/options/options.html");
+  cpSync("src/offscreen/listen.html", "dist/offscreen/listen.html");
 }
 
 const options = {
@@ -16,6 +17,7 @@ const options = {
     "background/index": "src/background/index.ts",
     "content/index": "src/content/index.ts",
     "options/options": "src/options/options.ts",
+    "offscreen/listen": "src/offscreen/listen.ts",
   },
   outdir: "dist",
   bundle: true,

@@ -8,7 +8,8 @@
     "build": "node build.mjs",
     "watch": "node build.mjs --watch",
     "typecheck": "tsc --noEmit",
-    "fixtures": "node test/serve.mjs"
+    "fixtures": "node test/serve.mjs",
+    "eval": "node test/eval/run.mjs"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.268",

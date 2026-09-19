@@ -59,7 +59,16 @@
   <p class="hint" style="margin:2px 0 0 24px">When you leave a page, Carat asks the model to note the facts on it you might act on
     elsewhere, keeps them for an hour, and includes them in later prompts. The page's visible text is sent to the API to do this.
     Skipped on blocklisted sites and pages with password fields.
-    <button id="forget" type="button" style="margin:6px 0 0;padding:4px 10px;font-weight:500;background:#6b7280">Forget what Carat has read</button></p>
+    <button id="forget" type="button" style="margin:6px 0 0;padding:4px 10px;font-weight:500;background:#6b7280">Forget what Carat has read and heard</button></p>
+
+  <label class="check"><input type="checkbox" id="listenEnabled" /> Listen in the background (microphone)</label>
+  <p class="hint" style="margin:2px 0 0 24px">While a Chrome window is focused, Carat listens through your microphone and transcribes
+    speech with OpenAI. Audio is never stored. Recording other people without their consent is illegal in some places.
+    <br /><button id="grantMic" type="button" style="margin:6px 0 0;padding:4px 10px;font-weight:500;background:#6b7280">Enable microphone</button>
+    <span id="micStatus"></span></p>
+
+  <label for="transcribeModel">Transcription model</label>
+  <input type="text" id="transcribeModel" />
 
   <label for="blocklist">Blocklist <span class="hint">(one hostname per line; subdomains included)</span></label>
   <textarea id="blocklist"></textarea>

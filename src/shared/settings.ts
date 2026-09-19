@@ -17,12 +17,22 @@ export interface Settings {
    * distilled page content is sent to the API.
    */
   memoryEnabled: boolean;
+  /**
+   * Background listening: the microphone runs (only while a Chrome window is
+   * focused), speech is transcribed with OpenAI. Opt-in.
+   */
+  listenEnabled: boolean;
+  /** OpenAI speech-to-text model. */
+  transcribeModel: string;
   /** Hostnames Carat never touches (suffix match). */
   blocklist: string[];
 }
 
-// Model id carried over from the original plan; change here if the API rejects it.
-export const DEFAULT_MODEL = "gpt-5.6-luna";
+// Picked by the model × reasoning ablation (npm run eval): as accurate as the
+// alternatives with no reasoning, and the tightest latency tail for ghost text.
+export const DEFAULT_MODEL = "gpt-5.6-terra";
+/** Earlier defaults: stored settings still on one of these follow the new default. */
+export const PREVIOUS_DEFAULT_MODELS = ["gpt-5.6-luna"];
 
 export const DEFAULT_SETTINGS: Settings = {
   enabled: true,
@@ -34,12 +44,19 @@ export const DEFAULT_SETTINGS: Settings = {
   textEnabled: true,
   actionsEnabled: true,
   memoryEnabled: false,
+  listenEnabled: false,
+  transcribeModel: "gpt-transcribe",
   blocklist: [],
 };
 
 export async function loadSettings(): Promise<Settings> {
   const stored = await chrome.storage.local.get(DEFAULT_SETTINGS);
-  return { ...DEFAULT_SETTINGS, ...(stored as Partial<Settings>) };
+  const settings = { ...DEFAULT_SETTINGS, ...(stored as Partial<Settings>) };
+  // The options page saves every field, so an old default sticks unless moved on here.
+  for (const key of ["textModel", "actionModel"] as const) {
+    if (PREVIOUS_DEFAULT_MODELS.includes(settings[key])) settings[key] = DEFAULT_MODEL;
+  }
+  return settings;
 }
 
 export function saveSettings(patch: Partial<Settings>): Promise<void> {

@@ -7,7 +7,8 @@
     "debugger",
     "storage",
     "tabs",
-    "webNavigation"
+    "webNavigation",
+    "offscreen"
   ],
   "host_permissions": [
     "<all_urls>"

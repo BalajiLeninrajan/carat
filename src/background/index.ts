@@ -8,6 +8,7 @@ import { buildOutline } from "./outline.js";
 import { cancelCompletion, complete } from "./complete.js";
 import { acceptAction, cancelPrediction, dismissAction, predictAction } from "./predict.js";
 import { buildActionRequest, buildTextRequest } from "./prompts.js";
+import "./listen.js";
 import "./visits.js";
 
 /** A page load only triggers a prediction if the user did something this recently. */
@@ -102,7 +103,7 @@ async function onIdle(tabId: number, msg: IdleMessage, post: (msg: WorkerToConte
   const textOutline = buildOutline(snapshot.nodes, { ...common, mode: "text" });
   const actionOutline = buildOutline(snapshot.nodes, { ...common, mode: "action", focusedValue });
   const history = await historyFor(tabId, msg.url);
-  const notes = settings.memoryEnabled ? await notesFor(msg.url) : "(none)";
+  const notes = await notesFor(msg.url, settings);
   if (idleSeq.get(tabId) !== seq) return;
   const buildMs = Math.round(performance.now() - started);
 
