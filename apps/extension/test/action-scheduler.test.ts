@@ -343,7 +343,7 @@ describe('keeping going', () => {
     chip.destroy();
   });
 
-  it('says nothing more after Esc until the user does something', async () => {
+  it('says nothing more after Esc until the retry comes due, or the user moves first', async () => {
     document.body.innerHTML = '<main><input aria-label="Title"><button>Save</button></main>';
     layAll();
     answerEach([action({ target: 2, label: 'Click "Save"' }), action({ kind: 'fill', target: 1, value: 'Dinner', label: 'Fill Title with "Dinner"' })]);
@@ -361,11 +361,14 @@ describe('keeping going', () => {
     await settled();
     expect(asks()).toHaveLength(1);
 
-    // Now they click, and the next question goes out once they pause.
+    // They click before the retry timer is up, so that is the question that goes.
     document.querySelector('button')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settled();
     expect(asks()).toHaveLength(2);
     expect(chip.text).toBe('Fill Title with "Dinner"');
+    // The retry the Esc queued was called off by the click, not merely delayed.
+    await tick(SNAPSHOT_TIMING.escRetryMs[0]);
+    expect(asks()).toHaveLength(2);
     chip.destroy();
   });
 
@@ -384,6 +387,93 @@ describe('keeping going', () => {
     expect(asks()).toHaveLength(1);
     await tick(SNAPSHOT_TIMING.minGapMs);
     expect(asks()).toHaveLength(2);
+    chip.destroy();
+  });
+});
+
+describe('Esc means "not that"', () => {
+  const esc = (): void => {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  };
+  const [FIRST_WAIT, SECOND_WAIT] = SNAPSHOT_TIMING.escRetryMs;
+
+  it('asks again after the first wait, with the dismissal already reported', async () => {
+    document.body.innerHTML = '<main><input aria-label="Title"><button>Save</button></main>';
+    layAll();
+    answerEach([action({ target: 2, label: 'Click "Save"' }), action({ kind: 'fill', target: 1, value: 'Dinner', label: 'Fill Title with "Dinner"' })]);
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    esc();
+    expect(chip.visible).toBe(false);
+
+    await tick(FIRST_WAIT - 1);
+    expect(asks()).toHaveLength(1);
+    await tick(1);
+    expect(asks()).toHaveLength(2);
+    // The dismissal reaches the background before the question that has to read it.
+    const order = sent.mock.calls.map((c) => c[0]);
+    expect(order.indexOf('feedback')).toBeLessThan(order.lastIndexOf('nextAction'));
+    expect(feedbacks()[0]).toMatchObject({ accepted: false, kind: 'click' });
+    // And the model picked something else, which is what the chip now offers.
+    expect(chip.text).toBe('Fill Title with "Dinner"');
+    chip.destroy();
+  });
+
+  it('backs off to the second wait, and then stops until the user moves', async () => {
+    document.body.innerHTML = '<main><input aria-label="Title"><input aria-label="Notes"><button>Save</button></main>';
+    layAll();
+    answerEach([
+      action({ target: 3, label: 'Click "Save"' }),
+      action({ kind: 'fill', target: 1, value: 'Dinner', label: 'Fill Title with "Dinner"' }),
+      action({ kind: 'fill', target: 2, value: 'Seven Shores', label: 'Fill Notes with "Seven Shores"' }),
+    ]);
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+
+    esc();
+    await tick(FIRST_WAIT);
+    expect(asks()).toHaveLength(2);
+
+    // The second refusal buys a longer wait, not the same one.
+    esc();
+    await tick(FIRST_WAIT);
+    expect(asks()).toHaveLength(2);
+    await tick(SECOND_WAIT - FIRST_WAIT);
+    expect(asks()).toHaveLength(3);
+
+    // The third ends it: no timer at all now.
+    esc();
+    await tick(SECOND_WAIT * 3);
+    expect(asks()).toHaveLength(3);
+
+    // Until the user does something of their own.
+    document.querySelector('button')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await settled();
+    expect(asks()).toHaveLength(4);
+    chip.destroy();
+  });
+
+  it('never offers an action it was refused, however often it asks', async () => {
+    document.body.innerHTML = '<main><input aria-label="Title"><button>Save</button></main>';
+    layAll();
+    answer(action({ target: 2, label: 'Click "Save"' }));
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    expect(chip.text).toBe('Click "Save"');
+
+    esc();
+    await tick(FIRST_WAIT);
+    // It asked again and the background offered the same thing; the chip stays down.
+    expect(asks()).toHaveLength(2);
+    expect(chip.visible).toBe(false);
+
+    document.querySelector('button')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await settled();
+    expect(asks().length).toBeGreaterThan(2);
+    expect(chip.visible).toBe(false);
     chip.destroy();
   });
 });

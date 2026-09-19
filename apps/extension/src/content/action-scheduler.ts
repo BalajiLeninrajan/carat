@@ -22,14 +22,20 @@ export const SNAPSHOT_TIMING = {
   minGapMs: 500,
   /** The same outline, with nothing new in the timeline, is not asked about again inside this window. */
   identicalMs: 60_000,
+  /**
+   * Esc means "not that". The question goes back out after the first wait
+   * with the dismissal in the timeline, then after the second if that answer
+   * is refused too, and then carat waits for the user.
+   */
+  escRetryMs: [3000, 6000],
 } as const;
 
 /**
  * Why a request is going out. They differ in what may stop them: `quiet`
- * needs the outline to have changed, `force` skips every gate, and the rest
- * go through the memo.
+ * needs the outline to have changed, `force` skips every gate, `retry`
+ * follows an Esc, and the rest go through the memo.
  */
-type Trigger = 'first' | 'quiet' | 'evidence' | 'focus' | 'performed' | 'user' | 'force';
+type Trigger = 'first' | 'quiet' | 'evidence' | 'focus' | 'performed' | 'user' | 'retry' | 'force';
 
 export interface ActionsHandle {
   /** The page's own text changed; ask again unless a chip is already up. */
@@ -96,8 +102,13 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
   let nextTrigger: Trigger | null = null;
   let gapTimer: number | null = null;
   let lastSentAt = 0;
-  /** Esc means wait: the next question goes out when the user does something, not before. */
+  /** Esc means wait: the next question goes out on the retry timer, or when the user does something. */
   let awaitingUser = false;
+  /** How many times Esc has been pressed since the user last did anything; it indexes the backoff. */
+  let escapes = 0;
+  let retryTimer: number | null = null;
+  /** The last dismissal on its way to the timeline; the retry waits for it. */
+  let reported: Promise<unknown> = Promise.resolve();
   /** Carat is in the middle of an action; the next question waits for the accept to be reported. */
   let performing = false;
 
@@ -148,8 +159,8 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     if (!ctx.isValid) return;
     // The focus moving because carat filled a field is not the user moving it.
     if (performing && trigger !== 'force') return;
-    // After Esc, only the user gets carat talking again.
-    if (awaitingUser && trigger !== 'force' && trigger !== 'user' && trigger !== 'focus') return;
+    // After Esc, only the user and the retry timer get carat talking again.
+    if (awaitingUser && trigger !== 'force' && trigger !== 'user' && trigger !== 'focus' && trigger !== 'retry') return;
     const force = nextTrigger === 'force' || trigger === 'force';
     nextTrigger = force ? 'force' : trigger;
     // The shortcut waits for nothing, not even the gap a queued trigger is sitting out.
@@ -280,8 +291,9 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
   /**
    * The chip went away. The user getting on with the page says nothing about
    * the offer, so nothing is reported and nothing is suppressed; Esc and
-   * typing over the value do say something, and stop carat until the user
-   * moves again.
+   * typing over the value do say something. They are a "not that", not a
+   * "stop": the question goes back out on the retry timer with the dismissal
+   * behind it, and the refused action is never offered again on this page.
    */
   function onDismiss(why: string, action: NextAction, target: OutlineTarget | undefined): void {
     if (why === 'acted' || why === 'scrolled') {
@@ -294,7 +306,32 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     if (why !== 'escape' && why !== 'typed') return;
     dismissed.add(actionKey(action));
     awaitingUser = true;
-    void send('feedback', { kind: action.kind, name: nameOf(action, target), label: action.label, host: doc.location.host, accepted: false });
+    // The dismissal is a line in the timeline, so the memo must not swallow what follows it.
+    events++;
+    reported = send('feedback', { kind: action.kind, name: nameOf(action, target), label: action.label, host: doc.location.host, accepted: false });
+    retryAfterDismissal();
+  }
+
+  /**
+   * Ask again, once the dismissal has reached the timeline, so the model
+   * reads it and picks something else. The second refusal buys a longer wait
+   * and the third ends it: after that the user has to move.
+   */
+  function retryAfterDismissal(): void {
+    cancelRetry();
+    const waits = SNAPSHOT_TIMING.escRetryMs;
+    const wait = escapes < waits.length ? waits[escapes] : null;
+    escapes++;
+    if (wait === null) return;
+    retryTimer = ctx.setTimeout(() => {
+      retryTimer = null;
+      void reported.then(() => ask('retry'));
+    }, wait);
+  }
+
+  function cancelRetry(): void {
+    if (retryTimer !== null) clearTimeout(retryTimer);
+    retryTimer = null;
   }
 
   async function accept(action: NextAction, target: OutlineTarget | undefined): Promise<void> {
@@ -321,10 +358,17 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     afterPerform.soon();
   }
 
-  /** Something new for the timeline, and carat is free to talk again. */
+  /**
+   * Something new for the timeline, and carat is free to talk again. The
+   * retry timer is the user's to interrupt: they are about to bring a
+   * question of their own, so the one Esc queued is dropped and the backoff
+   * starts over.
+   */
   function userActed(): void {
     events++;
     awaitingUser = false;
+    escapes = 0;
+    cancelRetry();
   }
 
   /** Carry the action out. Returns 'partial' when a fill went in but the pick after it did not. */
@@ -382,6 +426,8 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     afterPerform.cancel();
     afterMutation.cancel();
     afterCapture.cancel();
+    cancelRetry();
+    escapes = 0;
     pending = false;
     chip.hide();
     done.clear();
@@ -434,6 +480,8 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
       lastHash = '';
       dismissed.clear();
       awaitingUser = false;
+      escapes = 0;
+      cancelRetry();
       ask('force');
     },
     clear,
