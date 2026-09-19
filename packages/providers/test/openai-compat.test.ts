@@ -255,6 +255,12 @@ describe('OpenAICompatProvider', () => {
     expect(await provider(fetchImpl).suggest(discord, { signal: new AbortController().signal })).toEqual([]);
   });
 
+  it('keeps suggest text-only: every message content is a string', async () => {
+    const fetchImpl = vi.fn(async () => completion(JSON.stringify({ suggestions: [good] })));
+    await provider(fetchImpl).suggest(req, { signal: new AbortController().signal });
+    for (const m of requestBody(fetchImpl.mock.calls[0]!).messages) expect(typeof m.content).toBe('string');
+  });
+
   it('uses json_object for baseten-style servers and no response_format in prompt mode, tolerating fences', async () => {
     const fenced = '```json\n' + JSON.stringify([good]) + '\n```';
     const fetchImpl = vi.fn(async () => completion(fenced));
@@ -264,5 +270,56 @@ describe('OpenAICompatProvider', () => {
 
     expect(await provider(fetchImpl, 'prompt').suggest(req, { signal: new AbortController().signal })).toEqual([good]);
     expect(requestBody(fetchImpl.mock.calls[1]!).response_format).toBeUndefined();
+  });
+});
+
+const image = { dataUrl: 'data:image/jpeg;base64,/9j/4AAQ', title: 'Discord | #general', host: 'discord.com' };
+
+describe('OpenAICompatProvider.transcribe', () => {
+  it('sends the screenshot as an image_url data URI part on the configured model and returns plain text', async () => {
+    const fetchImpl = vi.fn(async () => completion('alex: dinner at\n\nSeven Shores Cafe,   Friday at 6?'));
+    const out = await provider(fetchImpl).transcribe(image, { signal: new AbortController().signal });
+
+    expect(out).toBe('alex: dinner at Seven Shores Cafe, Friday at 6?');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchImpl.mock.calls[0]! as unknown as [string, RequestInit];
+    expect(url).toBe('https://api.openai.com/v1/chat/completions');
+    const body = JSON.parse(init.body as string);
+    expect(body.model).toBe('gpt-5-mini');
+    expect(body.response_format).toBeUndefined();
+    expect(body.messages[0]).toEqual({ role: 'system', content: expect.stringContaining('transcribe') });
+    const parts = body.messages[1].content as Array<Record<string, unknown>>;
+    expect(parts[0]).toEqual({ type: 'text', text: expect.stringContaining('discord.com') });
+    expect(parts[1]).toEqual({ type: 'image_url', image_url: { url: image.dataUrl, detail: 'low' } });
+  });
+
+  it('clips the transcript to a page item length', async () => {
+    const fetchImpl = vi.fn(async () => completion('x'.repeat(5000)));
+    const out = await provider(fetchImpl).transcribe(image, { signal: new AbortController().signal });
+    expect(out.length).toBe(4000);
+  });
+
+  it("returns '' for an empty or missing reply and for an abort, and rejects on HTTP errors", async () => {
+    expect(await provider(vi.fn(async () => completion('   '))).transcribe(image, { signal: new AbortController().signal })).toBe('');
+    expect(await provider(vi.fn(async () => completion(null))).transcribe(image, { signal: new AbortController().signal })).toBe('');
+
+    const never = vi.fn();
+    expect(await provider(never as unknown as typeof fetch).transcribe(image, { signal: AbortSignal.abort() })).toBe('');
+    expect(never).not.toHaveBeenCalled();
+
+    const controller = new AbortController();
+    const hang = vi.fn(
+      (_url: string | URL | Request, init?: RequestInit) =>
+        new Promise<Response>((_, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+        }),
+    );
+    const pending = provider(hang as unknown as typeof fetch).transcribe(image, { signal: controller.signal });
+    controller.abort();
+    await expect(pending).resolves.toBe('');
+
+    await expect(provider(vi.fn(async () => completion(null, 429))).transcribe(image, { signal: new AbortController().signal })).rejects.toThrow(
+      'HTTP 429',
+    );
   });
 });

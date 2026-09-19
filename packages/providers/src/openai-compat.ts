@@ -1,6 +1,17 @@
-import type { ChatMessage, ElementDescriptor, InteractSuggestion, SuggestRequest, Suggestion } from '@carat/shared';
-import { LIMITS, SUGGESTION_RESPONSE_FORMAT, SuggestionListSchema, buildMessages, isDestructiveName, isIntentDestination, verbFits } from '@carat/shared';
-import type { Provider } from './provider';
+import type { ChatMessage, ElementDescriptor, ImageInput, InteractSuggestion, SuggestRequest, Suggestion } from '@carat/shared';
+import {
+  LIMITS,
+  SUGGESTION_RESPONSE_FORMAT,
+  SuggestionListSchema,
+  TRANSCRIBE_PROMPT,
+  buildMessages,
+  isDestructiveName,
+  isIntentDestination,
+  normalizeWhitespace,
+  truncate,
+  verbFits,
+} from '@carat/shared';
+import type { VisionProvider } from './provider';
 import { sameSite } from './same-site';
 
 export type OutputMode = 'json_schema' | 'json_object' | 'prompt';
@@ -19,7 +30,18 @@ interface ChatCompletion {
   choices?: Array<{ message?: { content?: unknown } }>;
 }
 
-export class OpenAICompatProvider implements Provider {
+// Only `transcribe` sends parts; `suggest` stays on plain string content so a
+// text-only server (or provider) never sees an image_url it cannot handle.
+type ContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string; detail: 'low' | 'high' | 'auto' } };
+
+interface PartsMessage {
+  role: 'system' | 'user';
+  content: string | ContentPart[];
+}
+
+export class OpenAICompatProvider implements VisionProvider {
   readonly id: 'openai' | 'baseten';
 
   constructor(
@@ -47,7 +69,40 @@ export class OpenAICompatProvider implements Provider {
     }
   }
 
+  /**
+   * Plain text read off a screenshot, whitespace-collapsed and clipped to a
+   * page item's length. An abort or an empty reply is '' (nothing to store);
+   * transport and HTTP failures reject like `suggest`.
+   */
+  async transcribe(image: ImageInput, opts: { signal: AbortSignal }): Promise<string> {
+    if (opts.signal.aborted) return '';
+    const messages: PartsMessage[] = [
+      { role: 'system', content: TRANSCRIBE_PROMPT },
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: `Screenshot of the tab "${image.title}" on ${image.host}.` },
+          { type: 'image_url', image_url: { url: image.dataUrl, detail: 'low' } },
+        ],
+      },
+    ];
+    try {
+      const content = await this.post({ model: this.options.model, messages }, opts.signal);
+      if (typeof content !== 'string') return '';
+      return truncate(normalizeWhitespace(content), LIMITS.pageTextChars);
+    } catch (e) {
+      if (opts.signal.aborted) return '';
+      throw e;
+    }
+  }
+
   private async complete(messages: ChatMessage[], signal: AbortSignal): Promise<Parsed> {
+    const body = { model: this.options.model, messages, ...responseFormat(this.options.mode) };
+    return parseContent(await this.post(body, signal));
+  }
+
+  /** One chat completion; resolves to the first choice's raw content. */
+  private async post(body: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
     // Chrome's fetch throws "Illegal invocation" when called with a non-global
     // `this`, so never invoke it as this.fetchImpl(...).
     const { fetchImpl } = this;
@@ -57,12 +112,12 @@ export class OpenAICompatProvider implements Provider {
         'content-type': 'application/json',
         authorization: `Bearer ${this.options.apiKey}`,
       },
-      body: JSON.stringify({ model: this.options.model, messages, ...responseFormat(this.options.mode) }),
+      body: JSON.stringify(body),
       signal,
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const completion = (await res.json()) as ChatCompletion;
-    return parseContent(completion.choices?.[0]?.message?.content);
+    return completion.choices?.[0]?.message?.content;
   }
 }
 

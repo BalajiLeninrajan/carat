@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from '@carat/shared';
-import { createProvider } from '../src/provider';
-import type { OpenAICompatProvider } from '../src/openai-compat';
+import { createProvider, createSmartProvider } from '../src/provider';
+import { OpenAICompatProvider } from '../src/openai-compat';
 import { FastThenSmartProvider } from '../src/fast-then-smart';
 import { JevProvider } from '../src/jev';
 
@@ -59,5 +59,34 @@ describe('createProvider transport', () => {
     const both = createProvider({ ...DEFAULT_SETTINGS, provider: 'cloudflare', ...cf, apiKey: 'sk-x' }, fetchImpl) as FastThenSmartProvider;
     expect((both.fast as JevProvider).fetchImpl).toBe(fetchImpl);
     expect((both.smart as OpenAICompatProvider).fetchImpl).toBe(fetchImpl);
+  });
+});
+
+describe('createSmartProvider', () => {
+  it('is undefined without a network provider: the regex fallback cannot read images', () => {
+    expect(createSmartProvider({ ...DEFAULT_SETTINGS, apiKey: '' })).toBeUndefined();
+    expect(createSmartProvider({ ...DEFAULT_SETTINGS, provider: 'local', apiKey: 'sk-x' })).toBeUndefined();
+  });
+
+  it('runs on the vision model, falling back to the fast model when that is blank', () => {
+    const smart = createSmartProvider({ ...DEFAULT_SETTINGS, apiKey: 'sk-x', model: 'fast', visionModel: 'smart' }) as OpenAICompatProvider;
+    expect(smart.options.model).toBe('smart');
+    expect(smart.options.mode).toBe('json_schema');
+    expect(typeof smart.transcribe).toBe('function');
+    const blank = createSmartProvider({ ...DEFAULT_SETTINGS, apiKey: 'sk-x', model: 'fast', visionModel: '' }) as OpenAICompatProvider;
+    expect(blank.options.model).toBe('fast');
+  });
+
+  it('is the chat model behind Jev for cloudflare, never Jev itself, and nothing when there is no chat key', () => {
+    const smart = createSmartProvider({ ...DEFAULT_SETTINGS, provider: 'cloudflare', ...cf, apiKey: 'sk-x', visionModel: 'smart' }) as OpenAICompatProvider;
+    expect(smart).toBeInstanceOf(OpenAICompatProvider);
+    expect(smart.options.model).toBe('smart');
+    expect(smart.options.mode).toBe('json_schema');
+    expect(createSmartProvider({ ...DEFAULT_SETTINGS, provider: 'cloudflare', ...cf })).toBeUndefined();
+  });
+
+  it('leaves the fast provider on the fast model', () => {
+    const fast = createProvider({ ...DEFAULT_SETTINGS, apiKey: 'sk-x', model: 'fast', visionModel: 'smart' }) as OpenAICompatProvider;
+    expect(fast.options.model).toBe('fast');
   });
 });
