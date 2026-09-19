@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { Settings } from '@carat/shared';
+import type { ImageInput, Settings } from '@carat/shared';
 import { DEFAULT_SETTINGS } from '@carat/shared';
 import { ContextStore, ShotStore } from '../src/store';
 import type { StorageArea } from '../src/store';
@@ -25,7 +25,7 @@ const on: Settings = { ...DEFAULT_SETTINGS, apiKey: 'sk-test', screenshots: true
 // A 1x1 PNG.
 const PNG =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
-const TRANSCRIPT = 'alex: dinner at Seven Shores Cafe, Friday at 6? sam: sounds good, see you there';
+const TRANSCRIPT = 'alex: dinner at Seven Shores Cafe, Friday at 6? sam: sounds good, see you there Facts: Event 2026-09-18T18:00:00-04:00 Venue: Seven Shores Cafe';
 
 const cue = (over: Partial<VisionCue> = {}): VisionCue => ({
   action: 'shot',
@@ -167,8 +167,9 @@ describe('vision pipeline', () => {
     expect(await failing.shots.live()).toEqual([]);
   });
 
-  it('reads the shot when the tab is left: the image goes, a vision item stays', async () => {
+  it('reads the shot when the tab is left: the image goes, a vision item with its facts stays', async () => {
     const { vision, shots, store, transcribe } = pipeline();
+    const shotAt = Date.now();
     await vision.handle(cue(), 1);
     await vision.handle(cue({ action: 'leaving' }), 1);
     expect(vision.hasPending(other)).toBe(true);
@@ -177,14 +178,18 @@ describe('vision pipeline', () => {
     expect(vision.hasPending(other)).toBe(false);
 
     expect(transcribe).toHaveBeenCalledTimes(1);
-    const [image, opts] = transcribe.mock.calls[0] as unknown as [{ dataUrl: string; title: string; host: string }, { signal: AbortSignal }];
-    expect(image).toEqual({ dataUrl: `${PNG}#small`, title: 'Discord | #general', host: 'discord.com' });
+    const [image, opts] = transcribe.mock.calls[0] as unknown as [ImageInput, { signal: AbortSignal }];
+    expect(image).toEqual({ dataUrl: `${PNG}#small`, title: 'Discord | #general', host: 'discord.com', now: expect.any(String) });
+    // The shot's own capture time, as local ISO with offset, so "3 days ago" in the picture counts from then.
+    expect(image.now).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/);
+    expect(new Date(image.now).getTime()).toBe(Math.floor(shotAt / 1000) * 1000);
     expect(opts.signal).toBeInstanceOf(AbortSignal);
 
     const items = await store.items();
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject({ kind: 'vision', tabId: 1, origin: 'https://discord.com', path: '/channels/1' });
     expect(items[0]!.text).toBe(`Discord | #general · discord.com ${TRANSCRIPT}`);
+    expect(items[0]!.text).toContain('Facts: Event 2026-09-18T18:00:00-04:00');
     expect(await shots.live()).toEqual([]);
   });
 

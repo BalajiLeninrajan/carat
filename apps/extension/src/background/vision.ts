@@ -113,8 +113,9 @@ export function createVisionPipeline(deps: VisionDeps): VisionPipeline {
     if (!provider) return note('no-model');
     note('reading');
     const host = new URL(shot.url).host;
+    // The picture's own time, not the leave: "3 days ago" in it counts from when it was taken.
     const text = await provider.transcribe(
-      { dataUrl: shot.dataUrl, title: shot.title, host },
+      { dataUrl: shot.dataUrl, title: shot.title, host, now: isoWithOffset(shot.capturedAt) },
       { signal: AbortSignal.timeout(timeoutMs) },
     );
     if (text.length < MIN_TRANSCRIPT_CHARS) return note('short');
@@ -128,6 +129,18 @@ export function createVisionPipeline(deps: VisionDeps): VisionPipeline {
     hasPending: (requester) => [...inflight.keys()].some((id) => id !== requester.tabId),
     settled: () => Promise.all(inflight.values()).then(() => undefined),
   };
+}
+
+/** Local time as ISO 8601 with the zone offset, the form the prompts promise the model. */
+export function isoWithOffset(ms: number): string {
+  const d = new Date(ms);
+  const pad = (n: number) => String(Math.abs(n)).padStart(2, '0');
+  const offset = -d.getTimezoneOffset();
+  const sign = offset < 0 ? '-' : '+';
+  return (
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}` +
+    `${sign}${pad(Math.trunc(offset / 60))}:${pad(offset % 60)}`
+  );
 }
 
 function hostOf(url: string): string {

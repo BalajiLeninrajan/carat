@@ -175,11 +175,13 @@ export interface Settings {
   smartModel: string;
 }
 
-/** A downscaled screenshot handed to a vision model, plus where it came from. */
+/** A downscaled screenshot handed to the smart model, plus where and when it was taken. */
 export interface ImageInput {
   dataUrl: string; // data:image/jpeg;base64,...
   title: string;
   host: string;
+  /** Time of the capture, ISO 8601 with offset; relative dates in the picture are resolved against it. */
+  now: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {

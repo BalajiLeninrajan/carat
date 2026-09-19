@@ -273,7 +273,26 @@ describe('OpenAICompatProvider', () => {
   });
 });
 
-const image = { dataUrl: 'data:image/jpeg;base64,/9j/4AAQ', title: 'Discord | #general', host: 'discord.com' };
+const image = { dataUrl: 'data:image/jpeg;base64,/9j/4AAQ', title: 'Discord | #general', host: 'discord.com', now: '2026-09-16T14:04:00-04:00' };
+
+// What the smart model is asked to write for an Instagram post seen three days after it went up.
+const INSTAGRAM_POST = {
+  image: { dataUrl: 'data:image/jpeg;base64,/9j/4BBQ', title: 'Instagram', host: 'www.instagram.com', now: '2026-09-19T10:30:00-04:00' },
+  reply: [
+    'sevenshorescafe',
+    'Night market pop-up this Saturday 6 to 11pm, 10 Regina St N. $8 plates.',
+    '3 days ago',
+    '',
+    'Facts:',
+    'Posted 2026-09-16',
+    'Event 2026-09-26T18:00:00-04:00 to 2026-09-26T23:00:00-04:00',
+    'Venue: Seven Shores Cafe',
+    'Address: 10 Regina St N',
+    'Handle: @sevenshorescafe',
+    'Price: $8 per plate',
+    'Poster: Night Market, Sat 6pm, Seven Shores Cafe',
+  ].join('\n'),
+};
 
 describe('OpenAICompatProvider.transcribe', () => {
   it('sends the screenshot as an image_url data URI part on the configured model and returns plain text', async () => {
@@ -287,10 +306,28 @@ describe('OpenAICompatProvider.transcribe', () => {
     const body = JSON.parse(init.body as string);
     expect(body.model).toBe('gpt-5-mini');
     expect(body.response_format).toBeUndefined();
-    expect(body.messages[0]).toEqual({ role: 'system', content: expect.stringContaining('transcribe') });
+    expect(body.messages[0]).toEqual({ role: 'system', content: expect.stringContaining('Facts:') });
     const parts = body.messages[1].content as Array<Record<string, unknown>>;
     expect(parts[0]).toEqual({ type: 'text', text: expect.stringContaining('discord.com') });
     expect(parts[1]).toEqual({ type: 'image_url', image_url: { url: image.dataUrl, detail: 'low' } });
+  });
+
+  it('hands the model the capture time with the image, and keeps the Facts block it writes back', async () => {
+    const fetchImpl = vi.fn(async () => completion(INSTAGRAM_POST.reply));
+    const out = await provider(fetchImpl).transcribe(INSTAGRAM_POST.image, { signal: new AbortController().signal });
+
+    const parts = requestBody(fetchImpl.mock.calls[0]!).messages[1]!.content as unknown as Array<Record<string, unknown>>;
+    expect(parts).toHaveLength(2);
+    expect(parts[0]).toEqual({ type: 'text', text: expect.stringContaining('now: 2026-09-19T10:30:00-04:00') });
+    expect(parts[0]!.text).toContain('www.instagram.com');
+    expect(parts[0]!.text).toContain('"Instagram"');
+    expect(parts[1]).toEqual({ type: 'image_url', image_url: { url: INSTAGRAM_POST.image.dataUrl, detail: 'low' } });
+
+    // One line, page-item sized, with the resolved facts still in it: this is what the context store gets.
+    expect(out).toContain('3 days ago Facts: Posted 2026-09-16 Event 2026-09-26T18:00:00-04:00');
+    expect(out).toContain('Poster: Night Market, Sat 6pm, Seven Shores Cafe');
+    expect(out).not.toContain('\n');
+    expect(out.length).toBeLessThanOrEqual(4000);
   });
 
   it('clips the transcript to a page item length', async () => {

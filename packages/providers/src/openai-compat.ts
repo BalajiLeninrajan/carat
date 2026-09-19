@@ -70,9 +70,11 @@ export class OpenAICompatProvider implements VisionProvider {
   }
 
   /**
-   * Plain text read off a screenshot, whitespace-collapsed and clipped to a
-   * page item's length. An abort or an empty reply is '' (nothing to store);
-   * transport and HTTP failures reject like `suggest`.
+   * The visible text of a screenshot plus a `Facts:` block (dates resolved
+   * against `image.now`, places, addresses, people, prices, what any inner
+   * image shows), whitespace-collapsed and clipped to a page item's length.
+   * An abort or an empty reply is '' (nothing to store); transport and HTTP
+   * failures reject like `suggest`.
    */
   async transcribe(image: ImageInput, opts: { signal: AbortSignal }): Promise<string> {
     if (opts.signal.aborted) return '';
@@ -81,7 +83,7 @@ export class OpenAICompatProvider implements VisionProvider {
       {
         role: 'user',
         content: [
-          { type: 'text', text: `Screenshot of the tab "${image.title}" on ${image.host}.` },
+          { type: 'text', text: `Screenshot of the tab "${image.title}" on ${image.host}. now: ${image.now}` },
           { type: 'image_url', image_url: { url: image.dataUrl, detail: 'low' } },
         ],
       },
