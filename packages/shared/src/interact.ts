@@ -1,3 +1,6 @@
+import { isMoneyName } from './destructive';
+import type { Eagerness } from './eagerness';
+import { EAGERNESS } from './eagerness';
 import type { ElementDescriptor, ElementRole, InteractVerb } from './types';
 
 /**
@@ -11,6 +14,7 @@ export const VERBS_BY_ROLE: Record<ElementRole, readonly InteractVerb[]> = {
   tab: ['click'],
   menuitem: ['click'],
   disclosure: ['click'],
+  option: ['click'],
   checkbox: ['check', 'uncheck'],
   switch: ['check', 'uncheck'],
   radio: ['check'],
@@ -21,7 +25,43 @@ export const VERBS_BY_ROLE: Record<ElementRole, readonly InteractVerb[]> = {
 export const ELEMENT_ROLES = Object.keys(VERBS_BY_ROLE) as ElementRole[];
 
 /** Roles whose value or state another tab's text can name; a plain button only gets a chip after carat filled something. */
-export const CONTROL_ROLES: ReadonlySet<ElementRole> = new Set(['checkbox', 'switch', 'radio', 'slider', 'select']);
+export const CONTROL_ROLES: ReadonlySet<ElementRole> = new Set(['checkbox', 'switch', 'radio', 'slider', 'select', 'option']);
+
+// The first word (or two) of a button that moves a flow forward rather than committing a payment.
+const PRIMARY_ACTION =
+  /^(?:search|continue|next|select|choose|proceed|review|book|apply|done|save|create|find|explore|get started|confirm (?:details|selection|and continue))(?![a-z0-9])/;
+const PRIMARY_NAME_MAX = 40;
+
+/** A name like Search, Continue, Next, Select flight, Review trip, Book: what a page's primary action is usually called. Book now is money, not this. */
+export function isPrimaryActionName(name: string): boolean {
+  const n = name.replace(/\s+/g, ' ').trim().toLowerCase();
+  return n.length > 0 && n.length <= PRIMARY_NAME_MAX && PRIMARY_ACTION.test(n) && !isMoneyName(n);
+}
+
+/** What decides whether a button or link may be clicked. */
+export interface ClickGate {
+  /** Carat filled something on this page in the last minute. */
+  filled: boolean;
+  /** A stored task marks this page as a step in an ongoing flow. */
+  flow: boolean;
+  eagerness: Eagerness;
+  /** The page still has an empty field carat could fill. */
+  fillable: boolean;
+}
+
+/**
+ * Whether a button or link may be clicked at all (other roles always may).
+ * After a fill, any button the model names. Otherwise only the page's primary
+ * action with a continue-style name, and only when a flow is under way or, at
+ * a level that allows it, when nothing on the page is left to fill.
+ */
+export function clickAllowed(d: Pick<ElementDescriptor, 'r' | 'nm' | 'p'>, gate: ClickGate): boolean {
+  if (d.r !== 'button' && d.r !== 'link') return true;
+  if (gate.filled) return true;
+  if (d.p !== 1 || !isPrimaryActionName(d.nm)) return false;
+  if (gate.flow) return true;
+  return EAGERNESS[gate.eagerness].primaryWithoutFill && !gate.fillable;
+}
 
 export function isElementRole(v: unknown): v is ElementRole {
   return typeof v === 'string' && v in VERBS_BY_ROLE;
@@ -50,6 +90,8 @@ export function impliedVerb(d: ElementDescriptor): Exclude<InteractVerb, 'scroll
     case 'menuitem':
     case 'disclosure':
       return 'click';
+    case 'option':
+      return d.sel === 1 ? null : 'click';
     case 'radio':
       return 'check';
     case 'checkbox':
@@ -85,7 +127,8 @@ export function verbFits(d: ElementDescriptor, verb: InteractVerb, value: string
     case 'choose':
       return d.op === undefined || d.op.some((o) => o.toLowerCase() === value.trim().toLowerCase());
     case 'click':
-      return true;
+      // An option card that is already chosen has nothing left to click.
+      return d.r !== 'option' || d.sel !== 1;
   }
 }
 
@@ -95,11 +138,11 @@ export interface ChipText {
   tail: string; // " to 40", or ""
 }
 
-/** The words on the chip: `Click "Save"`, `Check "Vegetarian"`, `Set "Volume" to 40`, `Choose "Canada"`, `Scroll to "Save"`. */
-export function interactionChipText(verb: InteractVerb, name: string, value: string): ChipText {
+/** The words on the chip: `Click "Save"`, `Select "7:00 AM Air Canada"`, `Check "Vegetarian"`, `Set "Volume" to 40`, `Choose "Canada"`, `Scroll to "Save"`. */
+export function interactionChipText(verb: InteractVerb, name: string, value: string, role?: ElementRole): ChipText {
   switch (verb) {
     case 'click':
-      return { verb: 'Click', value: name, tail: '' };
+      return { verb: role === 'option' ? 'Select' : 'Click', value: name, tail: '' };
     case 'scroll':
       return { verb: 'Scroll to', value: name, tail: '' };
     case 'check':

@@ -30,6 +30,7 @@ export interface FieldDescriptor {
   f?: 1; // focused
   w?: 's' | 'm' | 'l'; // width bucket
   o?: 1; // off-screen: outside the viewport when the snapshot was taken
+  fr?: number; // inside a child frame: the top frame's number for it
 }
 
 /** Roles carat can act on. Derived from the tag, the input type or an explicit ARIA role; nothing else is described. */
@@ -43,7 +44,8 @@ export type ElementRole =
   | 'select'
   | 'tab'
   | 'menuitem'
-  | 'disclosure';
+  | 'disclosure'
+  | 'option';
 
 /**
  * One interactive element, as the model sees it. No coordinates, no DOM: a
@@ -63,6 +65,9 @@ export interface ElementDescriptor {
   nb?: string; // nearby text, <= 80
   p?: 1; // the page's primary action (submit button, or styled as primary)
   o?: 1; // off-screen: outside the viewport when the snapshot was taken
+  sel?: 1; // an option card that is already the chosen one
+  m?: 1; // moves money (Pay, Book now): described only when payments are allowed, accepted with Enter
+  fr?: number; // inside a child frame: the top frame's number for it
 }
 
 export interface PageMeta {
@@ -85,6 +90,8 @@ export interface SuggestRequest {
   context: RequestContext;
   /** Text captured from the requesting tab itself: a source for actions, never for fills. Omitted when empty. */
   own?: RequestContext;
+  /** A stored task marks this page as a step in an ongoing flow, so its primary action may be clicked. Omitted when false. */
+  flow?: true;
   now: string; // ISO
   locale?: string;
 }
@@ -189,6 +196,11 @@ export interface Settings {
    * value; `conservative` only sure ones. See EAGERNESS for what each moves.
    */
   eagerness: Eagerness;
+  /**
+   * Controls that pay, buy or book may be offered. Off by default. When on,
+   * their chip is accepted with Enter, never Tab. See `mayPay`.
+   */
+  allowPayments: boolean;
 }
 
 /**
@@ -222,6 +234,7 @@ export const DEFAULT_SETTINGS: Settings = {
   screenshots: false,
   smartModel: '',
   eagerness: DEFAULT_EAGERNESS,
+  allowPayments: false,
 };
 
 export const LIMITS = {

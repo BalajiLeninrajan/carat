@@ -19,12 +19,14 @@ export interface EagernessKnobs {
   sameOriginContext: boolean;
   /** The regex provider also offers bare capitalised names and lowercase quoted strings for search and title fields. */
   looseNames: boolean;
+  /** The page's primary continue-style button may be offered with no prior fill, when there is no empty field to fill instead. */
+  primaryWithoutFill: boolean;
 }
 
 export const EAGERNESS: Record<Eagerness, EagernessKnobs> = {
-  conservative: { minConfidence: 0.7, jevGateMin: 0.6, maxSuggestions: 2, sameOriginContext: false, looseNames: false },
-  balanced: { minConfidence: 0.55, jevGateMin: 0.5, maxSuggestions: 2, sameOriginContext: false, looseNames: false },
-  eager: { minConfidence: 0.35, jevGateMin: 0.25, maxSuggestions: 4, sameOriginContext: true, looseNames: true },
+  conservative: { minConfidence: 0.7, jevGateMin: 0.6, maxSuggestions: 2, sameOriginContext: false, looseNames: false, primaryWithoutFill: false },
+  balanced: { minConfidence: 0.55, jevGateMin: 0.5, maxSuggestions: 2, sameOriginContext: false, looseNames: false, primaryWithoutFill: false },
+  eager: { minConfidence: 0.35, jevGateMin: 0.25, maxSuggestions: 4, sameOriginContext: true, looseNames: true, primaryWithoutFill: true },
 };
 
 export const DEFAULT_EAGERNESS: Eagerness = 'eager';
@@ -33,7 +35,7 @@ export const DEFAULT_EAGERNESS: Eagerness = 'eager';
 export const EAGERNESS_HELP: Record<Eagerness, string> = {
   conservative: 'Only sure values, and only from other sites. No suggestion beats a wrong one.',
   balanced: 'Likely values. Two chips per answer, nothing from another tab on the same site.',
-  eager: 'Any plausible value, up to four chips per answer, other tabs on the same site included. A wrong chip costs one Esc.',
+  eager: "Any plausible value, up to four chips per answer, other tabs on the same site included, and the page's Continue or Search button once there is nothing left to fill. A wrong chip costs one Esc.",
 };
 
 export function isEagerness(v: unknown): v is Eagerness {
