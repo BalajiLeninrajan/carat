@@ -59,13 +59,14 @@ export function scoreAndPickContext(items: ContextItem[], requester: Requester, 
 }
 
 /**
- * What the requesting tab itself holds: the fresh page item and the best
- * selection, clipped to 2000 chars. The only source for actions.
+ * What the requesting tab itself holds: the fresh page item, any transcript
+ * read off its screenshot, and the best selection, clipped to 2000 chars.
+ * The only source for actions.
  */
 export function ownContext(items: ContextItem[], requester: Requester, now: number = Date.now()): RequestContext {
   if (requester.tabId === undefined) return [];
   const own = items.filter((i) => i.tabId === requester.tabId && now - i.lastSeenAt < FRESH_MS);
-  const page = own.filter((i) => i.kind === 'page');
+  const page = own.filter((i) => i.kind === 'page' || i.kind === 'vision');
   const selections = rank(own.filter((i) => i.kind === 'selection'), now, 1);
   return clip(rank([...page, ...selections], now, OWN_LIMITS.maxItems), OWN_LIMITS.maxChars);
 }

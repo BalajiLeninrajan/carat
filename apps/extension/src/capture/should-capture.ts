@@ -6,14 +6,19 @@ const MIN_CHARS = 40;
 
 export type CaptureLocation = Pick<Location, 'protocol' | 'hostname'>;
 
-/**
- * Whether this page's text may be stored at all. `text` is the already
- * collected body text when the caller has it; otherwise it is collected here.
- */
-export function shouldCapture(doc: Document, location: CaptureLocation, text?: string): boolean {
+/** Whether anything from this page, text or pixels, may leave it at all. */
+export function mayCapture(doc: Document, location: CaptureLocation): boolean {
   if (location.protocol !== 'http:' && location.protocol !== 'https:') return false;
   if (isDenylisted(location.hostname)) return false;
-  if (hasVisiblePasswordField(doc)) return false;
+  return !hasVisiblePasswordField(doc);
+}
+
+/**
+ * Whether this page's text may be stored. `text` is the already collected
+ * body text when the caller has it; otherwise it is collected here.
+ */
+export function shouldCapture(doc: Document, location: CaptureLocation, text?: string): boolean {
+  if (!mayCapture(doc, location)) return false;
   return (text ?? collectVisibleText(doc)).length >= MIN_CHARS;
 }
 

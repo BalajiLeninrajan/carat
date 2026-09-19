@@ -1,5 +1,5 @@
 import type { ElementDescriptor, FieldDescriptor } from '@carat/shared';
-import { interactionChipText } from '@carat/shared';
+import { interactionChipText, mergeSuggestions } from '@carat/shared';
 import type { Chip } from '../chip';
 import { isTextEntry } from '../chip/keys';
 import { fillElement, resolveTarget } from '../fill';
@@ -12,6 +12,7 @@ import { enumerateFields, valueOf } from '../snapshot';
 import type { ScriptContext } from './context';
 import { debounce } from './context';
 import { pageMeta } from './page-meta';
+import type { PageState } from './page-state';
 import { send } from './send';
 
 export const SNAPSHOT_TIMING = {
@@ -28,6 +29,10 @@ interface LastSnapshot {
   suggestions: SuggestionView[];
   navigation: NavigationView[];
   interactions: InteractionView[];
+  /** Fields (`f|id`) and elements (`e|id`) the user accepted or dismissed under this snapshot; a late smart answer leaves them alone. */
+  settled: Set<string>;
+  /** A chip has been shown under this snapshot. */
+  shown: boolean;
 }
 
 interface Registries {
@@ -37,6 +42,18 @@ interface Registries {
 
 type Answer = Pick<LastSnapshot, 'suggestions' | 'navigation' | 'interactions'>;
 const EMPTY: Answer = { suggestions: [], navigation: [], interactions: [] };
+
+/** The chip on screen right now, enough to put a surer value in the same place. */
+type Shown =
+  | { kind: 'fill'; id: string; suggestion: SuggestionView; interceptFrom: Element | null }
+  | { kind: 'interact'; id: string; suggestion: InteractionView; interceptFrom: Element | null }
+  | { kind: 'nav' };
+
+interface PresentOptions {
+  /** Keep the chip on this field or element rather than picking afresh; used when only its value changes. */
+  prefer?: string;
+  interceptFrom?: Element | null;
+}
 
 export interface SuggestionsHandle {
   /** The page's own text changed; ask again unless a chip is already up. */
@@ -53,19 +70,27 @@ export interface RequestObserver {
   onAnswer?(): void;
 }
 
+export interface SuggestOptions extends RequestObserver {
+  /** Shared with the capture scheduler: the first chip here marks this the page being filled. */
+  page?: PageState;
+}
+
 export function startSuggestions(
   ctx: ScriptContext,
   chip: Chip,
   doc: Document = document,
-  observer: RequestObserver = {},
+  opts: SuggestOptions = {},
 ): SuggestionsHandle {
   const win = doc.defaultView;
   if (!win) return NO_HANDLE;
+  const { page } = opts;
+  const observer: RequestObserver = opts;
 
   let last: LastSnapshot | null = null;
   let seq = 0;
   // The field carat just filled keeps focus; the next chip must still take Tab from it.
   let justFilled: Element | null = null;
+  let shown: Shown | null = null;
   // Elements already acted on in this page load (`role|name`); never offered twice.
   const done = new Set<string>();
 
@@ -93,13 +118,66 @@ export function startSuggestions(
       ...(elements.descriptors.length > 0 ? { elements: elements.descriptors } : {}),
       ...(force ? { force: true } : {}),
     });
+    // The fast answer is the answer as far as the status line is concerned; the smart pass is silent.
     observer.onAnswer?.();
     // A newer snapshot owns the chip now; this answer describes fields that may be gone.
     if (mine !== seq || !ctx.isValid) return;
-    last = { key, at: now, suggestions: res?.suggestions ?? [], navigation: res?.navigation ?? [], interactions: res?.interactions ?? [] };
-    present(last, descriptors, registries);
+    const current: LastSnapshot = {
+      key,
+      at: now,
+      suggestions: res?.suggestions ?? [],
+      navigation: res?.navigation ?? [],
+      interactions: res?.interactions ?? [],
+      settled: new Set(),
+      shown: false,
+    };
+    last = current;
+    present(current, descriptors, registries);
+    // The smart answer is fetched after the chip is up, never before.
+    if (res?.ticket) void refine(res.ticket, current, mine, descriptors, registries);
   };
   const snapshotSoon = debounce(ctx, () => void snapshot(), SNAPSHOT_TIMING.debounceMs);
+
+  /**
+   * Fold a late smart answer in without a visible step backwards. A chip that
+   * is up only ever changes value, to something the model was surer of, and
+   * never jumps to another field or element; a corner chip is left alone. A
+   * chip appears from a smart answer only when the fast one showed nothing at
+   * all. A field the user settled stays settled, and anything the user typed
+   * meanwhile makes the answer stale. The merged answer is kept either way,
+   * so the next Tab or focus can use it.
+   */
+  async function refine(
+    ticket: string,
+    snap: LastSnapshot,
+    mine: number,
+    descriptors: FieldDescriptor[],
+    registries: Registries,
+  ): Promise<void> {
+    const res = await send('suggestRefine', { ticket });
+    if (!ctx.isValid || mine !== seq || last !== snap) return;
+    const fills = (res?.suggestions ?? []).filter((s) => !snap.settled.has(`f|${s.fieldId}`));
+    const interactions = (res?.interactions ?? []).filter((s) => !snap.settled.has(`e|${s.elementId}`));
+    if (fills.length === 0 && interactions.length === 0) return;
+    snap.suggestions = mergeSuggestions(snap.suggestions, fills);
+    snap.interactions = mergeSuggestions(snap.interactions, interactions);
+    const cur = shown;
+    if (chip.visible && cur) {
+      if (cur.kind === 'fill') {
+        const better = snap.suggestions.find((s) => s.fieldId === cur.id);
+        if (better && better !== cur.suggestion) {
+          presentFill(snap.suggestions, descriptors, registries, { prefer: cur.id, interceptFrom: cur.interceptFrom });
+        }
+      } else if (cur.kind === 'interact') {
+        const better = snap.interactions.find((s) => s.elementId === cur.id);
+        if (better && better !== cur.suggestion) {
+          presentInteract(snap.interactions, registries.elements, { prefer: cur.id, interceptFrom: cur.interceptFrom });
+        }
+      }
+      return;
+    }
+    if (!snap.shown && snap.settled.size === 0) present(snap, descriptors, registries);
+  }
 
   // A field chip wins, then a chip on an element; the corner chip only appears when there is nothing on the page to act on.
   function present(answer: Answer, descriptors: FieldDescriptor[], registries: Registries): void {
@@ -108,11 +186,27 @@ export function startSuggestions(
     presentNav(answer.navigation);
   }
 
-  function presentFill(suggestions: SuggestionView[], descriptors: FieldDescriptor[], registries: Registries): boolean {
+  /** From here on this is the page being filled: no picture of it, ever. */
+  function markFilling(): void {
+    if (last) last.shown = true;
+    if (page && !page.filling) {
+      page.filling = true;
+      void send('vision', { action: 'filling', url: doc.location.href, title: doc.title, bodyChars: 0 });
+    }
+  }
+
+  function presentFill(
+    suggestions: SuggestionView[],
+    descriptors: FieldDescriptor[],
+    registries: Registries,
+    opts: PresentOptions = {},
+  ): boolean {
     const registry = registries.fields;
     const byField = new Map(suggestions.map((s) => [s.fieldId, s] as const));
     const pick =
-      descriptors.find((d) => d.f === 1 && byField.has(d.i)) ?? descriptors.find((d) => byField.has(d.i));
+      (opts.prefer !== undefined && byField.has(opts.prefer) ? descriptors.find((d) => d.i === opts.prefer) : undefined) ??
+      descriptors.find((d) => d.f === 1 && byField.has(d.i)) ??
+      descriptors.find((d) => byField.has(d.i));
     const entry = pick && registry.get(pick.i);
     if (!pick || !entry || !entry.el.isConnected) return false;
     const suggestion = byField.get(pick.i)!;
@@ -121,7 +215,9 @@ export function startSuggestions(
     // The snapshot saw an empty field; the user (or a Maps redirect) may have filled it since.
     if (valueOf(target)) return false;
     const forget = (): void => {
-      if (last) last.suggestions = last.suggestions.filter((s) => s !== suggestion);
+      if (!last) return;
+      last.suggestions = last.suggestions.filter((s) => s !== suggestion);
+      last.settled.add(`f|${suggestion.fieldId}`);
     };
     const feedback = (accepted: boolean): void => {
       void send('feedback', {
@@ -132,13 +228,14 @@ export function startSuggestions(
         host,
       });
     };
+    const interceptFrom = 'interceptFrom' in opts ? (opts.interceptFrom ?? null) : justFilled;
 
     chip.show({
       target,
       value: suggestion.value,
       ...(suggestion.source ? { detail: describeSource(suggestion.source, doc.location.host) } : {}),
       ...(suggestion.reason ? { reason: suggestion.reason } : {}),
-      interceptFrom: justFilled,
+      interceptFrom,
       onAccept() {
         justFilled = null;
         if (valueOf(target) || !fillElement(target, suggestion.value, host)) return;
@@ -157,7 +254,9 @@ export function startSuggestions(
         feedback(false);
       },
     });
+    shown = { kind: 'fill', id: pick.i, suggestion, interceptFrom };
     justFilled = null;
+    markFilling();
     return true;
   }
 
@@ -166,21 +265,31 @@ export function startSuggestions(
    * `Click "Save"?`; Tab performs it once and asks for a fresh snapshot, since
    * the page usually changes. Nothing is chained onto it.
    */
-  function presentInteract(interactions: InteractionView[], registry: Map<string, ElementEntry>): boolean {
-    const pick = interactions.find((s) => {
+  function presentInteract(
+    interactions: InteractionView[],
+    registry: Map<string, ElementEntry>,
+    opts: PresentOptions = {},
+  ): boolean {
+    const fits = (s: InteractionView): boolean => {
       const entry = registry.get(s.elementId);
       return !!entry && !done.has(entry.key) && stillFits(entry.el, s.verb);
-    });
+    };
+    const pick =
+      (opts.prefer !== undefined ? interactions.find((s) => s.elementId === opts.prefer && fits(s)) : undefined) ??
+      interactions.find(fits);
     const entry = pick && registry.get(pick.elementId);
     if (!pick || !entry) return false;
     const host = doc.location.host;
     const text = interactionChipText(pick.verb, entry.name, pick.value);
     const forget = (): void => {
-      if (last) last.interactions = last.interactions.filter((s) => s !== pick);
+      if (!last) return;
+      last.interactions = last.interactions.filter((s) => s !== pick);
+      last.settled.add(`e|${pick.elementId}`);
     };
     const feedback = (accepted: boolean): void => {
       void send('feedback', { kind: 'interact', host, role: entry.role, name: entry.name, accepted });
     };
+    const interceptFrom = 'interceptFrom' in opts ? (opts.interceptFrom ?? null) : justFilled;
 
     chip.show({
       target: entry.el,
@@ -189,7 +298,7 @@ export function startSuggestions(
       tail: text.tail,
       ...(pick.source ? { detail: describeSource(pick.source, host) } : {}),
       ...(pick.reason ? { reason: pick.reason } : {}),
-      interceptFrom: justFilled,
+      interceptFrom,
       onAccept() {
         justFilled = null;
         forget();
@@ -204,10 +313,13 @@ export function startSuggestions(
         feedback(false);
       },
     });
+    shown = { kind: 'interact', id: pick.elementId, suggestion: pick, interceptFrom };
     justFilled = null;
+    markFilling();
     return true;
   }
 
+  // A corner chip does not make this the page being filled: it is the source page, and may still be photographed.
   function presentNav(navigation: NavigationView[]): void {
     const nav = navigation[0];
     if (!nav) {
@@ -237,6 +349,8 @@ export function startSuggestions(
         feedback(false);
       },
     });
+    shown = { kind: 'nav' };
+    if (last) last.shown = true;
   }
 
   ctx.setTimeout(() => void snapshot(), SNAPSHOT_TIMING.initialMs);
@@ -253,6 +367,7 @@ export function startSuggestions(
   ctx.addEventListener(win, 'wxt:locationchange', () => {
     last = null;
     done.clear();
+    if (page) page.filling = false;
     chip.hide();
     snapshotSoon();
   });

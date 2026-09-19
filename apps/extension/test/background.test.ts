@@ -8,6 +8,7 @@ import type { StorageArea } from '../src/store';
 import type { SuggestDiag } from '../src/background';
 import {
   DiagLog,
+  RefineQueue,
   explainGate,
   fingerprintMatchesDescriptor,
   gate,
@@ -550,6 +551,153 @@ describe('orchestrate', () => {
     expect(Date.now() - started).toBeLessThan(50 * 2 + 400);
     expect(local.calls).toBe(1);
     expect(res.suggestions).toEqual([]);
+  });
+});
+
+const smartOn: Settings = { ...enabled, screenshots: true };
+const idle = { hasPending: () => false, settled: async () => undefined };
+const tick = () => new Promise((r) => setTimeout(r, 0));
+
+describe('orchestrate smart path', () => {
+  it('issues the fast request without waiting on any vision work', async () => {
+    const { store, ctxId, now } = await seeded();
+    const order: string[] = [];
+    const fast = fakeProvider('openai', async () => {
+      order.push('fast');
+      return [suggestion({ sourceContextId: ctxId, confidence: 0.8 })];
+    });
+    const smart = fakeProvider('openai', () => {
+      order.push('smart');
+      return new Promise(() => undefined); // hangs for good
+    });
+    let settle!: () => void;
+    const vision = { hasPending: () => true, settled: () => new Promise<void>((r) => (settle = r)) };
+    const refine = new RefineQueue(() => undefined);
+
+    const started = performance.now();
+    const res = await orchestrate(maps, requester, {
+      store,
+      settings: async () => smartOn,
+      createProvider: () => fast,
+      createSmartProvider: () => smart,
+      refine,
+      vision,
+      now,
+      smartTimeoutMs: 1000,
+    });
+    const elapsed = performance.now() - started;
+
+    expect(res.suggestions.map((s) => s.value)).toEqual(['Seven Shores Cafe']);
+    expect(typeof res.ticket).toBe('string');
+    expect(elapsed).toBeLessThan(100);
+    // The smart model has not even been asked: it is waiting on the transcription, which the fast reply did not.
+    expect(order).toEqual(['fast']);
+
+    settle();
+    expect(await refine.claim(res.ticket!, requester.tabId)).toEqual({ suggestions: [], interactions: [] }); // hung past its own budget
+    expect(order).toEqual(['fast', 'smart']);
+  });
+
+  it('lets a surer smart answer replace the fast one, and serves the merged answer from cache afterwards', async () => {
+    const { store, ctxId, now } = await seeded();
+    const fast = fakeProvider('openai', async () => [suggestion({ sourceContextId: ctxId, confidence: 0.75, value: 'Seven Shores' })]);
+    const smart = fakeProvider('openai', async () => [suggestion({ sourceContextId: ctxId, confidence: 0.92, value: 'Seven Shores Cafe' })]);
+    const refine = new RefineQueue(() => undefined);
+    const deps = { store, settings: async () => smartOn, createProvider: () => fast, createSmartProvider: () => smart, refine, vision: idle, now };
+
+    const first = await orchestrate(maps, requester, deps);
+    expect(first.suggestions.map((s) => s.value)).toEqual(['Seven Shores']);
+    expect(await refine.claim(first.ticket!, requester.tabId)).toEqual({
+      suggestions: [expect.objectContaining({ value: 'Seven Shores Cafe', confidence: 0.92 })],
+      interactions: [],
+    });
+
+    const second = await orchestrate(maps, requester, deps);
+    expect(second.suggestions.map((s) => s.value)).toEqual(['Seven Shores Cafe']);
+    expect(second.ticket).toBeUndefined();
+    expect(fast.calls).toBe(1);
+    expect(smart.calls).toBe(1);
+  });
+
+  it('keeps the fast answer when the smart one is no surer', async () => {
+    const { store, ctxId, now } = await seeded();
+    const fast = fakeProvider('openai', async () => [suggestion({ sourceContextId: ctxId, confidence: 0.8, value: 'Seven Shores Cafe' })]);
+    const smart = fakeProvider('openai', async () => [suggestion({ sourceContextId: ctxId, confidence: 0.8, value: 'Other' })]);
+    const refine = new RefineQueue(() => undefined);
+    const res = await orchestrate(maps, requester, {
+      store,
+      settings: async () => smartOn,
+      createProvider: () => fast,
+      createSmartProvider: () => smart,
+      refine,
+      vision: idle,
+      now,
+    });
+    expect((await refine.claim(res.ticket!, requester.tabId)).suggestions.map((s) => s.value)).toEqual(['Seven Shores Cafe']);
+  });
+
+  it('answers from a screenshot the fast path could not wait for', async () => {
+    let clock = NOW;
+    const store = new ContextStore(new FakeArea(), { now: () => clock });
+    const fast = fakeProvider('openai', async () => [suggestion()]);
+    const smart = fakeProvider('openai', async (req) => [suggestion({ sourceContextId: req.context[0]!.id, confidence: 0.88 })]);
+    const vision = {
+      hasPending: () => true,
+      settled: async () => {
+        await store.upsertVision({
+          tabId: 1,
+          url: 'https://discord.com/channels/1',
+          title: 'Discord',
+          text: 'Discord · discord.com alex: dinner at Seven Shores Cafe, Friday at 6?',
+        });
+      },
+    };
+    const refine = new RefineQueue(() => undefined);
+    const res = await orchestrate(maps, requester, {
+      store,
+      settings: async () => smartOn,
+      createProvider: () => fast,
+      createSmartProvider: () => smart,
+      refine,
+      vision,
+      now: () => clock,
+    });
+    expect(res.suggestions).toEqual([]);
+    expect(fast.calls).toBe(0);
+    expect(typeof res.ticket).toBe('string');
+
+    const out = await refine.claim(res.ticket!, requester.tabId);
+    const [item] = await store.items();
+    expect(item?.kind).toBe('vision');
+    expect(out.suggestions).toEqual([expect.objectContaining({ fieldId: 'f0', sourceContextId: item!.id })]);
+    expect(smart.calls).toBe(1);
+  });
+
+  it('makes no smart call when it cannot help', async () => {
+    const { store, ctxId, now } = await seeded();
+    const sure = fakeProvider('openai', async () => [suggestion({ sourceContextId: ctxId, confidence: 0.95 })]);
+    const unsure = fakeProvider('openai', async () => [suggestion({ sourceContextId: ctxId, confidence: 0.75 })]);
+    const smart = fakeProvider('openai', async () => [suggestion({ sourceContextId: ctxId, confidence: 0.99, value: 'Other' })]);
+    const refine = new RefineQueue(() => undefined);
+    const base = { store, createProvider: () => unsure, createSmartProvider: () => smart, refine, vision: idle, now };
+    const fields = (nm: string) => ({ ...maps, fields: [{ i: 'f0', t: 'input:text', nm }] });
+
+    // screenshots off
+    expect((await orchestrate(fields('a'), requester, { ...base, settings: async () => enabled })).ticket).toBeUndefined();
+    // the fast answer is already sure
+    expect((await orchestrate(fields('b'), requester, { ...base, createProvider: () => sure, settings: async () => smartOn })).ticket).toBeUndefined();
+    // no smart provider (local, or no key)
+    expect((await orchestrate(fields('c'), requester, { ...base, createSmartProvider: () => undefined, settings: async () => smartOn })).ticket).toBeUndefined();
+    // the smart path is not wired at all
+    expect((await orchestrate(fields('d'), requester, { ...base, refine: undefined, settings: async () => smartOn })).ticket).toBeUndefined();
+    // no context and nothing on its way
+    expect(await orchestrate(fields('e'), { tabId: 1, origin: 'https://discord.com' }, { ...base, settings: async () => smartOn })).toEqual({
+      suggestions: [],
+      navigation: [],
+      interactions: [],
+    });
+    expect(smart.calls).toBe(0);
+    await tick();
   });
 });
 

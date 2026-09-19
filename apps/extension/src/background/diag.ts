@@ -15,6 +15,35 @@ export type GateVerdict =
 /** What happened to the last capture a tab sent. */
 export type CaptureVerdict = 'stored' | 'disabled' | 'site-off' | 'denylisted' | 'pinned' | 'empty' | 'not-http';
 
+/**
+ * What happened to the last screenshot cue from a tab. `shot`: a picture was
+ * taken and parked. `reading`: it went to the vision model. `transcribed`:
+ * the text landed as a vision item. The rest say why nothing happened.
+ */
+export type VisionVerdict =
+  | 'shot'
+  | 'reading'
+  | 'transcribed'
+  | 'dropped'
+  | 'disabled'
+  | 'screenshots-off'
+  | 'site-off'
+  | 'denylisted'
+  | 'pinned'
+  | 'not-http'
+  | 'not-in-front'
+  | 'capture-failed'
+  | 'no-shot'
+  | 'no-model'
+  | 'short'
+  | 'failed';
+
+export interface VisionDiag {
+  at: number;
+  host: string;
+  verdict: VisionVerdict;
+}
+
 export interface ProviderAttempt {
   id: Settings['provider'];
   ms: number;
@@ -45,11 +74,14 @@ export interface SuggestDiag {
   navigation?: number;
   /** Element interactions (click, check, set, choose) handed over alongside them. */
   interactions?: number;
+  /** A smart second pass was started; the content script polls for it. */
+  refine?: boolean;
 }
 
 export interface TabDiag {
   capture?: CaptureDiag;
   suggest?: SuggestDiag;
+  vision?: VisionDiag;
 }
 
 const KEY = 'diag';
@@ -76,6 +108,12 @@ export class DiagLog {
   async recordSuggest(tabId: number, suggest: SuggestDiag): Promise<void> {
     const state = await this.load();
     state[tabId] = { ...state[tabId], suggest };
+    this.write(tabId);
+  }
+
+  async recordVision(tabId: number, vision: VisionDiag): Promise<void> {
+    const state = await this.load();
+    state[tabId] = { ...state[tabId], vision };
     this.write(tabId);
   }
 
@@ -106,5 +144,5 @@ export class DiagLog {
 }
 
 function latest(d: TabDiag): number {
-  return Math.max(d.capture?.at ?? 0, d.suggest?.at ?? 0);
+  return Math.max(d.capture?.at ?? 0, d.suggest?.at ?? 0, d.vision?.at ?? 0);
 }

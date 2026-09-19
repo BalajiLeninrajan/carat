@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { InteractSuggestion, NavSuggestion, Suggestion } from '@carat/shared';
 import { createChip, type Chip, type ChipShowOptions, type CornerShowOptions } from '../src/chip';
-import { CAPTURE_TIMING, SNAPSHOT_TIMING, startCapture, startSuggestions } from '../src/content';
+import { CAPTURE_TIMING, SNAPSHOT_TIMING, createPageState, startCapture, startSuggestions } from '../src/content';
 import type { ScriptContext } from '../src/content';
 import type { NavigationView } from '../src/messaging';
 
@@ -50,6 +50,32 @@ function tab(): KeyboardEvent {
 }
 
 const flush = () => vi.advanceTimersByTimeAsync(0);
+const setVisibility = (state: DocumentVisibilityState) => {
+  Object.defineProperty(document, 'visibilityState', { value: state, configurable: true });
+  document.dispatchEvent(new Event('visibilitychange'));
+};
+const escape = () => {
+  (document.activeElement ?? document.body).dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+  );
+};
+type Answer = { suggestions: Suggestion[]; interactions?: Suggestion[]; ticket?: string };
+/** Fast answer for the Title field plus a refine ticket whose answer the test releases. */
+function fastThenSmart(fast: (ids: Record<string, string>) => Answer) {
+  let release!: (v: Answer) => void;
+  let ids: Record<string, string> = {};
+  sent.mockImplementation((type, data) => {
+    if (type === 'suggestRequest') {
+      const { fields } = data as { fields: Array<{ i: string; al?: string }> };
+      ids = Object.fromEntries(fields.map((f) => [f.al ?? f.i, f.i]));
+      return Promise.resolve(fast(ids));
+    }
+    if (type === 'suggestRefine') return new Promise<Answer>((resolve) => (release = resolve));
+    return Promise.resolve(undefined);
+  });
+  return { ids: () => ids, release: (v: Answer) => release(v) };
+}
+const s = (fieldId: string, value: string, confidence: number): Suggestion => ({ kind: 'fill', fieldId, value, confidence, reason: '', sourceContextId: 'c1' });
 const calls = (type: string) => sent.mock.calls.filter(([t]) => t === type).map(([, d]) => d as Record<string, unknown>);
 
 describe('content wiring', () => {
@@ -66,7 +92,171 @@ describe('content wiring', () => {
   afterEach(() => {
     ctx.invalidate();
     document.body.innerHTML = '';
+    delete (document as { visibilityState?: unknown }).visibilityState;
     vi.useRealTimers();
+  });
+
+  it('asks for a picture of a thin page, and for it to be read when the tab hides, but not once a chip has been shown here', async () => {
+    const page = createPageState();
+    startCapture(ctx, document, { page });
+    await vi.advanceTimersByTimeAsync(CAPTURE_TIMING.initialMs);
+    expect(calls('vision')).toEqual([{ action: 'shot', url: location.href, title: document.title, bodyChars: expect.any(Number) }]);
+    expect(calls('vision')[0]!.bodyChars as number).toBeLessThan(400);
+    // The text capture still happens; the picture is on top of it, not instead of it.
+    expect(calls('capture')).toHaveLength(1);
+
+    setVisibility('hidden');
+    expect(calls('vision').at(-1)).toMatchObject({ action: 'leaving' });
+    expect(calls('vision')).toHaveLength(2);
+    setVisibility('visible');
+
+    page.filling = true;
+    document.body.append(Object.assign(document.createElement('p'), { textContent: 'New paragraph' }));
+    await vi.advanceTimersByTimeAsync(CAPTURE_TIMING.mutationMs + CAPTURE_TIMING.screenshotMs);
+    setVisibility('hidden');
+    expect(calls('vision')).toHaveLength(2);
+  });
+
+  it('asks for no picture of a text-rich page, and at most one per 15s of a thin one', async () => {
+    document.body.innerHTML = `<p>${'Dinner at Seven Shores Cafe, Friday at 6? '.repeat(12)}</p>`;
+    startCapture(ctx, document);
+    await vi.advanceTimersByTimeAsync(CAPTURE_TIMING.initialMs);
+    expect(calls('vision')).toEqual([]);
+    expect(calls('capture')).toHaveLength(1);
+    ctx.invalidate();
+
+    ctx = fakeCtx();
+    document.body.innerHTML = '<p>Dinner at Seven Shores Cafe, Friday at 6? Bring the team.</p>';
+    startCapture(ctx, document);
+    await vi.advanceTimersByTimeAsync(CAPTURE_TIMING.initialMs);
+    document.body.append(Object.assign(document.createElement('p'), { textContent: 'Another line' }));
+    await vi.advanceTimersByTimeAsync(CAPTURE_TIMING.mutationMs);
+    expect(calls('capture')).toHaveLength(3);
+    expect(calls('vision')).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(CAPTURE_TIMING.screenshotMs);
+    document.body.append(Object.assign(document.createElement('p'), { textContent: 'And another' }));
+    await vi.advanceTimersByTimeAsync(CAPTURE_TIMING.mutationMs);
+    expect(calls('vision')).toHaveLength(2);
+  });
+
+  it('shows the fast answer at once and swaps in a surer smart value without hiding the chip', async () => {
+    const title = field('Title', 100);
+    const smart = fastThenSmart((ids) => ({ suggestions: [s(ids.Title!, 'Dinner', 0.8)], ticket: 't1' }));
+    const chip = createChip(document);
+    const show = vi.spyOn(chip, 'show');
+    const hide = vi.spyOn(chip, 'hide');
+    startSuggestions(ctx, chip, document);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
+    await flush();
+
+    expect(chip.visible).toBe(true);
+    expect(show.mock.calls.map(([o]) => o.value)).toEqual(['Dinner']);
+    // The refine poll goes out only after the fast answer is on screen.
+    expect(sent.mock.calls.map(([t]) => t).filter((t) => t.startsWith('suggest'))).toEqual(['suggestRequest', 'suggestRefine']);
+    expect(calls('suggestRefine')).toEqual([{ ticket: 't1' }]);
+
+    smart.release({ suggestions: [s(smart.ids().Title!, 'Dinner at Seven Shores Cafe', 0.95)] });
+    await flush();
+    expect(chip.visible).toBe(true);
+    expect(show.mock.calls.map(([o]) => o.value)).toEqual(['Dinner', 'Dinner at Seven Shores Cafe']);
+    expect(hide).not.toHaveBeenCalled();
+
+    title.focus();
+    expect(tab().defaultPrevented).toBe(true);
+    expect(title.value).toBe('Dinner at Seven Shores Cafe');
+  });
+
+  it('keeps a lower-confidence smart value out, and never moves a visible chip to another field', async () => {
+    const title = field('Title', 100);
+    field('Location', 200);
+    const smart = fastThenSmart((ids) => ({ suggestions: [s(ids.Title!, 'Dinner', 0.8)], ticket: 't1' }));
+    const chip = createChip(document);
+    const show = vi.spyOn(chip, 'show');
+    startSuggestions(ctx, chip, document);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
+    await flush();
+
+    const ids = smart.ids();
+    smart.release({ suggestions: [s(ids.Title!, 'Supper', 0.7), s(ids.Location!, '10 Regina St N', 0.9)] });
+    await flush();
+    expect(show).toHaveBeenCalledTimes(1);
+    expect(chip.visible).toBe(true);
+
+    // The extra field waits its turn: it is the next chip after this fill.
+    title.focus();
+    tab();
+    expect(title.value).toBe('Dinner');
+    expect(chip.visible).toBe(true);
+    expect(show.mock.calls.at(-1)![0].value).toBe('10 Regina St N');
+  });
+
+  it('shows a chip from the smart answer when the fast one had nothing', async () => {
+    const title = field('Title', 100);
+    const smart = fastThenSmart(() => ({ suggestions: [], ticket: 't1' }));
+    const chip = createChip(document);
+    startSuggestions(ctx, chip, document);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
+    await flush();
+    expect(chip.visible).toBe(false);
+
+    smart.release({ suggestions: [s(smart.ids().Title!, 'Dinner', 0.85)] });
+    await flush();
+    expect(chip.visible).toBe(true);
+    title.focus();
+    tab();
+    expect(title.value).toBe('Dinner');
+  });
+
+  it('drops a smart answer for a field the user dismissed', async () => {
+    const title = field('Title', 100);
+    const smart = fastThenSmart((ids) => ({ suggestions: [s(ids.Title!, 'Dinner', 0.8)], ticket: 't1' }));
+    const chip = createChip(document);
+    const show = vi.spyOn(chip, 'show');
+    startSuggestions(ctx, chip, document);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
+    await flush();
+    title.focus();
+    escape();
+    expect(chip.visible).toBe(false);
+    expect(calls('feedback')[0]).toMatchObject({ accepted: false });
+
+    smart.release({ suggestions: [s(smart.ids().Title!, 'Dinner at Seven Shores Cafe', 0.99)] });
+    await flush();
+    expect(chip.visible).toBe(false);
+    expect(show).toHaveBeenCalledTimes(1);
+    expect(tab().defaultPrevented).toBe(false);
+  });
+
+  it('drops a smart answer that lands after the user typed', async () => {
+    const title = field('Title', 100);
+    const smart = fastThenSmart((ids) => ({ suggestions: [s(ids.Title!, 'Dinner', 0.8)], ticket: 't1' }));
+    const chip = createChip(document);
+    const show = vi.spyOn(chip, 'show');
+    startSuggestions(ctx, chip, document);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
+    await flush();
+
+    title.focus();
+    title.value = 'Lunch';
+    title.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: 'h' }));
+    expect(chip.visible).toBe(false);
+
+    smart.release({ suggestions: [s(smart.ids().Title!, 'Dinner at Seven Shores Cafe', 0.99)] });
+    await flush();
+    expect(chip.visible).toBe(false);
+    expect(show).toHaveBeenCalledTimes(1);
+    expect(title.value).toBe('Lunch');
+  });
+
+  it("tells the background this is the page being filled the first time a chip shows here", async () => {
+    field('Title', 100);
+    const page = createPageState();
+    fastThenSmart((ids) => ({ suggestions: [s(ids.Title!, 'Dinner', 0.8)] }));
+    startSuggestions(ctx, createChip(document), document, { page });
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
+    await flush();
+    expect(page.filling).toBe(true);
+    expect(calls('vision')).toEqual([{ action: 'filling', url: location.href, title: document.title, bodyChars: 0 }]);
   });
 
   it('captures the page once after the initial delay and again only when the text changes', async () => {

@@ -1,4 +1,4 @@
-import type { CaptureDiag, CaptureVerdict, GateVerdict, ProviderAttempt, SuggestDiag } from '../background/diag';
+import type { CaptureDiag, CaptureVerdict, GateVerdict, ProviderAttempt, SuggestDiag, VisionDiag, VisionVerdict } from '../background/diag';
 import { relativeAge } from './age';
 
 const CAPTURE: Record<CaptureVerdict, string> = {
@@ -21,6 +21,25 @@ const GATE: Record<Exclude<GateVerdict, 'ok'>, string> = {
   'stale-context': 'all context is older than 30 min',
 };
 
+const VISION: Record<VisionVerdict, string> = {
+  shot: 'picture taken, waiting for the tab to hide',
+  reading: 'picture sent to the smart model',
+  transcribed: 'transcript stored, picture deleted',
+  dropped: 'picture deleted, a chip showed on this page',
+  disabled: 'skipped, carat is off',
+  'screenshots-off': 'skipped, screenshots are off',
+  'site-off': 'skipped, carat is off for this site',
+  denylisted: 'skipped, host is on the denylist',
+  pinned: 'skipped, context is pinned',
+  'not-http': 'skipped, not an http page',
+  'not-in-front': 'skipped, the tab was not in front',
+  'capture-failed': 'skipped, Chrome refused the picture',
+  'no-shot': 'nothing to read, no picture of this tab',
+  'no-model': 'nothing read, no smart model configured',
+  short: 'nothing kept, the model read too little text',
+  failed: 'nothing kept, the smart model failed',
+};
+
 /** One line: "page from discord.com 12s ago: stored". */
 export function describeCapture(d: CaptureDiag, now: number = Date.now()): string {
   return `${d.kind} from ${d.host} ${relativeAge(d.at, now)}: ${CAPTURE[d.verdict]}`;
@@ -35,10 +54,16 @@ export function describeSuggest(d: SuggestDiag, now: number = Date.now()): strin
     : (d.attempts ?? []).map(describeAttempt).join('; ') || 'no provider ran';
   const tabs = d.navigation ? `, ${d.navigation} tab ${d.navigation === 1 ? 'offer' : 'offers'}` : '';
   const controls = d.interactions ? `, ${d.interactions} ${d.interactions === 1 ? 'control' : 'controls'}` : '';
-  return `${when}: ${outcome}, offered ${d.offered ?? 0}${tabs}${controls}`;
+  const smart = d.refine ? '; smart model asked for a second opinion' : '';
+  return `${when}: ${outcome}, offered ${d.offered ?? 0}${tabs}${controls}${smart}`;
 }
 
 function describeAttempt(a: ProviderAttempt): string {
   if (a.error) return `${a.id} failed after ${a.ms} ms (${a.error})`;
   return `${a.id} answered in ${a.ms} ms with ${a.count}`;
+}
+
+/** One line: "screenshot of discord.com 12s ago: transcript stored, picture deleted". */
+export function describeVision(d: VisionDiag, now: number = Date.now()): string {
+  return `screenshot of ${d.host || 'this tab'} ${relativeAge(d.at, now)}: ${VISION[d.verdict]}`;
 }

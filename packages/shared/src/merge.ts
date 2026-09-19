@@ -8,9 +8,9 @@ import type { Suggestion } from './types';
  * built from the page's own text, which the smart model reads no better, and
  * a late one would move the corner chip under the user. Sorted best first.
  */
-export function mergeSuggestions(current: Suggestion[], incoming: Suggestion[]): Suggestion[] {
-  const best = new Map<string, Suggestion>();
-  const offer = (s: Suggestion): void => {
+export function mergeSuggestions<T extends Suggestion>(current: T[], incoming: T[]): T[] {
+  const best = new Map<string, T>();
+  const offer = (s: T): void => {
     const key = slotOf(s);
     const prev = best.get(key);
     if (!prev || s.confidence > prev.confidence) best.set(key, s);
