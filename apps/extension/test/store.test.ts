@@ -267,24 +267,27 @@ describe('settings store', () => {
       disabledHosts: [],
       statusLine: false,
       screenshots: false,
-      smartModel: 'gpt-5.6',
+      smartModel: '',
     });
   });
 
-  it('keeps screenshots off unless stored as true and fills a blank smart model', async () => {
+  it('keeps screenshots off unless stored as true and keeps a blank smart model blank', async () => {
     const settings = createSettingsStore(new FakeArea());
     const next = await settings.set({ screenshots: 'yes' as never, smartModel: '  ' });
     expect(next.screenshots).toBe(false);
-    expect(next.smartModel).toBe('gpt-5.6');
+    expect(next.smartModel).toBe('');
     expect((await settings.set({ screenshots: true, smartModel: ' big ' })).screenshots).toBe(true);
     expect((await settings.get()).smartModel).toBe('big');
   });
 
-  it('carries a stored visionModel over to smartModel until the user sets one', async () => {
+  it('carries a stored visionModel over to smartModel until the user sets one, except the old default', async () => {
     const area = new FakeArea();
     area.data['settings'] = { visionModel: 'old-big', screenshots: true };
     const settings = createSettingsStore(area);
     expect((await settings.get()).smartModel).toBe('old-big');
+    // Every save used to write 'gpt-5.6' back, so that value means "never chose one", which is now blank.
+    area.data['settings'] = { visionModel: 'gpt-5.6' };
+    expect((await settings.get()).smartModel).toBe('');
     // A saved smartModel wins, and the old key stops mattering once it has been written over.
     area.data['settings'] = { visionModel: 'old-big', smartModel: 'new-big' };
     expect((await settings.get()).smartModel).toBe('new-big');

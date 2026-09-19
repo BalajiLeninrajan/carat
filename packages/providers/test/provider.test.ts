@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { Settings } from '@carat/shared';
 import { DEFAULT_SETTINGS } from '@carat/shared';
 import { createProvider, createSmartProvider } from '../src/provider';
 import { OpenAICompatProvider } from '../src/openai-compat';
@@ -68,13 +69,31 @@ describe('createSmartProvider', () => {
     expect(createSmartProvider({ ...DEFAULT_SETTINGS, provider: 'local', apiKey: 'sk-x' })).toBeUndefined();
   });
 
-  it('runs on the smart model, falling back to the fast model when that is blank', () => {
+  it('runs on the fast model by default, on smartModel when one is set', () => {
+    const byDefault = createSmartProvider({ ...DEFAULT_SETTINGS, apiKey: 'sk-x' }) as OpenAICompatProvider;
+    expect(DEFAULT_SETTINGS.smartModel).toBe('');
+    expect(byDefault.options.model).toBe(DEFAULT_SETTINGS.model);
     const smart = createSmartProvider({ ...DEFAULT_SETTINGS, apiKey: 'sk-x', model: 'fast', smartModel: 'smart' }) as OpenAICompatProvider;
     expect(smart.options.model).toBe('smart');
     expect(smart.options.mode).toBe('json_schema');
     expect(typeof smart.transcribe).toBe('function');
-    const blank = createSmartProvider({ ...DEFAULT_SETTINGS, apiKey: 'sk-x', model: 'fast', smartModel: '' }) as OpenAICompatProvider;
-    expect(blank.options.model).toBe('fast');
+  });
+
+  it('asks OpenAI for no reasoning on the fast path and a little on the smart path, and asks other servers for nothing', () => {
+    const openai = { ...DEFAULT_SETTINGS, apiKey: 'sk-x' };
+    const fast = createProvider(openai) as OpenAICompatProvider;
+    const smart = createSmartProvider(openai) as OpenAICompatProvider;
+    expect(fast.options.reasoningEffort).toBe('minimal');
+    expect(smart.options.reasoningEffort).toBe('low');
+    // Same model, different effort: that is the whole difference between the two passes by default.
+    expect(smart.options.model).toBe(fast.options.model);
+
+    const baseten: Settings = { ...openai, provider: 'baseten', baseURL: 'https://model.api.baseten.co/sync/v1' };
+    expect((createProvider(baseten) as OpenAICompatProvider).options.reasoningEffort).toBeUndefined();
+    expect((createSmartProvider(baseten) as OpenAICompatProvider).options.reasoningEffort).toBeUndefined();
+    // A proxy under the openai setting is not api.openai.com either.
+    const proxy: Settings = { ...openai, baseURL: 'https://proxy.example/v1' };
+    expect((createProvider(proxy) as OpenAICompatProvider).options.reasoningEffort).toBeUndefined();
   });
 
   it('is the chat model behind Jev for cloudflare, never Jev itself, and nothing when there is no chat key', () => {

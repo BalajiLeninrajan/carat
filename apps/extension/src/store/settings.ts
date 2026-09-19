@@ -43,9 +43,18 @@ function sanitize(raw: unknown): Settings {
     disabledHosts: hosts(r.disabledHosts),
     statusLine: typeof r.statusLine === 'boolean' ? r.statusLine : DEFAULT_SETTINGS.statusLine,
     screenshots: typeof r.screenshots === 'boolean' ? r.screenshots : DEFAULT_SETTINGS.screenshots,
-    // `visionModel` is the name this setting had before; a stored one carries over the first time it is read.
-    smartModel: str(r.smartModel, '').trim() || str(r.visionModel, '').trim() || DEFAULT_SETTINGS.smartModel,
+    smartModel: str(r.smartModel, '').trim() || legacySmartModel(r.visionModel),
   };
+}
+
+// `visionModel` is the name this setting had before, and every save wrote its
+// default back, so a stored 'gpt-5.6' says nothing about what the user wanted.
+// Anything else was typed in and carries over the first time it is read.
+const OLD_SMART_DEFAULT = 'gpt-5.6';
+
+function legacySmartModel(v: unknown): string {
+  const model = typeof v === 'string' ? v.trim() : '';
+  return model === OLD_SMART_DEFAULT ? '' : model;
 }
 
 const MAX_DISABLED_HOSTS = 200;

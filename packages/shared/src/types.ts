@@ -171,7 +171,12 @@ export interface Settings {
   statusLine: boolean; // small bottom-right line on every page: running or not, and which model
   /** Opt-in: screenshot thin source tabs and run the slower smart path. Default off. */
   screenshots: boolean;
-  /** The slower model: a text-only second opinion after the fast answer, and the reader of screenshots at capture time. Must accept images. */
+  /**
+   * Optional override for the smart path: a text-only second opinion after the
+   * fast answer, and the reader of screenshots at capture time. Blank means the
+   * fast model itself, run with low reasoning instead of none. Whatever it is
+   * must accept images.
+   */
   smartModel: string;
 }
 
@@ -204,7 +209,7 @@ export const DEFAULT_SETTINGS: Settings = {
   disabledHosts: [],
   statusLine: false,
   screenshots: false,
-  smartModel: 'gpt-5.6',
+  smartModel: '',
 };
 
 export const LIMITS = {

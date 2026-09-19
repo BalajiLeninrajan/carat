@@ -34,6 +34,7 @@
       label { display: grid; gap: 4px; }
       label.row { grid-auto-flow: column; justify-content: start; align-items: center; gap: 8px; }
       .name { font-weight: 500; }
+      h2 { margin: 10px 0 -4px; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--subtext0); }
       .hint { font-size: 12px; color: var(--subtext0); }
       p.hint { margin: -6px 0 0 24px; }
       input:not([type="checkbox"]), select {
@@ -98,6 +99,8 @@
           <span class="hint">Local runs when there is no key or the network call fails, whatever you pick here. Cloudflare asks TypeSafe's Jev to pick from what the regexes found, and only calls the model below when Jev has nothing.</span>
         </label>
 
+        <h2>Chat model (OpenAI-compatible)</h2>
+
         <label>
           <span class="name">Base URL</span>
           <input type="url" name="baseURL" placeholder="https://api.openai.com/v1" autocomplete="off" spellcheck="false" />
@@ -112,8 +115,16 @@
         <label>
           <span class="name">Model</span>
           <input type="text" name="model" placeholder="gpt-5.6-luna" autocomplete="off" spellcheck="false" />
-          <span class="hint">The fast model. Every chip comes from this one first.</span>
+          <span class="hint">The fast model. Every chip comes from this one first, from text only, with no reasoning.</span>
         </label>
+
+        <label>
+          <span class="name">Smart model (optional)</span>
+          <input type="text" name="smartModel" placeholder="same as Model" autocomplete="off" spellcheck="false" />
+          <span class="hint">Leave blank to use the same model with low reasoning. It gives a second opinion from text when the fast answer was unsure, and reads screenshots at capture time, so whatever runs here must accept images. Only used when screenshots are on.</span>
+        </label>
+
+        <h2>Fast picker (Cloudflare Jev)</h2>
 
         <label>
           <span class="name">Cloudflare account ID</span>
@@ -124,21 +135,17 @@
         <label>
           <span class="name">Cloudflare API token</span>
           <input type="password" name="cfApiToken" autocomplete="off" spellcheck="false" />
-          <span class="hint">A token with the Workers AI permission. Stored like the API key above: local extension storage, background worker only.</span>
+          <span class="hint">A token with the Workers AI permission. Stored like the API key above: local extension storage, background worker only. Jev only picks among regex candidates; it never reads a screenshot and never gives the second opinion. Those go to the chat model above.</span>
         </label>
 
-        <label>
-          <span class="name">Smart model</span>
-          <input type="text" name="smartModel" placeholder="gpt-5.6" autocomplete="off" spellcheck="false" />
-          <span class="hint">The fast model answers from text. The smart model gives a second opinion from the same text when the fast answer was unsure, and reads screenshots into text at capture time, so it must accept images. Used only when screenshots are on. With the Cloudflare provider this is still the chat model at Base URL; Jev never gets the second opinion.</span>
-        </label>
+        <h2>Screenshots and display</h2>
 
         <label class="row">
           <input type="checkbox" name="screenshots" />
           <span class="name">Screenshots of tabs with little text</span>
         </label>
         <p class="hint" id="screenshots-help">
-          Off unless you turn it on. When on, and a tab you are reading is mostly an image, a pasted screenshot or a canvas app, Carat takes one picture of that tab while it is in front and keeps it in session memory for at most three minutes, two pictures at most. When you switch away, the picture goes to the smart model, which writes down the text it can see; the picture is deleted and only that text is kept, for 30 minutes like everything else. No picture is ever taken of a page Carat has offered to fill, of a page with a password field, or of a page on the denylist.
+          Off unless you turn it on. When on, and a tab you are reading is mostly an image, a pasted screenshot or a canvas app, Carat takes one picture of that tab while it is in front and keeps it in session memory for at most three minutes, two pictures at most. When you switch away, the picture goes to the smart model, which writes down the text it can see plus a few facts it works out from the picture (dates resolved to the calendar, places, addresses, prices); the picture is deleted and only that text is kept, for 30 minutes like everything else. No picture is ever taken of a page Carat has offered to fill, of a page with a password field, or of a page on the denylist.
         </p>
 
         <label class="row">

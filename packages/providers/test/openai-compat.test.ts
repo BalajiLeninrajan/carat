@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ImageInput, SuggestRequest } from '@carat/shared';
-import { OpenAICompatProvider, type OutputMode } from '../src/openai-compat';
+import { OpenAICompatProvider, type OutputMode, type ReasoningEffort } from '../src/openai-compat';
 
 const req: SuggestRequest = {
   page: { host: 'www.google.com', title: 'Google Maps', path: '/maps' },
@@ -42,14 +42,14 @@ function completion(content: string | null, status = 200): Response {
   });
 }
 
-function provider(fetchImpl: typeof fetch, mode: OutputMode = 'json_schema') {
+function provider(fetchImpl: typeof fetch, mode: OutputMode = 'json_schema', reasoningEffort?: ReasoningEffort) {
   return new OpenAICompatProvider(
-    { id: 'openai', baseURL: 'https://api.openai.com/v1', apiKey: 'sk-test', model: 'gpt-5-mini', mode },
+    { id: 'openai', baseURL: 'https://api.openai.com/v1', apiKey: 'sk-test', model: 'gpt-5-mini', mode, ...(reasoningEffort ? { reasoningEffort } : {}) },
     fetchImpl,
   );
 }
 
-function requestBody(call: unknown[]): { messages: Array<{ role: string; content: string }>; response_format?: unknown } {
+function requestBody(call: unknown[]): { messages: Array<{ role: string; content: string }>; response_format?: unknown; reasoning_effort?: string } {
   return JSON.parse((call[1] as RequestInit).body as string);
 }
 
@@ -259,6 +259,25 @@ describe('OpenAICompatProvider', () => {
     const fetchImpl = vi.fn(async () => completion(JSON.stringify({ suggestions: [good] })));
     await provider(fetchImpl).suggest(req, { signal: new AbortController().signal });
     for (const m of requestBody(fetchImpl.mock.calls[0]!).messages) expect(typeof m.content).toBe('string');
+  });
+
+  it('sends reasoning_effort on suggest and transcribe only when the option is set', async () => {
+    const fast = vi.fn(async () => completion(JSON.stringify({ suggestions: [good] })));
+    await provider(fast, 'json_schema', 'minimal').suggest(req, { signal: new AbortController().signal });
+    expect(requestBody(fast.mock.calls[0]!).reasoning_effort).toBe('minimal');
+
+    const smart = vi.fn(async () => completion(JSON.stringify({ suggestions: [good] })));
+    const smartProvider = provider(smart, 'json_schema', 'low');
+    await smartProvider.suggest(req, { signal: new AbortController().signal });
+    await smartProvider.transcribe(image, { signal: new AbortController().signal });
+    expect(requestBody(smart.mock.calls[0]!).reasoning_effort).toBe('low');
+    expect(requestBody(smart.mock.calls[1]!).reasoning_effort).toBe('low');
+
+    const plain = vi.fn(async () => completion(JSON.stringify({ suggestions: [good] })));
+    await provider(plain, 'json_object').suggest(req, { signal: new AbortController().signal });
+    await provider(plain, 'json_object').transcribe(image, { signal: new AbortController().signal });
+    expect(requestBody(plain.mock.calls[0]!)).not.toHaveProperty('reasoning_effort');
+    expect(requestBody(plain.mock.calls[1]!)).not.toHaveProperty('reasoning_effort');
   });
 
   it('uses json_object for baseten-style servers and no response_format in prompt mode, tolerating fences', async () => {

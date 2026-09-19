@@ -9,7 +9,8 @@ describe('normalizeSettings', () => {
     const s = normalizeSettings({ ...base, baseURL: '   ', model: '' });
     expect(s.baseURL).toBe(DEFAULT_SETTINGS.baseURL);
     expect(s.model).toBe(DEFAULT_SETTINGS.model);
-    expect(s.smartModel).toBe(DEFAULT_SETTINGS.smartModel);
+    expect(s.smartModel).toBe('');
+    expect(DEFAULT_SETTINGS.smartModel).toBe('');
   });
 
   it('keeps screenshots off unless the box is ticked, and trims the smart model', () => {

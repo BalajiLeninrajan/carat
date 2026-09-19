@@ -16,12 +16,17 @@ import { sameSite } from './same-site';
 
 export type OutputMode = 'json_schema' | 'json_object' | 'prompt';
 
+/** OpenAI's `reasoning_effort` values that make sense here; the fast path wants none, the smart path a little. */
+export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high';
+
 export interface OpenAICompatOptions {
   id: 'openai' | 'baseten';
   baseURL: string;
   apiKey: string;
   model: string;
   mode: OutputMode;
+  /** Sent as `reasoning_effort` on every call when set. Left unset for servers that reject unknown parameters. */
+  reasoningEffort?: ReasoningEffort;
 }
 
 type Parsed = { ok: true; suggestions: Suggestion[] } | { ok: false; error: string };
@@ -91,7 +96,7 @@ export class OpenAICompatProvider implements VisionProvider {
       },
     ];
     try {
-      const content = await this.post({ model: this.options.model, messages }, opts.signal);
+      const content = await this.post({ model: this.options.model, messages, ...this.reasoning() }, opts.signal);
       if (typeof content !== 'string') return '';
       return truncate(normalizeWhitespace(content), LIMITS.pageTextChars);
     } catch (e) {
@@ -101,8 +106,12 @@ export class OpenAICompatProvider implements VisionProvider {
   }
 
   private async complete(messages: ChatMessage[], signal: AbortSignal): Promise<Parsed> {
-    const body = { model: this.options.model, messages, ...responseFormat(this.options.mode) };
+    const body = { model: this.options.model, messages, ...responseFormat(this.options.mode), ...this.reasoning() };
     return parseContent(await this.post(body, signal));
+  }
+
+  private reasoning(): Record<string, unknown> {
+    return this.options.reasoningEffort ? { reasoning_effort: this.options.reasoningEffort } : {};
   }
 
   /** One chat completion; resolves to the first choice's raw content. */

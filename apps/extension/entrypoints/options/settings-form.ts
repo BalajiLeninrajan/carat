@@ -33,7 +33,7 @@ export function normalizeSettings(v: SettingsFormValues): Partial<Settings> {
     statusLine: v.statusLine,
     cfAccountId: v.cfAccountId.trim(),
     cfApiToken: v.cfApiToken.trim(),
-    smartModel: smartModel === '' ? DEFAULT_SETTINGS.smartModel : smartModel,
+    smartModel, // blank is a setting of its own: the fast model with low reasoning
     screenshots: v.screenshots,
   };
 }
