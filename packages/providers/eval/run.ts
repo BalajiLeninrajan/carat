@@ -4,7 +4,7 @@
 // the level to tolerate prints as WEAK and counts as a pass.
 //   openai, baseten:  OPENAI_API_KEY
 //   cloudflare:       CF_ACCOUNT_ID and CF_API_TOKEN; with OPENAI_API_KEY also set, the
-//                     chat model runs after Jev on the fixtures Jev leaves empty.
+//                     chat model races Jev and the surer answer wins each field.
 import { parseArgs } from 'node:util';
 import { DEFAULT_SETTINGS, EAGERNESS, LIMITS, isEagerness, type Settings } from '@carat/shared';
 import { createProvider } from '../src/provider';
@@ -44,7 +44,7 @@ if (provider === 'cloudflare' && (cfAccountId === '' || cfApiToken === '')) {
   console.error(
     `--provider cloudflare needs ${missing} in the environment.\n` +
       'CF_ACCOUNT_ID is the Workers AI account id; CF_API_TOKEN is an API token with the Workers AI permission.\n' +
-      'Set OPENAI_API_KEY as well to run the chat model after Jev on the fixtures Jev leaves empty.',
+      'Set OPENAI_API_KEY as well to race the chat model against Jev.',
   );
   process.exit(2);
 }
@@ -67,7 +67,7 @@ const label =
   p.id === 'local'
     ? 'provider=local'
     : p.id === 'cloudflare'
-      ? `provider=cloudflare model=${JEV_MODEL}${apiKey ? ` then ${settings.model}` : ' (no OPENAI_API_KEY: Jev alone)'}`
+      ? `provider=cloudflare model=${JEV_MODEL}${apiKey ? ` and ${settings.model}` : ' (no OPENAI_API_KEY: Jev alone)'}`
       : `provider=${p.id} model=${settings.model}`;
 console.log(`${label} eagerness=${eagerness} (floor ${EAGERNESS[eagerness].minConfidence}) fixtures=${fixtures.length}\n`);
 
