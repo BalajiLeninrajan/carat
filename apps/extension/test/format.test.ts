@@ -78,6 +78,15 @@ describe('describeSuggest', () => {
       'checked 15s ago: answer from cache, offered 0',
     );
   });
+
+  it('says how many links matched the page query, and when that answered without a provider', () => {
+    expect(describeSuggest({ ...base, gate: 'ok', cached: false, attempts: [], offered: 0, interactions: 1, query: 'doordash', linkMatched: 1 }, NOW)).toBe(
+      "checked 15s ago: answered from the page query, no provider asked, offered 0, 1 control, 1 link matched the page query 'doordash'",
+    );
+    expect(describeSuggest({ ...base, gate: 'ok', cached: false, attempts: [{ id: 'local', ms: 2, count: 0 }], offered: 0, query: 'weather', linkMatched: 0 }, NOW)).toBe(
+      "checked 15s ago: local answered in 2 ms with 0, offered 0, 0 links matched the page query 'weather'",
+    );
+  });
 });
 
 describe('describePerform', () => {

@@ -1475,3 +1475,139 @@ describe('orchestrate interactions', () => {
     expect(reports[3]).toMatchObject({ cached: false, interactions: 1 });
   });
 });
+
+describe('orchestrate page query', () => {
+  const serpPage = { host: 'www.google.com', title: 'doordash - Google Search', path: '/search', query: 'doordash' };
+  const links: ElementDescriptor[] = [
+    { i: 'e0', r: 'button', nm: 'Search', p: 1 },
+    { i: 'e1', r: 'link', nm: 'Order Now | Quick and Easy Food Delivery', h: 'doordash.com' },
+    { i: 'e2', r: 'link', nm: 'DoorDash - Wikipedia', h: 'wikipedia.org' },
+    { i: 'e3', r: 'link', nm: 'Best restaurants near you', h: 'yelp.com' },
+    { i: 'e4', r: 'button', nm: 'Tools' },
+  ];
+  const serp = { page: serpPage, fields: [], elements: links };
+  const onSerp = { tabId: 2, origin: 'https://www.google.com' };
+  const empty = () => ({ store: new ContextStore(new FakeArea(), { now: () => NOW }), now: () => NOW });
+  const pageClick = (over: Partial<InteractSuggestion> = {}): InteractSuggestion =>
+    interact({ elementId: 'e1', value: 'Order Now | Quick and Easy Food Delivery', sourceContextId: 'page', confidence: 0.7, ...over });
+
+  it('counts a real link on a page with a query as work, and lets the request through with nothing read', () => {
+    expect(hasWork(serp)).toBe(true);
+    expect(hasWork({ ...serp, page: { ...serpPage, query: undefined } })).toBe(false);
+    expect(hasWork({ ...serp, elements: [links[0]!, links[4]!] })).toBe(false);
+    expect(hasWork({ page: serpPage, fields: [{ i: 'f0', t: 'textarea', nm: 'q', v: 'doordash', f: 1 }], elements: [links[1]!] })).toBe(true);
+    expect(explainGate(serp, [], enabled, onSerp, NOW)).toBe('ok');
+    expect(explainGate({ ...serp, page: { ...serpPage, query: undefined } }, [], enabled, onSerp, NOW)).toBe('no-fields');
+    expect(explainGate({ ...serp, page: { ...serpPage, query: undefined } }, [item()], enabled, onSerp, NOW)).toBe('no-fields');
+    expect(explainGate(serp, [], { ...enabled, disabledHosts: ['www.google.com'] }, onSerp, NOW)).toBe('site-off');
+  });
+
+  it('offers the first link the query names at once, without asking any provider, and caches it', async () => {
+    const { store, now } = empty();
+    const reports: SuggestDiag[] = [];
+    const remote = fakeProvider('openai', async () => [pageClick({ elementId: 'e2', value: 'DoorDash - Wikipedia', confidence: 0.99 })]);
+    const deps = { store, settings: async () => enabled, createProvider: () => remote, now, onDiag: (d: SuggestDiag) => void reports.push(d) };
+    const res = await orchestrate(serp, onSerp, deps);
+    expect(remote.calls).toBe(0);
+    expect(res.interactions).toEqual([
+      {
+        kind: 'interact',
+        elementId: 'e1',
+        verb: 'click',
+        value: 'Order Now | Quick and Easy Food Delivery',
+        confidence: 0.8,
+        reason: expect.stringContaining('"doordash"'),
+        sourceContextId: 'page',
+        source: { host: 'www.google.com', capturedAt: NOW },
+      },
+    ]);
+    expect(res.suggestions).toEqual([]);
+    // Two links say "doordash"; the first in page order is the one offered.
+    expect(reports[0]).toMatchObject({ gate: 'ok', cached: false, attempts: [], query: 'doordash', linkMatched: 2, interactions: 1 });
+
+    const again = await orchestrate(serp, onSerp, deps);
+    expect(again.interactions.map((s) => s.elementId)).toEqual(['e1']);
+    expect(reports[1]).toMatchObject({ cached: true, linkMatched: 2 });
+    expect(remote.calls).toBe(0);
+  });
+
+  it('takes the first match in page order, sponsored or not, and matches the site name or the title words', async () => {
+    const { store, now } = empty();
+    const deps = { store, settings: async () => ({ ...enabled, provider: 'local' as const, apiKey: '' }), now };
+    const sponsoredFirst = { ...serp, elements: [links[0]!, { i: 'e9', r: 'link' as const, nm: 'DoorDash Promo Codes', h: 'coupons.example' }, ...links.slice(1)] };
+    expect((await orchestrate(sponsoredFirst, onSerp, deps)).interactions.map((s) => s.elementId)).toEqual(['e9']);
+    const wiki = { ...serp, page: { ...serpPage, query: 'doordash wikipedia' } };
+    expect((await orchestrate(wiki, onSerp, deps)).interactions.map((s) => s.elementId)).toEqual(['e2']);
+    const uber = { ...serp, page: { ...serpPage, query: 'Food Delivery!' } };
+    expect((await orchestrate(uber, onSerp, deps)).interactions.map((s) => s.elementId)).toEqual(['e1']);
+  });
+
+  it('asks the provider when no link matches outright, keeps its pick only when the link relates to the query, and never a button or an unrelated link', async () => {
+    const { store, now } = empty();
+    const fuzzy = { ...serp, page: { ...serpPage, query: 'food delivery near me' } };
+    let answer: Suggestion[] = [];
+    const remote = fakeProvider('openai', async () => answer);
+    const reports: SuggestDiag[] = [];
+    const deps = { store, settings: async () => enabled, createProvider: () => remote, now, onDiag: (d: SuggestDiag) => void reports.push(d) };
+
+    answer = [
+      pageClick(),
+      pageClick({ elementId: 'e2', value: 'DoorDash - Wikipedia' }), // nothing in common with the query
+      pageClick({ elementId: 'e4', value: 'Tools' }), // a button is never the page's to click
+      pageClick({ elementId: 'e0', value: 'Search' }),
+      pageClick({ elementId: 'e1', verb: 'scroll', value: '' }), // on-screen, so it would become a click; still page-sourced, still fine
+    ];
+    const res = await orchestrate({ ...fuzzy, force: true }, onSerp, deps);
+    expect(remote.calls).toBe(1);
+    expect(res.interactions.map((s) => [s.elementId, s.verb, s.confidence])).toEqual([['e1', 'click', 0.7]]);
+    expect(reports[0]).toMatchObject({ query: 'food delivery near me', linkMatched: 0, attempts: [expect.objectContaining({ id: 'openai' })] });
+
+    // "weather" relates to nothing here: even the model's pick is dropped.
+    answer = [pageClick({ confidence: 0.95 })];
+    const weather = { ...serp, page: { ...serpPage, query: 'weather' }, force: true };
+    expect((await orchestrate(weather, onSerp, deps)).interactions).toEqual([]);
+
+    // Without a query the page is not a source at all, and a link click still needs a fill first.
+    const { store: seededStore, ctxId } = await seeded();
+    const noQuery = { ...serp, page: { ...serpPage, query: undefined }, fields: [{ i: 'f0', t: 'input:search', al: 'Search' }] };
+    answer = [pageClick(), pageClick({ sourceContextId: ctxId })];
+    expect((await orchestrate(noQuery, onSerp, { ...deps, store: seededStore })).interactions).toEqual([]);
+    expect(remote.calls).toBe(3);
+  });
+
+  it('suppresses a dismissed link for 10 minutes, keeps an accepted one, and keys the cache by the query', async () => {
+    let clock = NOW;
+    const store = new ContextStore(new FakeArea(), { now: () => clock });
+    const remote = fakeProvider('openai', async () => []);
+    const deps = { store, settings: async () => enabled, createProvider: () => remote, now: () => clock };
+    expect((await orchestrate(serp, onSerp, deps)).interactions).toHaveLength(1);
+
+    await handleFeedback({ kind: 'interact', host: 'www.google.com', role: 'link', name: 'Order Now | Quick and Easy Food Delivery', accepted: false }, store, 2);
+    expect((await orchestrate(serp, onSerp, deps)).interactions).toEqual([]);
+    clock += 10 * MIN + 1;
+    expect((await orchestrate(serp, onSerp, deps)).interactions).toHaveLength(1);
+
+    await handleFeedback({ kind: 'interact', host: 'www.google.com', role: 'link', name: 'Order Now | Quick and Easy Food Delivery', accepted: true }, store, 2);
+    expect((await orchestrate(serp, onSerp, deps)).interactions).toHaveLength(1);
+    expect(remote.calls).toBe(0);
+
+    // The same links under another query are a different question.
+    expect((await orchestrate({ ...serp, page: { ...serpPage, query: 'weather' } }, onSerp, deps)).interactions).toEqual([]);
+    expect(remote.calls).toBe(1);
+  });
+
+  it('never lets the page query produce a fill, and never reads it on a denylisted host', async () => {
+    const { store, now } = empty();
+    const remote = fakeProvider('openai', async () => [suggestion({ sourceContextId: 'page', fieldId: 'f0', value: 'doordash' })]);
+    const deps = { store, settings: async () => enabled, createProvider: () => remote, now };
+    const withField = { ...serp, page: { ...serpPage, query: 'food delivery near me' }, fields: [{ i: 'f0', t: 'input:text', al: 'Add title' }] };
+    const res = await orchestrate(withField, onSerp, deps);
+    expect(remote.calls).toBe(1);
+    expect(res.suggestions).toEqual([]);
+    expect(res.interactions).toEqual([]);
+
+    const bank = { ...serp, page: { ...serpPage, host: 'www.chase.com' } };
+    expect(await orchestrate(bank, { tabId: 2, origin: 'https://www.chase.com' }, deps)).toEqual({ suggestions: [], navigation: [], interactions: [] });
+    expect(remote.calls).toBe(1);
+  });
+});

@@ -13,6 +13,7 @@ import {
   registrableDomain,
 } from '../src/page-query';
 import { EAGERNESS } from '../src/eagerness';
+import { isDestructiveElement } from '../src/destructive';
 
 const serp = { host: 'www.google.com', title: 'doordash - Google Search', path: '/search' };
 const doordash: ElementDescriptor = { i: 'e1', r: 'link', nm: 'Order Now | Quick and Easy Food Delivery', h: 'doordash.com' };
@@ -116,6 +117,16 @@ describe('firstMatchingLink and isSiteLink', () => {
     expect(isSiteLink({ r: 'link' })).toBe(false);
     expect(isSiteLink({ r: 'link', h: '' })).toBe(false);
     expect(isSiteLink({ r: 'button', h: 'doordash.com' })).toBe(false);
+  });
+
+  it('refuses a short link named like an action, not a result title that mentions one', () => {
+    expect(isDestructiveElement(doordash)).toBe(false);
+    expect(isDestructiveElement({ r: 'link', nm: 'Order Now', h: 'doordash.com' })).toBe(true);
+    expect(isDestructiveElement({ r: 'link', nm: 'Sign out', h: 'doordash.com' })).toBe(true);
+    expect(isDestructiveElement({ r: 'link', nm: 'Delete my account now', h: 'doordash.com' })).toBe(true);
+    expect(isDestructiveElement({ r: 'link', nm: 'Order Now | Quick and Easy Food Delivery' })).toBe(true); // no site: it acts as a button
+    expect(isDestructiveElement({ r: 'button', nm: 'Order Now | Quick and Easy Food Delivery' })).toBe(true);
+    expect(isDestructiveElement({ r: 'button', nm: 'Save' })).toBe(false);
   });
 
   it('pins the page source and a confidence above every level\'s floor', () => {

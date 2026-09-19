@@ -8,6 +8,7 @@ import type {
   FieldDescriptor,
   FillSuggestion,
   InteractSuggestion,
+  PageIntent,
   PageMeta,
   RequestContext,
   Settings,
@@ -17,14 +18,20 @@ import type {
 import {
   EAGERNESS,
   LIMITS,
+  PAGE_SOURCE,
   clickAllowed,
   fnv1a,
   impliedVerb,
-  isDestructiveName,
+  isDestructiveElement,
   isIntentName,
   isOffScreen,
+  isSiteLink,
+  linkMatchesQuery,
+  linkRelatesToQuery,
   mayPay,
   mergeSuggestions,
+  pageIntent,
+  pageQueryClick,
   verbFits,
 } from '@carat/shared';
 import type { EntitySource, Provider, SuggestOptions } from '@carat/providers';
@@ -109,7 +116,14 @@ export async function orchestrate(input: SuggestInput, requester: Requester, dep
   const flow = flowActive(input.page);
   diag.gate = explainGate({ ...input, elements, filled, flow }, items, settings, requester, at);
   const smart = smartPath(settings, deps, requester);
-  const shape: Shape = { input, elements, filled, store, eagerness, flow, pay: mayPay(settings) };
+  // What the user searched for on this page, and the links it names outright. Never a fill source.
+  const intent = pageIntent(input.page, input.fields);
+  const matched = intent ? elements.filter((e) => isSiteLink(e) && linkMatchesQuery(e, intent)) : [];
+  if (intent && elements.some(isSiteLink)) {
+    diag.query = intent.query;
+    diag.linkMatched = matched.length;
+  }
+  const shape: Shape = { input, elements, filled, store, eagerness, flow, pay: mayPay(settings), intent, now };
   if (diag.gate !== 'ok') {
     const result: SuggestResponse = { ...NONE };
     // Nothing to read yet, but a screenshot is being transcribed: the smart pass alone may have an answer.
@@ -135,7 +149,7 @@ export async function orchestrate(input: SuggestInput, requester: Requester, dep
 
   const context = scoreAndPickContext(items, requester, at, eagerness);
   const own = ownContext(items, requester, at);
-  if (context.length === 0 && own.length === 0) {
+  if (context.length === 0 && own.length === 0 && !intent) {
     deps.onDiag?.(diag);
     return NONE;
   }
@@ -167,6 +181,18 @@ export async function orchestrate(input: SuggestInput, requester: Requester, dep
     const fresh = !diag.cached;
     const follow = wantsSmart(pass, offered, fresh) ? (r: Refinement) => secondOpinion(pass, r, fresh) : undefined;
     return finish(pass, suggestions, offered, follow);
+  }
+
+  // The first result whose site or title is what the user searched for needs no
+  // model and no network, so it answers before the race is ever started.
+  if (intent && matched[0]) {
+    const link = valid([pageQueryClick(matched[0], intent)], shape, context, own, bump);
+    const linkOffered = await offer(link, shape, context, own);
+    if (linkOffered.interactions.length > 0) {
+      diag.attempts = [];
+      await store.setCached(key, link);
+      return finish(pass, link, linkOffered);
+    }
   }
 
   const req = request(shape, context, own, now());
@@ -213,6 +239,9 @@ interface Shape {
   flow: boolean;
   /** Money controls may be offered (the setting, through `mayPay`). */
   pay: boolean;
+  /** The page's own query, when it has one; the only thing that lets a link be clicked with nothing filled. */
+  intent: PageIntent | null;
+  now: () => number;
 }
 
 /** Everything one request settled before its first answer, shared by the reply and what runs on behind it. */
@@ -500,6 +529,8 @@ async function offer(suggestions: Suggestion[], shape: Shape, context: RequestCo
     return !!el && !suppressed.includes(interactSuppressionKey(input.page.host, el.r, el.nm));
   });
   const sources = new Map([...context, ...own].map((c) => [c.id, sourceOf(c)] as const));
+  // A click the page's own query justifies came from this page, just now.
+  if (shape.intent) sources.set(PAGE_SOURCE, { host: input.page.host, capturedAt: shape.now() });
   const withSource = <T extends { sourceContextId: string }>(s: T): T & { source?: SuggestionSource } => ({
     ...s,
     ...(sources.has(s.sourceContextId) ? { source: sources.get(s.sourceContextId) } : {}),
@@ -695,13 +726,15 @@ function withTimeout(provider: Provider, req: SuggestRequest, timeoutMs: number,
  * a verb that fits its role and state, cite another tab's text or a recent
  * fill, and never a destructive name. A button or link is clicked only after
  * carat filled something on the page, or when it is the primary action and
- * the level or a flow allows that (`clickAllowed`); a money control only
- * when `mayPay` says so. A scroll to an element that is already on-screen
- * becomes the verb it stood in for, or nothing. Whatever passes all that but
- * sits under the level's confidence floor is dropped and counted.
+ * the level or a flow allows that (`clickAllowed`); a money control only when
+ * `mayPay` says so. The one exception to the fill rule is a real link, cited
+ * to the page itself, while the page has a query that the link has something
+ * to do with. A scroll to an element that is already on-screen becomes the
+ * verb it stood in for, or nothing. Whatever passes all that but sits under
+ * the level's confidence floor is dropped and counted.
  */
 function valid(suggestions: Suggestion[], shape: Shape, context: RequestContext, own: RequestContext, onUnderFloor?: () => void): Suggestion[] {
-  const { input, elements, filled } = shape;
+  const { input, elements, filled, intent } = shape;
   const knobs: EagernessKnobs = EAGERNESS[shape.eagerness];
   const contextIds = new Set(context.map((c) => c.id));
   const ownIds = new Set(own.map((o) => o.id));
@@ -714,9 +747,13 @@ function valid(suggestions: Suggestion[], shape: Shape, context: RequestContext,
     if (s.kind === 'action') return isIntentName(s.intent) && ownIds.has(s.sourceContextId);
     if (s.kind === 'interact') {
       const el = elements.find((e) => e.i === s.elementId);
-      if (!el || isDestructiveName(el.nm) || !interactIds.has(s.sourceContextId)) return false;
+      if (!el || isDestructiveElement(el)) return false;
       if (el.m === 1 && !shape.pay) return false;
       if (!verbFits(el, s.verb, s.value.trim())) return false;
+      if (s.sourceContextId === PAGE_SOURCE) {
+        return s.verb === 'click' && isSiteLink(el) && intent !== null && linkRelatesToQuery(el, intent);
+      }
+      if (!interactIds.has(s.sourceContextId)) return false;
       return s.verb !== 'click' || clickAllowed(el, gate);
     }
     const field = input.fields.find((f) => f.i === s.fieldId);
@@ -785,6 +822,6 @@ function cacheKey(shape: Shape, context: RequestContext, own: RequestContext): s
   const els = elements.map(({ o: _o, ...rest }) => rest);
   // Context and own ids are kept apart: the same item is a fill source for one tab and the page's own text for another.
   const ids = `${context.map((c) => c.id).join(',')}|${own.map((c) => c.id).join(',')}`;
-  // The level is part of the key: a cached answer was filtered at the floor of the level that asked.
-  return fnv1a(`${input.page.host}|${eagerness}|${JSON.stringify(fields)}|${JSON.stringify(els)}|${filled.join(',')}|${ids}`).toString(36);
+  // The level is part of the key: a cached answer was filtered at the floor of the level that asked. So is the page's query.
+  return fnv1a(`${input.page.host}|${input.page.query ?? ''}|${eagerness}|${JSON.stringify(fields)}|${JSON.stringify(els)}|${filled.join(',')}|${ids}`).toString(36);
 }

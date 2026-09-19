@@ -66,7 +66,8 @@ export function describeSuggest(d: SuggestDiag, now: number = Date.now()): strin
         ? `${ORIGIN[d.source]} answered first in ${d.ms ?? 0} ms`
         : '';
   const attempts = d.cached ? '' : (d.attempts ?? []).map(describeAttempt).join('; ');
-  const outcome = [first, attempts].filter(Boolean).join('; ') || 'no provider ran';
+  const outcome =
+    [first, attempts].filter(Boolean).join('; ') || (d.linkMatched ? 'answered from the page query, no provider asked' : 'no provider ran');
   const tabs = d.navigation ? `, ${d.navigation} tab ${d.navigation === 1 ? 'offer' : 'offers'}` : '';
   const controls = d.interactions ? `, ${d.interactions} ${d.interactions === 1 ? 'control' : 'controls'}` : '';
   const level = d.eagerness ?? DEFAULT_EAGERNESS;
@@ -75,7 +76,8 @@ export function describeSuggest(d: SuggestDiag, now: number = Date.now()): strin
     : '';
   const later = d.refined ? `; ${d.refined} later ${d.refined === 1 ? 'answer' : 'answers'} handed over` : '';
   const smart = d.smart ? '; smart model asked for a second opinion' : d.refine && !d.refined ? '; more may follow' : '';
-  return `${when}: ${outcome}, offered ${d.offered ?? 0}${tabs}${controls}${floor}${later}${smart}`;
+  const links = d.query !== undefined ? `, ${d.linkMatched ?? 0} ${d.linkMatched === 1 ? 'link' : 'links'} matched the page query '${d.query}'` : '';
+  return `${when}: ${outcome}, offered ${d.offered ?? 0}${tabs}${controls}${floor}${links}${later}${smart}`;
 }
 
 const PREWARM: Record<Exclude<PrewarmVerdict, 'warmed' | 'failed'>, string> = {

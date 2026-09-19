@@ -33,7 +33,7 @@ export type { ChatMessage, ChatRole } from './prompt';
 export { INTENT_REGISTRY, buildIntentUrl, calendarDates, intentLabel, isIntentDestination } from './intents';
 export type { IntentEntity, IntentSpec } from './intents';
 export { DENYLIST_HOSTS, isDenylisted } from './denylist';
-export { DESTRUCTIVE_NAMES, MONEY_NAMES, isDestructiveName, isMoneyName, mayPay } from './destructive';
+export { DESTRUCTIVE_NAMES, MONEY_NAMES, isDestructiveElement, isDestructiveName, isMoneyName, mayPay } from './destructive';
 export type { PayContext } from './destructive';
 export {
   CONTROL_ROLES,
@@ -60,6 +60,7 @@ export {
   linkMatchesQuery,
   linkRelatesToQuery,
   pageIntent,
+  pageQueryClick,
   queryTokens,
   registrableDomain,
 } from './page-query';

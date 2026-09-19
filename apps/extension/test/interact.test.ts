@@ -7,7 +7,7 @@ function lay(el: Element, width = 120, top = 100, height = 32, left = 0): void {
 }
 
 function layAll(width = 120, top = 100): void {
-  for (const el of document.querySelectorAll('button,input,select,a,summary,[role]')) lay(el, width, top);
+  for (const el of document.querySelectorAll('button,input,select,a,summary,h1,h2,h3,h4,[role]')) lay(el, width, top);
 }
 
 const named = (descriptors: ElementDescriptor[]) => descriptors.map((d) => d.nm);
@@ -337,6 +337,8 @@ describe('enumerateLinks', () => {
     expect(registry.get('e0')).toMatchObject({ role: 'link', site: 'doordash.com', key: 'link|doordash food delivery' });
     expect(registry.get('e0')!.el).toBe(document.querySelector('a'));
     expect(registry.get('e0')!.at).toBeUndefined();
+    // A card anchor around a heading is clicked itself; the chip sits on the heading.
+    expect(registry.get('e2')!.at).toBe(document.querySelector('h3'));
   });
 
   it('reads the query off a filled search field too, but never next to a visible password field', () => {

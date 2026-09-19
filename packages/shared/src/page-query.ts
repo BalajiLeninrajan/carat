@@ -1,4 +1,4 @@
-import type { ElementDescriptor, FieldDescriptor, PageMeta } from './types';
+import type { ElementDescriptor, FieldDescriptor, InteractSuggestion, PageMeta } from './types';
 
 /**
  * The `sourceContextId` of a click that the page's own query justifies. The
@@ -116,4 +116,21 @@ export function isSiteLink(e: Pick<ElementDescriptor, 'r' | 'h'>): e is ElementD
 export function firstMatchingLink(elements: ElementDescriptor[], intent: PageIntent | null): ElementDescriptor | null {
   if (!intent) return null;
   return elements.find((e) => isSiteLink(e) && linkMatchesQuery(e, intent)) ?? null;
+}
+
+/**
+ * The click on the link the page's own query names: cited to the page, sure
+ * enough for every eagerness level. Built the same way by the local provider
+ * and by the orchestrator's pre-check, so both offer the same chip.
+ */
+export function pageQueryClick(link: ElementDescriptor, intent: PageIntent): InteractSuggestion {
+  return {
+    kind: 'interact',
+    elementId: link.i,
+    verb: 'click',
+    value: link.nm,
+    confidence: PAGE_QUERY_CONFIDENCE,
+    reason: `you searched for "${intent.query}" on this page; this result is on ${link.h}`,
+    sourceContextId: PAGE_SOURCE,
+  };
 }

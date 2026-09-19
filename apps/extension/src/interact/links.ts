@@ -1,4 +1,4 @@
-import { isDenylisted, isDestructiveName, registrableDomain, truncate } from '@carat/shared';
+import { isDenylisted, isDestructiveElement, registrableDomain, truncate } from '@carat/shared';
 import { isVisible } from '../capture/visibility';
 import type { LinkCandidate } from '../fill/adapters';
 import { getAdapter } from '../fill/adapters';
@@ -11,9 +11,6 @@ export const LINK_WINDOW_BELOW = 1;
 export const MAX_LINKS = 8;
 
 const NAME_MAX = 60;
-// A short link named like an action ("Sign out", "Unsubscribe", "Delete account") is one; a page title that
-// happens to contain "order now" is not, and following it orders nothing.
-const ACTION_NAME_WORDS = 4;
 // GET links that do something: never offered, whatever they are called.
 const ACTION_PATH = /(?:^|[/_.-])(?:logout|log-out|signout|sign-out|unsubscribe|delete|remove|cancel|checkout|pay|payment|withdraw|transfer|deactivate)(?=$|[/_.?-])/i;
 // Page chrome and cookie banners: not what anyone searched for.
@@ -57,7 +54,8 @@ export interface LinkEntry {
  * with visible text is a candidate. Out, before anything is described: links
  * to `mailto:`, `tel:` and `javascript:`, links on nav, header, footer or a
  * cookie banner, links to denylisted hosts or to a path that acts (logout,
- * unsubscribe, checkout), downloads, and short links with a destructive name.
+ * unsubscribe, checkout), downloads, and short links with a destructive name
+ * ("Sign out"; a page title that happens to say "order now" orders nothing).
  */
 export function enumerateLinks(doc: Document, win: Window, site: Site): LinkEntry[] {
   if (!pageQuery(doc)) return [];
@@ -74,7 +72,7 @@ export function enumerateLinks(doc: Document, win: Window, site: Site): LinkEntr
     if (rect.bottom <= 0 || rect.top >= (1 + LINK_WINDOW_BELOW) * vh) return;
     if (!isVisible(el, win) || el.getAttribute('aria-disabled') === 'true' || el.closest('[aria-hidden="true"],[inert]')) return;
     const title = truncate(name, NAME_MAX);
-    if (!title || (isDestructiveName(title) && title.split(/\s+/).length <= ACTION_NAME_WORDS)) return;
+    if (!title || isDestructiveElement({ r: 'link', nm: title, h: target })) return;
     out.push({ el, name: title, at, site: target, inViewport: inViewport(at, win), rect, order });
   });
   return out;
@@ -96,7 +94,11 @@ function destination(el: HTMLAnchorElement, doc: Document): string | null {
   return registrableDomain(url.hostname);
 }
 
-/** Every anchor with an href, named by its aria-label, an inner heading, or its own text. Anchors acting as buttons are elements already. */
+/**
+ * Every anchor with an href, named by its aria-label, an inner heading, or
+ * its own text. When a heading names it, the chip sits on that heading
+ * rather than on the whole card. Anchors acting as buttons are elements already.
+ */
 function genericLinks(doc: Document): LinkCandidate[] {
   const out: LinkCandidate[] = [];
   for (const el of doc.querySelectorAll<HTMLAnchorElement>('a[href]')) {
@@ -104,7 +106,7 @@ function genericLinks(doc: Document): LinkCandidate[] {
     const heading = el.getAttribute('aria-label') ? null : el.querySelector(INNER_TITLE);
     const name = heading ? (heading.textContent ?? '').replace(/\s+/g, ' ').trim() : accessibleName(el, doc);
     if (!name) continue;
-    out.push({ el, name, at: el });
+    out.push({ el, name, at: heading ?? el });
   }
   return out;
 }

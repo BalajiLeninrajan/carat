@@ -53,3 +53,19 @@ export interface PayContext {
 export function mayPay(ctx: PayContext): boolean {
   return ctx.allowPayments === true;
 }
+
+// A link named like an action is one: "Sign out", "Unsubscribe", "Delete my account".
+const ACTION_LINK_WORDS = 4;
+
+/**
+ * Whether a described element must never get a chip. A control is judged by
+ * its name alone. A real link (role `link` with a destination site) is a
+ * page title as often as an action label, and following "Order Now | Quick
+ * and Easy Food Delivery" orders nothing, so only a short link with a
+ * destructive name is refused.
+ */
+export function isDestructiveElement(e: { r: string; nm: string; h?: string }): boolean {
+  if (!isDestructiveName(e.nm)) return false;
+  if (e.r !== 'link' || !e.h) return true;
+  return e.nm.trim().split(/\s+/).length <= ACTION_LINK_WORDS;
+}

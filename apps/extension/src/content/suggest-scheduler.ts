@@ -397,9 +397,11 @@ export function startSuggestions(
 
   /**
    * One element, one verb, one Tab. The chip sits on the element and reads
-   * `Click "Save"?`; Tab performs it once and asks for a fresh snapshot, since
-   * the page usually changes. Nothing is chained onto it. A money control
-   * takes Enter instead, and its accept is reported as such.
+   * `Click "Save"?`, or `Open "…" on doordash.com?` for a real link, where it
+   * sits on the result's title and Tab clicks the anchor around it. Tab
+   * performs it once and asks for a fresh snapshot, since the page usually
+   * changes. Nothing is chained onto it. A money control takes Enter instead,
+   * and its accept is reported as such.
    */
   function presentInteract(
     interactions: InteractionView[],
@@ -419,7 +421,9 @@ export function startSuggestions(
     if (!pick || !entry) return false;
     const host = doc.location.host;
     const frame = frameOf(entry);
-    const text = interactionChipText(pick.verb, entry.name, pick.value, entry.role);
+    // A result link is clicked on its anchor but the chip sits on the title inside it.
+    const at = entry.at ?? entry.el;
+    const text = interactionChipText(pick.verb, entry.name, pick.value, entry.role, entry.site);
     const key: AcceptKey = entry.money ? 'Enter' : 'Tab';
     const forget = (): void => {
       if (!last) return;
@@ -447,10 +451,10 @@ export function startSuggestions(
       snapshotSoon();
     };
 
-    const onScreen = frame ? hub.anchor(frame, entry.frame!.remoteId) !== null && inViewport(entry.el, win) : inViewport(entry.el, win);
+    const onScreen = frame ? hub.anchor(frame, entry.frame!.remoteId) !== null && inViewport(at, win) : inViewport(at, win);
     if (!onScreen) {
       presentScroll(pick.elementId, {
-        target: entry.el,
+        target: at,
         name: entry.name,
         ...view,
         interceptFrom,
@@ -474,7 +478,7 @@ export function startSuggestions(
 
     const disarm = armFrame(frame, key);
     chip.show({
-      target: entry.el,
+      target: at,
       verb: text.verb,
       value: text.value,
       tail: text.tail,

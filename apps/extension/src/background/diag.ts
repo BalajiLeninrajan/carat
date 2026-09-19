@@ -91,6 +91,10 @@ export interface SuggestDiag {
   navigation?: number;
   /** Element interactions (click, check, set, choose) handed over alongside them. */
   interactions?: number;
+  /** What the user searched for on the page, when it had a query and links to match it against. */
+  query?: string;
+  /** Described links whose site or title is that query; the first one is offered without asking a provider. */
+  linkMatched?: number;
   /** A better answer may still come; the content script polls for it. */
   refine?: boolean;
   /** The smart model was asked for a second opinion. */

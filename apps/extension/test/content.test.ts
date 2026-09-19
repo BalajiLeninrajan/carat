@@ -1018,7 +1018,7 @@ describe('interaction chip', () => {
   });
 
   type Fields = Array<{ i: string; al?: string; v?: string }>;
-  type Elements = Array<{ i: string; nm: string; r: string }>;
+  type Elements = Array<{ i: string; nm: string; r: string; h?: string }>;
 
   function button(name: string, top: number): HTMLButtonElement {
     const el = document.createElement('button');
@@ -1211,6 +1211,40 @@ describe('interaction chip', () => {
     tab();
     expect(clicks).toHaveBeenCalledTimes(1);
     expect(calls('feedback')).toEqual([{ kind: 'interact', host: location.host, role: 'button', name: 'Save', accepted: true }]);
+  });
+
+  it('offers the result the page query names: the chip sits on the title, says the site, and Tab clicks the anchor', async () => {
+    window.history.pushState({}, '', '/search?q=doordash');
+    document.body.innerHTML = '<a href="https://www.doordash.com/en-CA/"><h3>Order Now | Quick and Easy Food Delivery</h3></a><a href="mailto:hi@doordash.com">Email DoorDash</a>';
+    const link = document.querySelector('a')!;
+    const title = document.querySelector('h3')!;
+    onScreen(link, 100);
+    onScreen(title, 400);
+    onScreen(document.querySelectorAll('a')[1]!, 200);
+    const clicks = vi.fn((e: Event) => e.preventDefault());
+    link.addEventListener('click', clicks);
+    answer((_fields, elements) => {
+      const e = elements.find((x) => x.r === 'link' && x.h);
+      return e ? { interactions: [{ kind: 'interact', elementId: e.i, verb: 'click', value: e.nm, confidence: 0.8, reason: '', sourceContextId: 'page' }] } : {};
+    });
+    const chip = createChip(document);
+    startSuggestions(ctx, chip, document);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
+    await flush();
+
+    // The mailto anchor is never described; the result link is, with its site.
+    expect(calls('suggestRequest')[0]?.elements).toEqual([
+      expect.objectContaining({ r: 'link', nm: 'Order Now | Quick and Easy Food Delivery', h: 'doordash.com' }),
+    ]);
+    expect(chip.text).toBe('Open "Order Now | Quick and Easy Food Delivery" on doordash.com?');
+    // The chip sits on the title inside the anchor, not on the card around it.
+    expect(Number.parseInt(chipHost().style.top, 10)).toBeGreaterThan(300);
+
+    tab();
+    expect(clicks).toHaveBeenCalledTimes(1);
+    expect(clicks.mock.calls[0]![0].target).toBe(link);
+    expect(calls('feedback').at(-1)).toEqual({ kind: 'interact', host: location.host, role: 'link', name: 'Order Now | Quick and Easy Food Delivery', accepted: true });
+    window.history.pushState({}, '', '/');
   });
 
   it('performs a bare scroll suggestion as the whole interaction and asks again once the element is in view', async () => {

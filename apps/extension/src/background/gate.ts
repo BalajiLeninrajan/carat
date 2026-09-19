@@ -1,5 +1,5 @@
 import type { ContextItem, Eagerness, ElementDescriptor, FieldDescriptor, PageMeta, Settings } from '@carat/shared';
-import { CONTROL_ROLES, DEFAULT_EAGERNESS, clickAllowed, isDenylisted } from '@carat/shared';
+import { CONTROL_ROLES, DEFAULT_EAGERNESS, clickAllowed, isDenylisted, isSiteLink, pageIntent } from '@carat/shared';
 import { isSiteOff } from '../store';
 import type { GateVerdict } from './diag';
 import { isFresh, isSource } from './eligible';
@@ -39,7 +39,8 @@ export function gate(
  * Same checks as `gate`, but says which one stopped the request. Fresh text
  * from another tab feeds fills and interactions (another origin too, below
  * eager); the requesting tab's own fresh text feeds actions. Either is enough
- * to ask.
+ * to ask. So is the page's own query with a link to match it against: the
+ * search the user just made needs no other tab to explain it.
  */
 export function explainGate(
   input: GateInput,
@@ -52,6 +53,7 @@ export function explainGate(
   if (isSiteOff(settings, input.page.host)) return 'site-off';
   if (isDenylisted(input.page.host)) return 'denylisted';
   if (!hasWork(input, settings.eagerness)) return 'no-fields';
+  if (hasQueryAndLinks(input)) return 'ok';
   if (items.length === 0) return 'no-context';
   const fresh = items.filter((i) => isFresh(i, now));
   if (fresh.length === 0) return 'stale-context';
@@ -61,13 +63,19 @@ export function explainGate(
   return 'own-context';
 }
 
-/** A field, a value-bearing control, (after a fill here) any element at all, or a primary action the click rule lets through. */
+/** A field, a value-bearing control, a real link on a page with a query, (after a fill here) any element at all, or a primary action the click rule lets through. */
 export function hasWork(input: GateInput, eagerness: Eagerness = DEFAULT_EAGERNESS): boolean {
   if (input.fields.length > 0) return true;
   const elements = input.elements ?? [];
   if (elements.some((e) => CONTROL_ROLES.has(e.r))) return true;
+  if (hasQueryAndLinks(input)) return true;
   const filled = (input.filled?.length ?? 0) > 0;
   if (filled && elements.length > 0) return true;
   const gate = { filled, flow: input.flow === true, eagerness, fillable: false };
   return elements.some((e) => (e.r === 'button' || e.r === 'link') && e.m !== 1 && clickAllowed(e, gate));
+}
+
+/** The page says what the user searched for and lists links it could be answered by. */
+function hasQueryAndLinks(input: GateInput): boolean {
+  return pageIntent(input.page, input.fields) !== null && (input.elements ?? []).some(isSiteLink);
 }
