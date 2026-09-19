@@ -38,6 +38,18 @@ Field fills only use text from other tabs; the page being filled is never its ow
 
 If a tab already shows the destination, the chip says "Switch to" instead of "Open in" and reuses that tab.
 
+## How readily it offers
+
+A wrong chip costs one Esc. A missing chip costs the whole retype. So by default Carat offers a chip whenever there is a plausible candidate, and the options page has a three-way setting, `eagerness`, for people who want it quieter. Every number that used to be fixed lives in one table, `EAGERNESS` in `packages/shared/src/eagerness.ts`, and the providers, the eval and the service worker all read it.
+
+| Level                | Confidence floor | Jev `relevant` gate | Chips per answer | Other tabs on the same site | Regex provider                                  | Model's last rule                                   |
+| -------------------- | ---------------- | ------------------- | ---------------- | --------------------------- | ----------------------------------------------- | --------------------------------------------------- |
+| `eager` (default)    | 0.35             | 0.25                | 4                | count as context            | also bare capitalised names and quoted strings  | propose the best plausible value, say how sure      |
+| `balanced`           | 0.55             | 0.5                 | 2                | shut out                    | cued matches only                               | pick the likelier value when torn, else stay quiet  |
+| `conservative`       | 0.7              | 0.6                 | 2                | shut out                    | cued matches only                               | when unsure, return nothing                         |
+
+The content script still shows one chip at a time; after Tab or Esc it moves to the next field's chip from the same answer, so a wrong first guess never hides a right second one. The escape valves do not move with the level: Esc suppresses that field and source for 10 minutes, a chip that is ignored goes away after 20 seconds, the requesting tab's own text is never a fill source, the destructive-name list never gets a chip, and nothing navigates without Tab. The popup's check line names the level when a candidate was dropped for confidence ("2 candidates under the eager floor (0.35)").
+
 ## Fast path and smart path
 
 Every chip comes from the fast path first: text captured from other tabs, the chat model with `reasoning_effort: none`, a 6s budget. It never sees an image. The smart path is opt-in ("Screenshots of tabs with little text" on the options page, off by default) and never delays the chip. By default it is the same model with `reasoning_effort: low`; the optional "Smart model" field swaps in a bigger one. Either way it does two jobs.
@@ -75,4 +87,4 @@ pnpm test
 pnpm eval --provider local
 ```
 
-`pnpm eval` runs the eighteen fixtures in `packages/providers/eval/fixtures` against a provider and prints pass/fail with latency. Pass `--provider openai` with `OPENAI_API_KEY` set in the environment to run them against the model instead of the regex fallback.
+`pnpm eval` runs the twenty-one fixtures in `packages/providers/eval/fixtures` against a provider and prints pass/fail with latency. Pass `--provider openai` with `OPENAI_API_KEY` set in the environment to run them against the model instead of the regex fallback. `--eagerness conservative|balanced|eager` picks the level (default eager); a few fixtures expect a chip at eager only, and two negatives are allowed a weak chip there, printed as WEAK. See the fixtures README for the two keys that express this.
