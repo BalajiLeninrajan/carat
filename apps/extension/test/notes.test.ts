@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ContextItem } from '@carat/shared';
 import { NOTES_LIMITS, createNotes, fallbackFacts } from '../src/background/notes';
 import type { Distill } from '../src/background/notes';
+import { describeTabs } from '../src/background/tabs';
 import type { StorageArea } from '../src/store';
 
 class FakeArea implements StorageArea {
@@ -177,5 +178,22 @@ describe('fallbackFacts', () => {
     const facts = fallbackFacts({ id: 'i1', kind: 'page', title: 'Waterloo plans', text: 'Dinner at Seven Shores Cafe. Mail hana@example.com.' });
     expect(facts.join(' ')).toContain('email address mentioned: hana@example.com');
     expect(facts.join(' ')).toContain('(on "Waterloo plans")');
+  });
+});
+
+describe('describeTabs', () => {
+  it('names the tabs the user could switch to, and leaves out the rest', () => {
+    expect(
+      describeTabs(
+        [
+          { id: 1, url: 'https://maps.google.com/', title: 'Google Maps' },
+          { id: 2, url: 'chrome://extensions', title: 'Extensions' },
+          { id: 3, url: 'https://www.rbcroyalbank.com/', title: 'Banking' },
+          { id: 4, url: 'https://discord.com/channels/1', title: 'Waterloo plans' },
+          { url: 'https://example.com/', title: 'No id' },
+        ],
+        4,
+      ),
+    ).toEqual([{ id: 1, host: 'maps.google.com', title: 'Google Maps' }]);
   });
 });
