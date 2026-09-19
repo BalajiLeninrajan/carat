@@ -378,6 +378,14 @@ export function createChip(doc: Document = document): Chip {
     ring(opts.target);
     render();
     reposition();
+    // The control's box is nowhere the chip can sit — a field in a frame that
+    // is scrolled out of view, an anchor the frame reported as off screen. A
+    // chip that is mounted but invisible eats nothing and offers nothing, so
+    // the offer moves to the banner, which is always somewhere.
+    if (session?.mode === 'control' && !session.onScreen) {
+      showBanner({ ...opts, target: opts.target });
+      return;
+    }
     // A longer label would shift the pill out from under the user's eye; put it back.
     if (held && host.style.display !== 'none') {
       host.style.top = held.top;

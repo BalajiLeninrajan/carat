@@ -41,6 +41,8 @@ The answer is one JSON object with `target` as its first property, streamed. The
 | `switch` | bring one of the open tabs forward |
 | `none` | nothing worth offering; refused at `eager` |
 
+At `eager` a refusal is not the end of it. An answer of `none`, one the service worker refuses, one under the floor and a provider that failed or timed out all mean the same thing — no chip — so the question goes back out once with the reason written into `<history>` as a line the model reads: `carat: the last answer was none; something on this page is still the next step`. If the second answer is nothing too, the plainest step the page itself offers stands in: read on when there is more page below, else put what the user read into the field in front of them, else press the control nearest the focus, never a risky one. The page that truly has nothing — no controls, no text, nothing below — is still allowed to say so, and the popup's check line says which of those it was.
+
 There are no hand-written priors any more. The page kind, the results-page rule, the checkout rule and the article-scroll rule are gone: the model decides, and the regex pass is only a placeholder while it thinks.
 
 ## What Carat refuses
@@ -101,7 +103,7 @@ The popup shows what Carat currently knows and a few controls:
 
 - An "On for <host>" switch for the tab it was opened over. Off means Carat neither reads that site nor offers chips on it. Hosts match exactly.
 - Pin. While pinned nothing new is read and nothing expires, so a stray tab cannot change what Carat knows mid-demo. Clear also unpins.
-- Debug lines for the current tab: what happened to its last capture, and how its last request went — what answered first and how long the page waited, each provider's latency, the action's kind, the model's own label and reason, whether it asks for a second Tab, why one was refused, and whether the model replaced the placeholder.
+- Debug lines for the current tab: what happened to its last capture, and how its last request went — what answered first and how long the page waited, each provider's latency, the action's kind, the model's own label and reason, whether it asks for a second Tab, why one was refused, what the second ask was for, whether the model replaced the placeholder, and, when the page ended up with no chip on it, why.
 
 `Alt+Shift+C` asks again on the current page right now, past the 60-second cache and past anything dismissed with Esc. Change the key at `chrome://extensions/shortcuts`.
 

@@ -239,9 +239,12 @@ export class OpenAICompatProvider implements VisionProvider {
       }
       if (res.ok) return await readStream(res, onDelta);
       const { message, param } = await errorOf(res);
-      if (res.status !== 400 || !param || !this.canDrop(request, param)) throw new Error(`HTTP ${res.status}: ${message}`);
-      delete request[param];
-      await this.relaxStore.drop(this.options.model, param);
+      // Servers that reject `reasoning_effort`, `prompt_cache_key` or a streamed
+      // `response_format` often name it in the prose and leave `error.param` empty.
+      const drop = param ?? paramFromMessage(message, request);
+      if (res.status !== 400 || !drop || !this.canDrop(request, drop)) throw new Error(`HTTP ${res.status}: ${message}`);
+      delete request[drop];
+      await this.relaxStore.drop(this.options.model, drop);
     }
     throw new Error('the model kept rejecting the request');
   }
@@ -286,6 +289,21 @@ function responseFormat(mode: OutputMode): Record<string, unknown> {
     case 'prompt':
       return {};
   }
+}
+
+/**
+ * The parameter a 400 is about when the server did not put it in
+ * `error.param`. Only a key the request actually carries counts, and only one
+ * the request can do without, so a message that happens to mention "model" or
+ * "messages" never strips the call of what it is. The longest match wins, so
+ * "response_format" is not read as "format".
+ */
+export function paramFromMessage(message: string, body: Record<string, unknown>): string | undefined {
+  const text = message.toLowerCase();
+  return Object.keys(body)
+    .filter((k) => !NEVER_DROP.has(k))
+    .sort((a, b) => b.length - a.length)
+    .find((k) => new RegExp(`\\b${k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(text));
 }
 
 async function errorOf(res: Response): Promise<{ message: string; param?: string }> {

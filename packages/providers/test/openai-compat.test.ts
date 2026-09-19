@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { NextActionRequest } from '@carat/shared';
 import { WARMUP_OUTLINE, buildNextActionMessages, renderPrefix } from '@carat/shared';
-import { OpenAICompatProvider, cacheKey, memoryRelaxStore } from '../src/openai-compat';
+import { OpenAICompatProvider, cacheKey, memoryRelaxStore, paramFromMessage } from '../src/openai-compat';
 
 const req: NextActionRequest = {
   page: { host: 'www.google.com', title: 'Google Maps', path: '/maps', scroll: { y: 0, pages: 1, more: false } },
@@ -96,6 +96,33 @@ describe('the streamed action call', () => {
     await p.next(req, { signal: new AbortController().signal });
     expect(bodies).toHaveLength(3);
     expect('reasoning_effort' in bodies[2]!).toBe(false);
+  });
+
+  it('drops the parameter a 400 names in its message when error.param is empty', async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+      bodies.push(body);
+      // A vLLM-style server: the parameter is in the prose, `param` is not set.
+      if ('response_format' in body) {
+        return new Response(JSON.stringify({ error: { message: "response_format is not supported with stream: true" } }), { status: 400 });
+      }
+      return sse(['{"target":1,"kind":"click","value":"","label":"Go","irreversible":false,"confidence":0.6,"reason":"x"}']);
+    }) as unknown as typeof fetch;
+    const relax = memoryRelaxStore();
+    const p = provider(fetchImpl, { relaxStore: relax, mode: 'json_object' });
+    expect(await p.next(req, { signal: new AbortController().signal })).toMatchObject({ kind: 'click' });
+    expect(bodies).toHaveLength(2);
+    expect('response_format' in bodies[1]!).toBe(false);
+    expect(await relax.dropped('gpt-5.6-luna')).toEqual(['response_format']);
+  });
+
+  it('reads only a parameter the request carries and can do without out of a 400 message', () => {
+    const body = { model: 'm', messages: [], stream: true, prompt_cache_key: 'k', reasoning_effort: 'none' };
+    expect(paramFromMessage("unknown parameter 'prompt_cache_key'", body)).toBe('prompt_cache_key');
+    // `model` is named but the request cannot go without it, and `top_p` is not in it at all.
+    expect(paramFromMessage('the model is not available', body)).toBeUndefined();
+    expect(paramFromMessage("unsupported value for 'top_p'", body)).toBeUndefined();
   });
 
   it('never drops the model or the messages, whatever the server says', async () => {

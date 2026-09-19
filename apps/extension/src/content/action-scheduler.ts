@@ -36,6 +36,19 @@ export const SNAPSHOT_TIMING = {
    * the page is open; the model is never left with nothing to try.
    */
   escRetryMs: [3000, 6000, 10_000],
+  /**
+   * An exchange that ended with nothing on screen is asked again after this.
+   * Long enough that a page mid-render is not asked twice about the same
+   * half of itself, short enough that the user is not left looking at a page
+   * carat has nothing to say about.
+   */
+  silentRetryMs: 1200,
+  /**
+   * Silent asks in a row before carat stops trying. The page that truly has
+   * nothing is rare; the loop that would cost a request every second is not.
+   * Reset the moment a chip goes up or the user does anything.
+   */
+  silentRetries: 3,
   /** Refusals in a row before the chip starts saying how to shut carat up. */
   snoozeAfterEscapes: 5,
   /** Shift+Tab: how long this tab hears nothing at all. */
@@ -48,7 +61,7 @@ export const SNAPSHOT_TIMING = {
  * `performed` skips the memo and the gap both, `retry` follows an Esc, and
  * the rest go through the memo.
  */
-type Trigger = 'first' | 'quiet' | 'evidence' | 'focus' | 'performed' | 'settled' | 'user' | 'retry' | 'lost' | 'force';
+type Trigger = 'first' | 'quiet' | 'evidence' | 'focus' | 'performed' | 'settled' | 'user' | 'retry' | 'lost' | 'silent' | 'force';
 
 /** Why an ask did not go out. `snoozed` is the one the user chose. */
 type Refusal = 'gone' | 'snoozed' | 'performing' | 'awaiting' | 'queued';
@@ -131,6 +144,8 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
   let performing = false;
   /** One re-ask per lost ticket, so a worker that keeps dying costs one extra request, not a loop. */
   let lostRetry = false;
+  /** Exchanges that ended with no chip on screen, since the last one that did. */
+  let silentAsks = 0;
   /** Shift+Tab: when carat may speak on this tab again, or 0 when it may now. */
   let quietUntil = 0;
   let quietTimer: number | null = null;
@@ -165,6 +180,26 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
   // Behind the fast lane, not in front of it: the page that keeps loading after a click.
   const afterPerform = settleTimer(SNAPSHOT_TIMING.settleMs, () => ask('settled'));
   const afterMutation = settleTimer(SNAPSHOT_TIMING.mutationQuietMs, () => ask('quiet'));
+  const afterSilence = settleTimer(SNAPSHOT_TIMING.silentRetryMs, () => ask('silent'));
+
+  /**
+   * The exchange is over. A chip on screen is the end of it; nothing on
+   * screen is not an answer, so the page is asked again — a bounded few
+   * times, because the page that truly has nothing must also be allowed to
+   * say so. Everything that could legitimately keep carat quiet is checked
+   * first: the snooze, an Esc waiting on its own timer, an action in flight.
+   */
+  function checkSilent(): void {
+    if (!ctx.isValid) return;
+    if (chip.visible) {
+      silentAsks = 0;
+      return;
+    }
+    if (quietUntil !== 0 || awaitingUser || performing) return;
+    if (silentAsks >= SNAPSHOT_TIMING.silentRetries) return;
+    silentAsks++;
+    afterSilence.soon();
+  }
 
   /** A request the model may still improve on has closed; the chip is final. */
   const settle = (mine: number): void => {
@@ -246,12 +281,14 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
       }
       const now = Date.now();
       const fresh = hash !== lastHash;
-      // Two questions the memo must not answer: a lost ticket, whose whole
-      // point is that the last answer never arrived, and the one after carat
-      // acted, which the timeline has a new line for whatever the outline did.
-      // The settle behind that one is not the same question: it is only worth
+      // Questions the memo must not answer: a lost ticket, whose whole point
+      // is that the last answer never arrived; the one after carat acted,
+      // which the timeline has a new line for whatever the outline did; and
+      // the one after an exchange that put nothing on screen, whose whole
+      // point is that the memo's stored answer was no answer. The settle
+      // behind the performed one is not the same question: it is only worth
       // asking if the page moved after the immediate one went out.
-      if (!force && trigger !== 'lost' && trigger !== 'performed') {
+      if (!force && trigger !== 'lost' && trigger !== 'performed' && trigger !== 'silent') {
         // A page that settled without changing has nothing new to say.
         if ((trigger === 'quiet' || trigger === 'settled') && !fresh) return;
         if (!fresh && events === lastEvents && now - lastAt < SNAPSHOT_TIMING.identicalMs) return;
@@ -271,6 +308,8 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
       if (!pending) observer.onAnswer?.();
       present(res?.action ?? null);
       if (res?.ticket !== undefined) void follow(res.ticket, mine);
+      // With a ticket the exchange is not over yet; `follow` checks when it is.
+      else checkSilent();
     } finally {
       inFlight = false;
       drain();
@@ -287,10 +326,19 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
       // it stand as the model's answer.
       if (update.lost) {
         settle(mine);
+        // The one re-ask is only spent when it actually goes out: a refusal
+        // here (an Esc waiting on its timer, an action in flight) would
+        // otherwise burn it and leave the placeholder standing as the answer.
         if (!lostRetry) {
-          lostRetry = true;
-          ask('lost');
+          const refusal = ask('lost');
+          if (refusal === undefined || refusal === 'queued') {
+            lostRetry = true;
+            return;
+          }
         }
+        // Spent, or refused. A worker that keeps dying must still not end in
+        // silence, so what is left is the bounded budget every other path uses.
+        checkSilent();
         return;
       }
       // The number lands long before the words do; the ring goes up on it now.
@@ -303,6 +351,7 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     }
     lostRetry = false;
     settle(mine);
+    if (mine === seq) checkSilent();
   }
 
   function present(action: NextAction | null): void {
@@ -316,6 +365,8 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     if (done.has(key) || dismissed.has(key)) return;
     const target = action.target === null ? undefined : registry.get(action.target);
     if (['fill', 'click', 'select'].includes(action.kind) && !target?.el.isConnected) return;
+    // Something is going up; whatever silence came before it is over.
+    silentAsks = 0;
     if (opts.page) opts.page.filling = true;
 
     const el = target?.el;
@@ -359,6 +410,13 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
       if (why === 'scrolled' && action.kind === 'scroll') done.add(key);
       userActed();
       afterUser.soon();
+      return;
+    }
+    // The offer ran out of time, or the control under it went away. Neither
+    // is the user saying no, and neither leaves anything on screen: ask again
+    // rather than let the page stand there with no chip on it.
+    if (why === 'timeout' || why === 'detached') {
+      checkSilent();
       return;
     }
     if (why !== 'escape' && why !== 'typed') return;
@@ -405,6 +463,7 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     afterCapture.cancel();
     afterPerform.cancel();
     afterMutation.cancel();
+    afterSilence.cancel();
     cancelRetry();
     awaitingUser = false;
     if (quietTimer !== null) clearTimeout(quietTimer);
@@ -496,6 +555,7 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     events++;
     awaitingUser = false;
     escapes = 0;
+    silentAsks = 0;
     cancelRetry();
   }
 
@@ -554,6 +614,7 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     afterPerform.cancel();
     afterMutation.cancel();
     afterCapture.cancel();
+    afterSilence.cancel();
     cancelRetry();
     endSnooze();
     escapes = 0;
@@ -570,7 +631,10 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     awaitingUser = false;
     performing = false;
     lostRetry = false;
-    // Nothing is asked for on the spot; the next ordinary trigger does that.
+    silentAsks = 0;
+    // Nothing goes out on the spot, but this page load now knows nothing at
+    // all, so it is owed a chip again: one ask once the page has settled.
+    afterUser.soon();
   }
 
   const onUser = (): void => {

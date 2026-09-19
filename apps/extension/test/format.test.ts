@@ -86,6 +86,31 @@ describe('describeSuggest', () => {
     );
   });
 
+  it('says why there is no chip, and what was retried to avoid it', () => {
+    const line = describeSuggest(
+      {
+        ...base,
+        gate: 'ok',
+        source: 'fallback',
+        ms: 900,
+        reasked: 'none',
+        kind: 'scroll',
+        label: 'Scroll more',
+        confidence: 0.4,
+      },
+      1000,
+    );
+    expect(line).toContain('nobody answered, so the page’s plainest step stood in');
+    expect(line).toContain('asked again after "none"');
+    expect(line).not.toContain('no chip');
+
+    const quiet = describeSuggest(
+      { ...base, gate: 'ok', source: 'model', ms: 900, reasked: 'none', silent: 'nothing was offered and the page had no plainer step to stand in' },
+      1000,
+    );
+    expect(quiet).toContain('no chip: nothing was offered and the page had no plainer step to stand in');
+  });
+
   it('prints the three moments that decide how fast it feels, and whether the prefix was warm', () => {
     const line = describeSuggest(
       { ...base, gate: 'ok', source: 'placeholder', ms: 4, placeholderMs: 4, partialMs: 210, finalMs: 812, warmed: true, kind: 'click' },

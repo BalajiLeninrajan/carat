@@ -52,7 +52,7 @@ export interface CaptureDiag {
 }
 
 /** Where the action the chip showed first came from. */
-export type AnswerOrigin = 'cache' | 'placeholder' | 'model';
+export type AnswerOrigin = 'cache' | 'placeholder' | 'model' | 'fallback';
 
 export interface SuggestDiag {
   at: number;
@@ -85,6 +85,18 @@ export interface SuggestDiag {
   armed?: boolean;
   /** Why an otherwise valid action was refused: under the floor, a control that is not there, a scroll with nothing below. */
   refused?: string;
+  /**
+   * Eager owes the user a chip, so a first answer of nothing is put back to
+   * the model once with the reason written into the timeline. This is that
+   * reason, and its presence means a second call went out.
+   */
+  reasked?: string;
+  /**
+   * Why this request ended with no chip on the page, in the words the popup
+   * prints. Set on every path that ends silent and on no path that does not,
+   * so "there was no prompt" always has an answer.
+   */
+  silent?: string;
   /** A better answer may still come; the content script polls for it. */
   refine?: boolean;
   /** The model replaced what the placeholder had put up. */

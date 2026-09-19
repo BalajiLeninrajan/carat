@@ -13,9 +13,10 @@ import { LocalProvider, RaceProvider, createProvider } from '@carat/providers';
 import type { StorageArea } from '../store';
 import type { NextActionResponse, PageSnapshot } from '../messaging';
 import { AnswerCache, CACHE_MS } from './answer-cache';
-import type { AnswerOrigin, SuggestDiag } from './diag';
+import type { AnswerOrigin, GateVerdict, SuggestDiag } from './diag';
 import { explainGate } from './gate';
 import type { HistoryStore } from './history';
+import { lastResort } from './last-resort';
 
 import type { RefineQueue } from './refine';
 import type { Requester } from './requester';
@@ -76,6 +77,7 @@ export async function nextAction(input: PageSnapshot, requester: Requester, deps
     eagerness: settings.eagerness,
   };
   if (diag.gate !== 'ok') {
+    diag.silent = SILENT_GATE[diag.gate];
     deps.onDiag?.(diag);
     return { action: null };
   }
@@ -103,6 +105,7 @@ export async function nextAction(input: PageSnapshot, requester: Requester, deps
     diag.source = 'cache';
     diag.ms = now() - started;
     report(diag, hit.action);
+    sayWhySilent(diag, hit.action);
     deps.onDiag?.(diag);
     return { action: hit.action };
   }
@@ -123,12 +126,15 @@ export async function nextAction(input: PageSnapshot, requester: Requester, deps
       diag,
     );
     diag.finalMs = now() - started;
-    const chosen = pick(placeholder, model);
-    diag.source = chosen === placeholder && placeholder !== null ? 'placeholder' : 'model';
-    diag.ms = now() - started;
+    const first = pick(placeholder, model);
+    diag.source = first === placeholder && placeholder !== null ? 'placeholder' : 'model';
     if (provider instanceof RaceProvider) diag.attempts = [...provider.attempts];
+    // Eager owes the user a chip: nothing here is an answer, it is a reason to ask again.
+    const chosen = await insist(first, provider, req, settings, deps, diag);
+    diag.ms = now() - started;
     void cache.set(key, { at: started, action: chosen });
     report(diag, chosen);
+    sayWhySilent(diag, chosen);
     deps.onDiag?.(diag);
     return { action: chosen };
   }
@@ -153,17 +159,20 @@ export async function nextAction(input: PageSnapshot, requester: Requester, deps
         diag,
       );
       diag.finalMs = now() - started;
-      const chosen = pick(placeholder, model);
-      void cache.set(key, { at: now(), action: chosen });
       if (provider instanceof RaceProvider) diag.attempts = [...provider.attempts];
+      // Eager owes the user a chip: nothing here is a reason to ask again, not an answer.
+      const chosen = await insist(pick(placeholder, model), provider, req, settings, deps, diag);
+      void cache.set(key, { at: now(), action: chosen });
       if (chosen !== placeholder) {
         diag.replaced = true;
-        diag.source = 'model';
+        if (diag.source !== 'fallback') diag.source = 'model';
         report(diag, chosen);
         ticket.push({ action: chosen });
       }
+      sayWhySilent(diag, chosen ?? placeholder);
     } catch {
-      // A provider that never answered leaves the placeholder alone and caches nothing.
+      // Nothing the model or the page could offer. The chip keeps the placeholder, if there was one.
+      sayWhySilent(diag, placeholder);
     } finally {
       ticket.close();
       deps.onDiag?.(diag);
@@ -203,6 +212,75 @@ async function answer(
   } catch {
     return null;
   }
+}
+
+/**
+ * The line the re-ask puts in the timeline so the model reads why it is being
+ * asked twice. It goes in `<history>` like any other line: the model is told
+ * what happened, not scolded in an instruction it has already seen.
+ */
+export function nudgeLine(why: string): string {
+  return `carat: the last answer was ${why}; something on this page is still the next step`;
+}
+
+/**
+ * Why a request that never reached a provider ended with no chip, in plain
+ * words. The same wording the popup's gate line uses, so the two never
+ * disagree in front of the user.
+ */
+const SILENT_GATE: Record<Exclude<GateVerdict, 'ok'>, string> = {
+  disabled: 'carat is off',
+  'site-off': 'carat is off for this site',
+  denylisted: 'host is on the denylist',
+  password: 'the page has a password field',
+  'no-snapshot': 'nothing on the page to act on',
+};
+
+/**
+ * At `eager` there is no "nothing". A first answer of none — the model's own
+ * `none`, an answer the validator refused, one under the floor, a provider
+ * that failed or timed out, a race in which everything came back empty — is
+ * put back to the model once, with the reason written into the timeline it
+ * reads. If that answers nothing too, the plainest step the page itself
+ * offers stands in. At the quieter levels nothing is nothing, and this
+ * returns it unchanged.
+ */
+async function insist(
+  chosen: NextAction | null,
+  provider: Provider,
+  req: NextActionRequest,
+  settings: Settings,
+  deps: NextActionDeps,
+  diag: SuggestDiag,
+): Promise<NextAction | null> {
+  if (chosen || settings.eagerness !== 'eager') return chosen;
+  const why = diag.refused ?? 'none';
+  diag.reasked = why;
+  delete diag.refused;
+  const again: NextActionRequest = { ...req, history: [...req.history, nudgeLine(why)] };
+  const second = validate(await answer(provider, again, deps), again, settings, diag);
+  // A race keeps only its latest run's attempts, and this was a run of its own.
+  if (provider instanceof RaceProvider) diag.attempts = [...(diag.attempts ?? []), ...provider.attempts];
+  if (second) return second;
+  const fallback = validate(lastResort(req), req, settings, diag);
+  if (fallback) {
+    diag.source = 'fallback';
+    delete diag.refused;
+  }
+  return fallback;
+}
+
+/** Records why there is no chip, and clears the note when there is one. */
+function sayWhySilent(diag: SuggestDiag, action: NextAction | null): void {
+  if (action) {
+    delete diag.silent;
+    return;
+  }
+  diag.silent = diag.refused
+    ? `the answer was refused: ${diag.refused}`
+    : diag.eagerness === 'eager'
+      ? 'nothing was offered and the page had no plainer step to stand in'
+      : 'nothing reached this level’s floor';
 }
 
 /**
