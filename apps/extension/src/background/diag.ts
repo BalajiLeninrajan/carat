@@ -1,22 +1,16 @@
-import type { Eagerness, PageKind, Settings } from '@carat/shared';
+import type { Eagerness, NextActionKind, Settings } from '@carat/shared';
 import type { StorageArea } from '../store';
-import type { PrewarmDiag } from './prewarm';
 
-/** Why the last suggestion request on a tab did or did not reach a provider. */
-export type GateVerdict =
-  | 'ok'
-  | 'disabled'
-  | 'site-off'
-  | 'denylisted'
-  | 'no-snapshot';
+/** Why the last request on a tab did or did not reach a provider. */
+export type GateVerdict = 'ok' | 'disabled' | 'site-off' | 'denylisted' | 'password' | 'no-snapshot';
 
 /** What happened to the last capture a tab sent. */
 export type CaptureVerdict = 'stored' | 'disabled' | 'site-off' | 'denylisted' | 'pinned' | 'empty' | 'not-http';
 
 /**
  * What happened to the last screenshot cue from a tab. `shot`: a picture was
- * taken and parked. `reading`: it went to the smart model. `transcribed`:
- * the text landed as a vision item. The rest say why nothing happened.
+ * taken and parked. `reading`: it went to the vision model. `transcribed`:
+ * the text landed and was distilled into notes. The rest say why nothing happened.
  */
 export type VisionVerdict =
   | 'shot'
@@ -45,7 +39,8 @@ export interface VisionDiag {
 export interface ProviderAttempt {
   id: Settings['provider'];
   ms: number;
-  count: number;
+  /** The kind it answered with, or '-' when it had nothing. */
+  kind: string;
   error?: string;
 }
 
@@ -56,52 +51,36 @@ export interface CaptureDiag {
   verdict: CaptureVerdict;
 }
 
-/**
- * Where the answer the chip showed first came from: entities predicted at
- * capture time, a pre-warmed call made on navigation, the regex pass, Jev,
- * the chat model, or the 60s cache.
- */
-export type AnswerOrigin = 'entities' | 'prewarm' | 'prior' | 'local' | 'jev' | 'chat' | 'cache';
+/** Where the action the chip showed first came from. */
+export type AnswerOrigin = 'cache' | 'placeholder' | 'model';
 
 export interface SuggestDiag {
   at: number;
   host: string;
-  fields: number;
-  /** Interactive elements the page described alongside its fields. */
-  elements?: number;
+  /** Numbered controls in the outline the request carried. */
+  controls: number;
   gate: GateVerdict;
-  /** What kind of page the content script thought it was on. */
-  pageKind?: PageKind;
-  /** The prior the local predictor found for that kind, in the words the popup shows. */
-  prior?: string;
-  /** Set once the gate passed. */
-  cached?: boolean;
-  /** The answer came from the cache the navigation pre-warmed. */
-  prewarmed?: boolean;
-  /** What produced the first answer, and how long the content script waited for it. */
+  /** What produced the first action, and how long the content script waited for it. */
   source?: AnswerOrigin;
   ms?: number;
   attempts?: ProviderAttempt[];
-  /** The level the request ran at; names the floor when candidates fell under it. */
+  /** The level the request ran at; names the floor an action fell under. */
   eagerness?: Eagerness;
-  /** Otherwise valid candidates the provider or the service worker dropped for confidence under the level's floor. */
-  underFloor?: number;
-  /** Field fills handed to the content script after suppression. */
-  offered?: number;
-  /** Tab offers (open or switch) handed over alongside them. */
-  navigation?: number;
-  /** Element interactions (click, check, set, choose) handed over alongside them. */
-  interactions?: number;
-  /** What the user searched for on the page, when it had a query and links to match it against. */
-  query?: string;
-  /** Described links whose site or title is that query; the first one is offered without asking a provider. */
-  linkMatched?: number;
+  /** The action the chip was given: its kind, the model's own label and reason. */
+  kind?: NextActionKind;
+  label?: string;
+  reason?: string;
+  confidence?: number;
+  /** The chip asks for a second Tab before it acts. */
+  irreversible?: boolean;
+  /** The user armed it with that first Tab. */
+  armed?: boolean;
+  /** Why an otherwise valid action was refused: under the floor, a control that is not there, money without the setting. */
+  refused?: string;
   /** A better answer may still come; the content script polls for it. */
   refine?: boolean;
-  /** The smart model was asked for a second opinion. */
-  smart?: boolean;
-  /** Later answers handed to the content script through the ticket. */
-  refined?: number;
+  /** The model replaced what the placeholder had put up. */
+  replaced?: boolean;
 }
 
 /**
@@ -123,7 +102,6 @@ export interface TabDiag {
   capture?: CaptureDiag;
   suggest?: SuggestDiag;
   vision?: VisionDiag;
-  prewarm?: PrewarmDiag;
   /** Newest last, at most MAX_PERFORMS. */
   performs?: PerformDiag[];
 }
@@ -156,12 +134,6 @@ export class DiagLog {
     const current = state[tabId]?.suggest;
     if (current && current.at > suggest.at) return;
     state[tabId] = { ...state[tabId], suggest };
-    this.write(tabId);
-  }
-
-  async recordPrewarm(tabId: number, prewarm: PrewarmDiag): Promise<void> {
-    const state = await this.load();
-    state[tabId] = { ...state[tabId], prewarm };
     this.write(tabId);
   }
 
@@ -209,7 +181,6 @@ function latest(d: TabDiag): number {
     d.capture?.at ?? 0,
     d.suggest?.at ?? 0,
     d.vision?.at ?? 0,
-    d.prewarm?.at ?? 0,
     d.performs?.at(-1)?.at ?? 0,
   );
 }

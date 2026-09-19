@@ -1,28 +1,28 @@
-import type { RefineResponse } from '../messaging';
+import type { ActionUpdate } from '../messaging';
 
 const GRACE_MS = 30_000;
-const NONE: RefineResponse = { suggestions: [], interactions: [] };
+const NONE: ActionUpdate = {};
 
-/** A ticket the background pushes better answers through until it closes it. */
+/** A ticket the background pushes later words through until it closes it. */
 export interface RefineTicket {
   readonly id: string;
-  /** Hand the content script a better answer. Ignored once closed. */
-  push(answer: RefineResponse): void;
-  /** Nothing more is coming; the poll after the last answer gets nothing. */
+  /** Move the ring, or replace the action. Ignored once closed. */
+  push(update: ActionUpdate): void;
+  /** Nothing more is coming; the poll after the last update gets nothing. */
   close(): void;
 }
 
 interface Entry {
   tabId: number | undefined;
-  answers: RefineResponse[];
+  updates: ActionUpdate[];
   closed: boolean;
   waiting: Array<() => void>;
 }
 
 /**
- * Later answers in flight, keyed by the ticket the fast reply hands the
- * content script. The script long-polls `suggestRefine` with it; each poll
- * gets the next answer, marked `more` while the ticket is still open, and
+ * Later words in flight, keyed by the ticket the first reply hands the
+ * content script. The script long-polls `nextActionRefine` with it; each poll
+ * gets the next update, marked `more` while the ticket is still open, and
  * nothing once it is closed and drained. Only the tab that received the
  * ticket may claim it. Memory only: a worker restart forgets the ticket and
  * the poll gets nothing, which the chip reads as "nothing better".
@@ -32,53 +32,43 @@ export class RefineQueue {
 
   constructor(private readonly setTimer: (fn: () => void, ms: number) => unknown = (fn, ms) => setTimeout(fn, ms)) {}
 
-  /** One answer, then done. A rejected promise answers nothing. */
-  add(tabId: number | undefined, result: Promise<RefineResponse>): string {
-    const ticket = this.open(tabId);
-    void result.then(
-      (answer) => ticket.push(answer),
-      () => undefined,
-    ).finally(() => ticket.close());
-    return ticket.id;
-  }
-
   /** A ticket that answers as many times as something better lands, until it is closed. */
   open(tabId: number | undefined): RefineTicket {
     const id = newTicket();
-    const entry: Entry = { tabId, answers: [], closed: false, waiting: [] };
+    const entry: Entry = { tabId, updates: [], closed: false, waiting: [] };
     this.pending.set(id, entry);
     const wake = (): void => {
       for (const resolve of entry.waiting.splice(0)) resolve();
     };
     return {
       id,
-      push: (answer) => {
+      push: (update) => {
         if (entry.closed) return;
-        entry.answers.push(answer);
+        entry.updates.push(update);
         wake();
       },
       close: () => {
         if (entry.closed) return;
         entry.closed = true;
         wake();
-        // An unclaimed ticket (the page navigated away) must not pin its answers forever.
+        // An unclaimed ticket (the page navigated away) must not pin its updates forever.
         this.setTimer(() => this.pending.delete(id), GRACE_MS);
       },
     };
   }
 
-  async claim(ticket: string, tabId: number | undefined): Promise<RefineResponse> {
+  async claim(ticket: string, tabId: number | undefined): Promise<ActionUpdate> {
     const entry = this.pending.get(ticket);
     if (!entry || entry.tabId !== tabId) return NONE;
-    while (entry.answers.length === 0 && !entry.closed) {
+    while (entry.updates.length === 0 && !entry.closed) {
       await new Promise<void>((resolve) => entry.waiting.push(resolve));
     }
-    const next = entry.answers.shift();
+    const next = entry.updates.shift();
     if (!next) {
       this.pending.delete(ticket);
       return NONE;
     }
-    if (entry.closed && entry.answers.length === 0) {
+    if (entry.closed && entry.updates.length === 0) {
       this.pending.delete(ticket);
       return next;
     }
