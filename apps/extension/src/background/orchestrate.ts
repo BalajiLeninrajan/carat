@@ -37,9 +37,11 @@ export async function orchestrate(
 
   const settings = await deps.settings();
   const items = await store.items();
-  if (!gate(input, items, settings, requester, now())) return NONE;
+  // Freshness follows the store's clock, which stands still while pinned.
+  const at = await store.clock();
+  if (!gate(input, items, settings, requester, at)) return NONE;
 
-  const context = scoreAndPickContext(items, requester, now());
+  const context = scoreAndPickContext(items, requester, at);
   if (context.length === 0) return NONE;
 
   const key = cacheKey(input, context);

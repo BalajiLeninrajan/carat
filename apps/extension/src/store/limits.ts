@@ -9,5 +9,5 @@ export const STORE_LIMITS = {
   previewChars: 120,
 } as const;
 
-export const STORE_KEYS = ['ctx', 'consumed', 'dismissed', 'cache'] as const;
+export const STORE_KEYS = ['ctx', 'consumed', 'dismissed', 'cache', 'pinned'] as const;
 export type StoreKey = (typeof STORE_KEYS)[number];

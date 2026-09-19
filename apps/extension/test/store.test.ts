@@ -172,6 +172,45 @@ describe('ContextStore TTL', () => {
   });
 });
 
+describe('ContextStore pin', () => {
+  it('blocks new captures and stops the clock while pinned', async () => {
+    const { store, tick } = setup();
+    await store.upsertPage(page(1, 'kept for the demo'));
+    await store.markDismissed('d:host:fp');
+    await store.pin();
+    expect(await store.isPinned()).toBe(true);
+    expect(await store.upsertPage(page(2, 'a stray tab'))).toBeUndefined();
+    expect(await store.upsertSelection(page(2, 'stray selection'))).toBeUndefined();
+
+    tick(45 * MIN);
+    await store.sweep();
+    expect((await store.items()).map((i) => i.tabId)).toEqual([1]);
+    expect(await store.suppressedKeys()).toEqual(['d:host:fp']);
+    expect(await store.clock()).toBe(1_000_000);
+  });
+
+  it('unpin lets real time back in and evicts what expired meanwhile', async () => {
+    const { store, tick } = setup();
+    await store.upsertPage(page(1, 'kept for the demo'));
+    await store.pin();
+    tick(45 * MIN);
+    await store.unpin();
+    expect(await store.isPinned()).toBe(false);
+    expect(await store.items()).toEqual([]);
+    expect(await store.upsertPage(page(2, 'captures again'))).toBeDefined();
+  });
+
+  it('persists the pin across a reload and drops it on clear', async () => {
+    const { area, store } = setup();
+    await store.pin();
+    await store.flush();
+    expect(await new ContextStore(area).isPinned()).toBe(true);
+    await store.clear();
+    expect(await store.isPinned()).toBe(false);
+    expect(await new ContextStore(area).isPinned()).toBe(false);
+  });
+});
+
 describe('ContextStore resilience', () => {
   it('retries load after a failed read instead of staying broken', async () => {
     const area = new FakeArea();

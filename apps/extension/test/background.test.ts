@@ -290,6 +290,17 @@ describe('orchestrate', () => {
     expect(remote.calls).toBe(1);
   });
 
+  it('keeps offering pinned context after it would have gone stale', async () => {
+    const { store, ctxId, now, tick } = await seeded();
+    const remote = fakeProvider('openai', async () => [suggestion({ sourceContextId: ctxId })]);
+    const deps = { store, settings: async () => enabled, createProvider: () => remote, now };
+    await store.pin();
+    tick(45 * MIN);
+    expect((await orchestrate(maps, requester, deps)).suggestions).toHaveLength(1);
+    await store.unpin();
+    expect((await orchestrate(maps, requester, deps)).suggestions).toEqual([]);
+  });
+
   it('caches a genuine empty answer but never a failure', async () => {
     const { store, ctxId, now } = await seeded();
     const empty = fakeProvider('openai', async () => []);

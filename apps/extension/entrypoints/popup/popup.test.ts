@@ -119,6 +119,37 @@ describe('popup', () => {
     expect(sendMessage).toHaveBeenCalledWith('setSettings', { enabled: false });
   });
 
+  it('pins and unpins the store from the footer, and Clear unpins', async () => {
+    let pinned = false;
+    sendMessage.mockImplementation(async (type: string, data?: { pinned?: boolean }) => {
+      if (type === 'getSettings') return { enabled: true };
+      if (type === 'getKnown') return { items: [], pinned };
+      if (type === 'setPinned') {
+        pinned = data!.pinned!;
+        return { pinned };
+      }
+      return undefined;
+    });
+    await import('./main');
+    await flush();
+    const pin = document.getElementById('pin') as HTMLButtonElement;
+    const note = document.getElementById('pinned-note') as HTMLElement;
+    expect(pin.textContent).toBe('Pin');
+    expect(note.hidden).toBe(true);
+
+    pin.click();
+    await flush();
+    expect(sendMessage).toHaveBeenCalledWith('setPinned', { pinned: true });
+    expect(pin.textContent).toBe('Unpin');
+    expect(pin.getAttribute('aria-pressed')).toBe('true');
+    expect(note.hidden).toBe(false);
+
+    (document.getElementById('clear') as HTMLButtonElement).click();
+    await flush();
+    expect(pin.textContent).toBe('Pin');
+    expect(note.hidden).toBe(true);
+  });
+
   it('opens the options page from the Settings link', async () => {
     sendMessage.mockImplementation(async (type: string) =>
       type === 'getSettings' ? { enabled: true } : { items: [] },

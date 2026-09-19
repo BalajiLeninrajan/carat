@@ -6,7 +6,7 @@ export { orchestrate } from './orchestrate';
 export type { OrchestrateDeps, SuggestInput } from './orchestrate';
 export { handleFeedback } from './feedback';
 export type { FeedbackInput } from './feedback';
-export { getKnown, clearKnown } from './known';
+export { getKnown, clearKnown, setPinned } from './known';
 export { requesterFromSender } from './requester';
 export type { Requester } from './requester';
 export { fingerprintMatchesDescriptor } from './fingerprint';

@@ -25,8 +25,9 @@ export interface Protocol {
     accepted: boolean;
     host: string;
   }): void;
-  getKnown(): { items: KnownItem[] };
+  getKnown(): { items: KnownItem[]; pinned: boolean };
   clearKnown(): void;
+  setPinned(data: { pinned: boolean }): { pinned: boolean };
   getSettings(): Settings;
   setSettings(s: Partial<Settings>): Settings;
 }

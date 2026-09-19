@@ -23,6 +23,8 @@ interface State {
   consumed: ExpiringSet;
   dismissed: ExpiringSet;
   cache: Record<string, CacheEntry>;
+  /** When the store was pinned, or 0. While pinned its clock stands still. */
+  pinned: number;
 }
 
 export interface ContextStoreOptions {
@@ -58,6 +60,7 @@ export class ContextStore {
           consumed: asRecord<number>(raw.consumed),
           dismissed: asRecord<number>(raw.dismissed),
           cache: asRecord<CacheEntry>(raw.cache),
+          pinned: typeof raw.pinned === 'number' ? raw.pinned : 0,
         };
       })
       .catch((err: unknown) => {
@@ -84,7 +87,8 @@ export class ContextStore {
 
   private async upsert(kind: ContextItem['kind'], input: CaptureInput): Promise<ContextItem | undefined> {
     await this.load();
-    const now = this.now();
+    if (this.state.pinned) return undefined;
+    const now = this.at();
     const location = parseLocation(input.url);
     if (!location) return undefined;
     const max = kind === 'page' ? LIMITS.pageTextChars : LIMITS.selectionTextChars;
@@ -132,34 +136,65 @@ export class ContextStore {
   /** Drop everything past its TTL. Cheap; runs on every write and on the alarm. */
   async sweep(): Promise<void> {
     await this.load();
-    const changed = this.evictExpired(this.now());
+    const changed = this.evictExpired(this.at());
     if (changed.length) this.write(changed);
+  }
+
+  /**
+   * Freeze the store: no new captures land and the clock every TTL is measured
+   * against stops, so nothing ages out until unpinned. Meant for a demo that a
+   * stray tab must not derail. Session-only, like the rest of the store.
+   */
+  async pin(): Promise<void> {
+    await this.load();
+    if (this.state.pinned) return;
+    this.state.pinned = this.now();
+    this.commit(['pinned']);
+  }
+
+  /** Resume; anything past its TTL by real time goes out with this write. */
+  async unpin(): Promise<void> {
+    await this.load();
+    if (!this.state.pinned) return;
+    this.state.pinned = 0;
+    this.commit(['pinned']);
+  }
+
+  async isPinned(): Promise<boolean> {
+    await this.load();
+    return this.state.pinned !== 0;
+  }
+
+  /** The time the store measures freshness against: real time, or the moment it was pinned. */
+  async clock(): Promise<number> {
+    await this.load();
+    return this.at();
   }
 
   async markConsumed(key: string): Promise<void> {
     await this.load();
-    this.state.consumed[key] = this.now() + STORE_LIMITS.consumedTtlMs;
+    this.state.consumed[key] = this.at() + STORE_LIMITS.consumedTtlMs;
     delete this.state.dismissed[key];
     this.commit(['consumed', 'dismissed']);
   }
 
   async markDismissed(key: string): Promise<void> {
     await this.load();
-    this.state.dismissed[key] = this.now() + STORE_LIMITS.dismissedTtlMs;
+    this.state.dismissed[key] = this.at() + STORE_LIMITS.dismissedTtlMs;
     this.commit(['dismissed']);
   }
 
   /** Live consumed + dismissed keys. */
   async suppressedKeys(): Promise<string[]> {
     await this.load();
-    const now = this.now();
+    const now = this.at();
     const live = (set: ExpiringSet) => Object.keys(set).filter((k) => (set[k] ?? 0) > now);
     return [...new Set([...live(this.state.consumed), ...live(this.state.dismissed)])];
   }
 
   async isSuppressed(key: string): Promise<boolean> {
     await this.load();
-    const now = this.now();
+    const now = this.at();
     return (this.state.consumed[key] ?? 0) > now || (this.state.dismissed[key] ?? 0) > now;
   }
 
@@ -167,7 +202,7 @@ export class ContextStore {
     await this.load();
     const entry = this.state.cache[key];
     if (!entry) return undefined;
-    if (entry.expiresAt <= this.now()) {
+    if (entry.expiresAt <= this.at()) {
       delete this.state.cache[key];
       this.write(['cache']);
       return undefined;
@@ -177,7 +212,7 @@ export class ContextStore {
 
   async setCached(key: string, suggestions: Suggestion[]): Promise<void> {
     await this.load();
-    this.state.cache[key] = { suggestions, expiresAt: this.now() + STORE_LIMITS.cacheTtlMs };
+    this.state.cache[key] = { suggestions, expiresAt: this.at() + STORE_LIMITS.cacheTtlMs };
     this.commit(['cache']);
   }
 
@@ -196,7 +231,7 @@ export class ContextStore {
 
   /** Every write is also a sweep: expired entries go out with whatever changed. */
   private commit(keys: StoreKey[]): void {
-    const swept = this.evictExpired(this.now());
+    const swept = this.evictExpired(this.at());
     this.write([...new Set([...keys, ...swept])]);
   }
 
@@ -245,6 +280,10 @@ export class ContextStore {
     this.chain = this.chain.then(() => this.area.set(snapshot)).catch(() => undefined);
   }
 
+  private at(): number {
+    return this.state.pinned || this.now();
+  }
+
   private newId(kind: ContextItem['kind'], hash: number, now: number): string {
     this.seq = (this.seq + 1) % 1296;
     return `${kind[0]}${now.toString(36)}${hash.toString(36)}${this.seq.toString(36).padStart(2, '0')}`;
@@ -252,7 +291,7 @@ export class ContextStore {
 }
 
 function emptyState(): State {
-  return { ctx: [], consumed: {}, dismissed: {}, cache: {} };
+  return { ctx: [], consumed: {}, dismissed: {}, cache: {}, pinned: 0 };
 }
 
 function asRecord<T>(v: unknown): Record<string, T> {

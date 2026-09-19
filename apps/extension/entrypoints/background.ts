@@ -10,6 +10,7 @@ import {
   orchestrate,
   redactSettings,
   requesterFromSender,
+  setPinned,
 } from '../src/background';
 
 const SWEEP_ALARM = 'carat-sweep';
@@ -43,8 +44,11 @@ export default defineBackground(() => {
   onMessage('feedback', ({ data }) => handleFeedback(data, store));
 
   // The key and the cross-tab context stay with the extension's own pages; a content script gets a redacted view.
-  onMessage('getKnown', ({ sender }) => (trusted(sender) ? getKnown(store) : { items: [] }));
+  onMessage('getKnown', ({ sender }) => (trusted(sender) ? getKnown(store) : { items: [], pinned: false }));
   onMessage('clearKnown', ({ sender }) => (trusted(sender) ? clearKnown(store) : undefined));
+  onMessage('setPinned', async ({ data, sender }) =>
+    trusted(sender) ? setPinned(store, data.pinned) : { pinned: await store.isPinned() },
+  );
   onMessage('getSettings', async ({ sender }) => {
     const s = await settings.get();
     return trusted(sender) ? s : redactSettings(s);
