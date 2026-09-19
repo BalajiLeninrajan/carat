@@ -112,6 +112,16 @@ export function startSuggestions(
   const done = new Set<string>();
   // The descriptors and registries the current answer was presented against, so Esc can move on to the next chip in it.
   let view: { descriptors: FieldDescriptor[]; registries: Registries } | null = null;
+  // A ticket is open, so every chip shown from this answer carries the indicator.
+  let pending = false;
+
+  /** The ticket is done: the chip's value is final and the status line stops saying "thinking". */
+  const settle = (): void => {
+    if (!pending) return;
+    pending = false;
+    chip.settle();
+    observer.onAnswer?.();
+  };
 
   const snapshot = async (force = false): Promise<void> => {
     if (!ctx.isValid || doc.visibilityState === 'hidden') return;
@@ -137,8 +147,9 @@ export function startSuggestions(
       ...(elements.descriptors.length > 0 ? { elements: elements.descriptors } : {}),
       ...(force ? { force: true } : {}),
     });
-    // The fast answer is the answer as far as the status line is concerned; the smart pass is silent.
-    observer.onAnswer?.();
+    // A ticket means a better answer may still land, so the status line keeps saying "thinking" until it closes.
+    const open = res?.ticket !== undefined && mine === seq && ctx.isValid;
+    if (!open) observer.onAnswer?.();
     // A newer snapshot owns the chip now; this answer describes fields that may be gone.
     if (mine !== seq || !ctx.isValid) return;
     const current: LastSnapshot = {
@@ -151,6 +162,7 @@ export function startSuggestions(
       shown: false,
     };
     last = current;
+    pending = open;
     present(current, descriptors, registries);
     // The smart answer is fetched after the chip is up, never before.
     if (res?.ticket) void refine(res.ticket, current, mine, descriptors, registries);
@@ -176,9 +188,13 @@ export function startSuggestions(
     // A ticket answers as often as something better lands; `more` says to poll it again.
     for (;;) {
       const res = await send('suggestRefine', { ticket });
+      // A newer request owns the indicator and the status line now; leave both to it.
       if (!ctx.isValid || mine !== seq || last !== snap) return;
       fold(res, snap, descriptors, registries);
-      if (!res?.more) return;
+      if (!res?.more) {
+        settle();
+        return;
+      }
     }
   }
 
@@ -289,6 +305,7 @@ export function startSuggestions(
       target,
       value: suggestion.value,
       ...view,
+      pending,
       interceptFrom,
       onAccept() {
         justFilled = null;
@@ -386,6 +403,7 @@ export function startSuggestions(
       value: text.value,
       tail: text.tail,
       ...view,
+      pending,
       interceptFrom,
       onAccept() {
         justFilled = null;
@@ -424,6 +442,7 @@ export function startSuggestions(
       value: offer.name,
       ...(offer.detail ? { detail: offer.detail } : {}),
       ...(offer.reason ? { reason: offer.reason } : {}),
+      pending,
       target,
       interceptFrom: offer.interceptFrom,
       onAccept() {
@@ -465,6 +484,7 @@ export function startSuggestions(
       value: nav.value,
       ...(nav.source ? { detail: describeSource(nav.source, doc.location.host) } : {}),
       ...(nav.reason ? { reason: nav.reason } : {}),
+      pending,
       onAccept() {
         forget();
         feedback(true);
@@ -495,6 +515,7 @@ export function startSuggestions(
   });
   ctx.addEventListener(win, 'wxt:locationchange', () => {
     last = null;
+    settle();
     done.clear();
     if (page) page.filling = false;
     chip.hide();
@@ -510,6 +531,7 @@ export function startSuggestions(
     },
     force() {
       last = null;
+      settle();
       chip.hide();
       void snapshot(true);
     },

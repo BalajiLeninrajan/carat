@@ -207,6 +207,80 @@ describe('content wiring', () => {
     expect(title.value).toBe('Dinner at Seven Shores Cafe');
   });
 
+  it('marks the chip pending while the ticket is open and settles it on the last answer', async () => {
+    field('Title', 100);
+    const smart = fastThenSmart((ids) => ({ suggestions: [s(ids.Title!, 'Dinner', 0.8)], ticket: 't1' }));
+    const chip = createChip(document);
+    const show = vi.spyOn(chip, 'show');
+    const settled = vi.spyOn(chip, 'settle');
+    startSuggestions(ctx, chip, document);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
+    await flush();
+    expect(show.mock.calls.map(([o]) => o.pending)).toEqual([true]);
+    expect(chip.pending).toBe(true);
+    expect(settled).not.toHaveBeenCalled();
+
+    smart.release({ suggestions: [s(smart.ids().Title!, 'Dinner at Seven Shores Cafe', 0.95)] });
+    await flush();
+    // The later chip is still marked pending when it is shown; the settle right after takes the dot off.
+    expect(show.mock.calls.map(([o]) => o.pending)).toEqual([true, true]);
+    expect(settled).toHaveBeenCalledTimes(1);
+    expect(chip.pending).toBe(false);
+    expect(chip.visible).toBe(true);
+  });
+
+  it('settles the chip when the ticket closes with nothing better', async () => {
+    field('Title', 100);
+    const smart = fastThenSmart((ids) => ({ suggestions: [s(ids.Title!, 'Dinner', 0.8)], ticket: 't1' }));
+    const chip = createChip(document);
+    startSuggestions(ctx, chip, document);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
+    await flush();
+    expect(chip.pending).toBe(true);
+
+    smart.release({ suggestions: [] });
+    await flush();
+    expect(chip.pending).toBe(false);
+    expect(chip.text).toBe('Fill "Dinner"?');
+  });
+
+  it('keeps the chip pending across every poll while an answer says more', async () => {
+    field('Title', 100);
+    let ids: Record<string, string> = {};
+    const polls: Array<(v: Answer) => void> = [];
+    sent.mockImplementation((type, data) => {
+      if (type === 'suggestRequest') {
+        const { fields } = data as { fields: Array<{ i: string; al?: string }> };
+        ids = Object.fromEntries(fields.map((f) => [f.al ?? f.i, f.i]));
+        return Promise.resolve({ suggestions: [s(ids.Title!, 'Dinner', 0.75)], ticket: 't1' });
+      }
+      if (type === 'suggestRefine') return new Promise<Answer>((resolve) => polls.push(resolve));
+      return Promise.resolve(undefined);
+    });
+    const chip = createChip(document);
+    startSuggestions(ctx, chip, document);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
+    await flush();
+
+    polls[0]!({ suggestions: [s(ids.Title!, 'Dinner at Seven Shores', 0.8)], more: true });
+    await flush();
+    expect(chip.pending).toBe(true);
+    polls[1]!({ suggestions: [s(ids.Title!, 'Dinner at Seven Shores Cafe', 0.95)] });
+    await flush();
+    expect(chip.pending).toBe(false);
+  });
+
+  it('leaves a chip with no ticket unmarked', async () => {
+    field('Title', 100);
+    fastThenSmart((ids) => ({ suggestions: [s(ids.Title!, 'Dinner', 0.8)] }));
+    const chip = createChip(document);
+    startSuggestions(ctx, chip, document);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
+    await flush();
+    expect(chip.visible).toBe(true);
+    expect(chip.pending).toBe(false);
+  });
+
   it('keeps a lower-confidence smart value out, and never moves a visible chip to another field', async () => {
     const title = field('Title', 100);
     field('Location', 200);
@@ -289,7 +363,7 @@ describe('content wiring', () => {
     expect(title.value).toBe('Lunch');
   });
 
-  it('tells the status observer about the fast answer, not the smart one', async () => {
+  it('keeps the status observer waiting until the ticket closes, not just until the fast answer', async () => {
     field('Title', 100);
     const smart = fastThenSmart((ids) => ({ suggestions: [s(ids.Title!, 'Dinner', 0.8)], ticket: 't1' }));
     const onRequest = vi.fn();
@@ -298,10 +372,21 @@ describe('content wiring', () => {
     await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
     await flush();
     expect(onRequest).toHaveBeenCalledTimes(1);
-    expect(onAnswer).toHaveBeenCalledTimes(1);
+    // The fast chip is up, but the model may still replace its value.
+    expect(onAnswer).not.toHaveBeenCalled();
     smart.release({ suggestions: [s(smart.ids().Title!, 'Dinner at Seven Shores Cafe', 0.95)] });
     await flush();
     expect(onRequest).toHaveBeenCalledTimes(1);
+    expect(onAnswer).toHaveBeenCalledTimes(1);
+  });
+
+  it('answers the status observer at once when the reply carries no ticket', async () => {
+    field('Title', 100);
+    fastThenSmart((ids) => ({ suggestions: [s(ids.Title!, 'Dinner', 0.8)] }));
+    const onAnswer = vi.fn();
+    startSuggestions(ctx, createChip(document), document, { onAnswer });
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
+    await flush();
     expect(onAnswer).toHaveBeenCalledTimes(1);
   });
 
@@ -644,10 +729,12 @@ describe('content wiring', () => {
     const chip: Chip = {
       show: (opts) => void shows.push(opts),
       showCorner: () => undefined,
+      settle: () => undefined,
       hide: () => undefined,
       destroy: () => undefined,
       visible: false,
       text: '',
+      pending: false,
     };
     startSuggestions(ctx, chip, document);
     await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
@@ -753,10 +840,12 @@ describe('navigation chip', () => {
     const chip: Chip = {
       show: () => undefined,
       showCorner: (opts) => void shows.push(opts),
+      settle: () => undefined,
       hide: () => undefined,
       destroy: () => undefined,
       visible: false,
       text: '',
+      pending: false,
     };
     startSuggestions(ctx, chip, document);
     await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);

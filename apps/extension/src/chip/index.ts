@@ -17,6 +17,11 @@ interface ChipText extends ChipCallbacks {
   detail?: string;
   /** Why it was offered; shown as the native tooltip on hover. */
   reason?: string;
+  /**
+   * A refine ticket is still open, so the model may yet replace this value.
+   * The chip carries a pulsing dot until `settle()`.
+   */
+  pending?: boolean;
 }
 
 export interface ChipShowOptions extends ChipText {
@@ -49,15 +54,21 @@ export interface CornerShowOptions extends ChipText {
 export interface Chip {
   show(opts: ChipShowOptions): void;
   showCorner(opts: CornerShowOptions): void;
+  /** The value on screen is final: drop the indicator and the tooltip's waiting line, keep the chip. */
+  settle(): void;
   hide(): void;
   destroy(): void;
   readonly visible: boolean;
   /** The words on the chip, e.g. `Click "Save"?`; the shadow root is closed, so tests read it here. */
   readonly text: string;
+  /** Whether the indicator is up; the shadow root is closed, so tests read it here. */
+  readonly pending: boolean;
 }
 
 export const AUTO_DISMISS_MS = 20_000;
 export const CORNER_INSET_PX = 24;
+/** Appended to the chip's reason while a better answer may still land. */
+export const PENDING_HINT = 'checking with the model…';
 const VALUE_MAX = 40;
 const HOST_ATTR = 'data-carat-chip';
 
@@ -96,12 +107,18 @@ export function createChip(doc: Document = document): Chip {
   const sub = doc.createElement('span');
   sub.className = 'sub';
   text.append(label, sub);
+  const spinner = doc.createElement('span');
+  spinner.className = 'pending';
+  spinner.hidden = true;
   const key = doc.createElement('kbd');
   key.textContent = 'Tab';
-  pill.append(text, key);
+  pill.append(text, spinner, key);
   root.append(style, pill);
 
   let session: Session | null = null;
+  let pending = false;
+  // The reason on its own, so the waiting line can go on and come off it.
+  let reason = '';
   const win = doc.defaultView ?? window;
 
   const onKeydown = (e: KeyboardEvent): void => {
@@ -151,13 +168,31 @@ export function createChip(doc: Document = document): Chip {
     host.style.left = `${Math.round(left)}px`;
   };
 
-  function mount(verb: string, tail: string, opts: ChipText): SessionBase {
+  /** The dot is static when the user asked for less motion; the CSS says the same, this is what a test can read. */
+  function stillDot(): boolean {
+    try {
+      return win.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
+    } catch {
+      return false;
+    }
+  }
+
+  function setPending(next: boolean): void {
+    pending = next;
+    spinner.hidden = !next;
+    spinner.classList.toggle('is-static', next && stillDot());
+    const title = next ? (reason ? `${reason} · ${PENDING_HINT}` : PENDING_HINT) : reason;
+    if (title) pill.setAttribute('title', title);
+    else pill.removeAttribute('title');
+  }
+
+  function mount(verb: string, tail: string, opts: ChipText, fresh: boolean): SessionBase {
     hide();
-    label.replaceChildren(`${verb} `, valueNode(opts.value), `${tail}?`);
+    label.replaceChildren(`${verb} `, valueNode(opts.value, fresh), `${tail}?`);
     sub.textContent = opts.detail ?? '';
     sub.hidden = !opts.detail;
-    if (opts.reason) pill.setAttribute('title', opts.reason);
-    else pill.removeAttribute('title');
+    reason = opts.reason ?? '';
+    setPending(opts.pending === true);
     if (!host.isConnected) doc.documentElement.appendChild(host);
     // Capture phase so the page's own Tab handlers never see an accepted Tab.
     win.addEventListener('keydown', onKeydown, true);
@@ -174,7 +209,10 @@ export function createChip(doc: Document = document): Chip {
   }
 
   function show(opts: ChipShowOptions): void {
-    const base = mount(opts.verb ?? 'Fill', opts.tail ?? '', opts);
+    // Re-showing on the same field is a value swap: the word changes, the chip does not move.
+    const swap = session?.mode === 'field' && session.target === opts.target && session.onScreen;
+    const held = swap ? { top: host.style.top, left: host.style.left } : null;
+    const base = mount(opts.verb ?? 'Fill', opts.tail ?? '', opts, swap);
     const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(() => reposition()) : null;
     observer?.observe(opts.target);
     session = { ...base, mode: 'field', target: opts.target, interceptFrom: opts.interceptFrom ?? null, observer };
@@ -188,10 +226,16 @@ export function createChip(doc: Document = document): Chip {
     // Typing on in the field carat just filled means the user is busy there, not ready for the next chip.
     opts.interceptFrom?.addEventListener('input', onTyped);
     reposition();
+    // A longer value would shift the pill out from under the user's eye; put it back.
+    if (held && host.style.display !== 'none') {
+      host.style.top = held.top;
+      host.style.left = held.left;
+    }
   }
 
   function showCorner(opts: CornerShowOptions): void {
-    const base = mount(opts.bare ? opts.label : `${opts.label}:`, '', opts);
+    const swap = session?.mode === 'corner';
+    const base = mount(opts.bare ? opts.label : `${opts.label}:`, '', opts, swap);
     session = { ...base, mode: 'corner', onScreen: true, target: opts.target ?? null, interceptFrom: opts.interceptFrom ?? null };
     pill.classList.add('is-banner');
     host.style.top = 'auto';
@@ -221,7 +265,13 @@ export function createChip(doc: Document = document): Chip {
     } else {
       doc.removeEventListener('input', onTyped, true);
     }
+    setPending(false);
     host.style.display = 'none';
+  }
+
+  /** The ticket closed: whatever is on the chip now is the answer. */
+  function settle(): void {
+    if (pending) setPending(false);
   }
 
   function accept(): void {
@@ -243,9 +293,9 @@ export function createChip(doc: Document = document): Chip {
     host.remove();
   }
 
-  function valueNode(value: string): HTMLElement {
+  function valueNode(value: string, fresh: boolean): HTMLElement {
     const span = doc.createElement('span');
-    span.className = 'value';
+    span.className = fresh ? 'value is-fresh' : 'value';
     const shown = value.length > VALUE_MAX ? `${value.slice(0, VALUE_MAX - 1)}…` : value;
     span.textContent = `"${shown}"`;
     return span;
@@ -254,6 +304,7 @@ export function createChip(doc: Document = document): Chip {
   return {
     show,
     showCorner,
+    settle,
     hide,
     destroy,
     get visible() {
@@ -261,6 +312,9 @@ export function createChip(doc: Document = document): Chip {
     },
     get text() {
       return label.textContent ?? '';
+    },
+    get pending() {
+      return pending;
     },
   };
 }

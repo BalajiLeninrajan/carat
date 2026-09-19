@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
-import { AUTO_DISMISS_MS, CORNER_INSET_PX, createChip, type Chip, type DismissReason } from '../src/chip';
+import { AUTO_DISMISS_MS, CORNER_INSET_PX, PENDING_HINT, createChip, type Chip, type DismissReason } from '../src/chip';
+import { CHIP_CSS } from '../src/chip/styles';
 
 // Grabbed before any test spies on it, so a spy never wraps an earlier spy.
 const attachShadow = Element.prototype.attachShadow;
@@ -231,6 +232,126 @@ describe('chip', () => {
     expect(esc.defaultPrevented).toBe(false);
     expect(onAccept).not.toHaveBeenCalled();
     expect(onDismiss).not.toHaveBeenCalled();
+  });
+});
+
+describe('pending indicator', () => {
+  let chip: Chip;
+  let target: HTMLInputElement;
+  let root: ShadowRoot;
+  let onAccept: Mock<() => void>;
+  let onDismiss: Mock<(reason: DismissReason) => void>;
+  const dot = () => root.querySelector('.pending') as HTMLElement;
+  const title = () => root.querySelector('.chip')!.getAttribute('title');
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    target = document.createElement('input');
+    onScreen(target);
+    document.body.append(target);
+    vi.spyOn(Element.prototype, 'attachShadow').mockImplementation(function (this: Element, init) {
+      root = attachShadow.call(this, init);
+      return root;
+    });
+    chip = createChip();
+    onAccept = vi.fn<() => void>();
+    onDismiss = vi.fn<(reason: DismissReason) => void>();
+  });
+
+  afterEach(() => {
+    chip.destroy();
+    vi.restoreAllMocks();
+    delete (HTMLElement.prototype as { offsetWidth?: unknown }).offsetWidth;
+    delete (window as { matchMedia?: unknown }).matchMedia;
+    document.body.innerHTML = '';
+    vi.useRealTimers();
+  });
+
+  it('carries a pulsing dot and the waiting line in the tooltip while a better answer may land', () => {
+    chip.show({ target, value: 'Dinner', reason: 'named as a plan', pending: true, onAccept, onDismiss });
+    expect(chip.pending).toBe(true);
+    expect(dot().hidden).toBe(false);
+    expect(dot().classList.contains('is-static')).toBe(false);
+    expect(title()).toBe('named as a plan · checking with the model…');
+    // The words on the chip say nothing about waiting; the dot does.
+    expect(chip.text).toBe('Fill "Dinner"?');
+  });
+
+  it('says only the waiting line when the suggestion came with no reason', () => {
+    chip.show({ target, value: 'Dinner', pending: true, onAccept, onDismiss });
+    expect(title()).toBe(PENDING_HINT);
+  });
+
+  it('shows no dot and no waiting line when nothing more is coming', () => {
+    chip.show({ target, value: 'Dinner', reason: 'named as a plan', onAccept, onDismiss });
+    expect(chip.pending).toBe(false);
+    expect(dot().hidden).toBe(true);
+    expect(title()).toBe('named as a plan');
+  });
+
+  it('drops the dot on settle but keeps the chip and its reason', () => {
+    chip.show({ target, value: 'Dinner', reason: 'named as a plan', pending: true, onAccept, onDismiss });
+    chip.settle();
+    expect(chip.pending).toBe(false);
+    expect(dot().hidden).toBe(true);
+    expect(title()).toBe('named as a plan');
+    expect(chip.visible).toBe(true);
+    // Settling twice, or with nothing up, is harmless.
+    chip.settle();
+    chip.hide();
+    chip.settle();
+    expect(chip.pending).toBe(false);
+  });
+
+  it('holds the dot still when the user asked for less motion', () => {
+    // jsdom has no matchMedia of its own, which is also the path a chip takes when the query is unavailable.
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: (query: string) => ({ matches: query.includes('prefers-reduced-motion'), media: query }) as MediaQueryList,
+    });
+    chip.show({ target, value: 'Dinner', pending: true, onAccept, onDismiss });
+    expect(dot().classList.contains('is-static')).toBe(true);
+    // The CSS says the same for a browser that never reaches matchMedia.
+    expect(CHIP_CSS).toContain('@media (prefers-reduced-motion: reduce)');
+  });
+
+  it('fades a replaced value in without moving the chip', () => {
+    // A wider pill is pushed left by the viewport edge, so the target sits near it.
+    Object.defineProperty(HTMLElement.prototype, 'offsetWidth', {
+      configurable: true,
+      get(this: HTMLElement) {
+        return (this.textContent ?? '').length * 8;
+      },
+    });
+    target.getBoundingClientRect = () =>
+      ({ top: 100, left: 1000, bottom: 130, right: 1200, width: 200, height: 30 }) as DOMRect;
+
+    chip.show({ target, value: 'Dinner', pending: true, onAccept, onDismiss });
+    const host = hosts()[0] as HTMLElement;
+    const left = host.style.left;
+    expect(root.querySelector('.value')!.classList.contains('is-fresh')).toBe(false);
+
+    chip.show({ target, value: 'Dinner at Seven Shores Cafe', pending: true, onAccept, onDismiss });
+    expect(chip.text).toBe('Fill "Dinner at Seven Shores Cafe"?');
+    expect(host.style.left).toBe(left);
+    expect(host.style.top).toBe('136px');
+    expect(root.querySelector('.value')!.classList.contains('is-fresh')).toBe(true);
+
+    // A chip on a different field is a new chip, so it is placed afresh.
+    const other = document.createElement('input');
+    onScreen(other);
+    document.body.append(other);
+    chip.show({ target: other, value: 'Dinner', onAccept, onDismiss });
+    expect(host.style.left).toBe('20px');
+    expect(root.querySelector('.value')!.classList.contains('is-fresh')).toBe(false);
+  });
+
+  it('gives the banner the same dot', () => {
+    chip.showCorner({ label: 'Open in Google Maps', value: 'Seven Shores Cafe', pending: true, onAccept, onDismiss });
+    expect(chip.pending).toBe(true);
+    expect(dot().hidden).toBe(false);
+    chip.settle();
+    expect(dot().hidden).toBe(true);
   });
 });
 
