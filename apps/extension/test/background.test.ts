@@ -1067,6 +1067,50 @@ describe('orchestrate interactions', () => {
     ]);
   });
 
+  it('keeps a scroll to an off-screen element, rewrites one to an on-screen element as the verb it implies, and drops the rest', async () => {
+    const { store, ctxId, now } = await seeded();
+    await handleFeedback({ fieldId: 'f0', fingerprint: 'input|text|||Add title|', contextId: ctxId, accepted: true, host: 'calendar.google.com' }, store, 2);
+    const scrollable = {
+      ...input,
+      elements: [
+        { i: 'e0', r: 'button' as const, nm: 'Save', p: 1 as const, o: 1 as const },
+        { i: 'e1', r: 'checkbox' as const, nm: 'All day', st: 'off' as const },
+        { i: 'e2', r: 'slider' as const, nm: 'Volume', v: '80', min: 0, max: 100, step: 1 },
+        { i: 'e3', r: 'button' as const, nm: 'Delete event', o: 1 as const },
+      ],
+    };
+    const remote = fakeProvider('openai', async () => [
+      interact({ sourceContextId: ctxId, elementId: 'e0', verb: 'scroll', value: '', confidence: 0.9 }), // off-screen: stays a scroll
+      interact({ sourceContextId: ctxId, elementId: 'e1', verb: 'scroll', value: '', confidence: 0.8 }), // on-screen box: becomes a check
+      interact({ sourceContextId: ctxId, elementId: 'e2', verb: 'scroll', value: '', confidence: 0.85 }), // on-screen slider: nothing implied
+      interact({ sourceContextId: ctxId, elementId: 'e3', verb: 'scroll', value: '', confidence: 0.95 }), // destructive, off-screen or not
+      interact({ sourceContextId: ctxId, elementId: 'e0', verb: 'scroll', value: 'Save', confidence: 0.99 }), // a scroll carries no value
+    ]);
+    const res = await orchestrate(scrollable, onCalendar, { store, settings: async () => enabled, createProvider: () => remote, now });
+    expect(res.interactions.map((s) => [s.elementId, s.verb, s.value])).toEqual([
+      ['e0', 'scroll', ''],
+      ['e1', 'check', 'All day'],
+    ]);
+  });
+
+  it('turns a cached scroll into a click once the button is on-screen, and drops it when nothing was filled', async () => {
+    const { store, ctxId, now } = await seeded();
+    await handleFeedback({ fieldId: 'f0', fingerprint: 'input|text|||Add title|', contextId: ctxId, accepted: true, host: 'calendar.google.com' }, store, 2);
+    const remote = fakeProvider('openai', async () => [interact({ sourceContextId: ctxId, elementId: 'e0', verb: 'scroll', value: '' })]);
+    const deps = { store, settings: async () => enabled, createProvider: () => remote, now };
+    const below = { ...input, elements: [{ i: 'e0', r: 'button' as const, nm: 'Save', p: 1 as const, o: 1 as const }] };
+    expect((await orchestrate(below, onCalendar, deps)).interactions.map((s) => s.verb)).toEqual(['scroll']);
+
+    // Same answer from the cache, button now in view: the click it stood in for.
+    const inView = { ...input, elements: [{ i: 'e0', r: 'button' as const, nm: 'Save', p: 1 as const }] };
+    const again = await orchestrate(inView, onCalendar, deps);
+    expect(again.interactions.map((s) => [s.verb, s.value])).toEqual([['click', 'Save']]);
+    expect(remote.calls).toBe(1);
+
+    // A click still needs a fill behind it; another tab's fill does not count.
+    expect((await orchestrate(inView, { ...onCalendar, tabId: 5 }, deps)).interactions).toEqual([]);
+  });
+
   it('never lets the model click a button on a page carat filled nothing on', async () => {
     const { store, ctxId, now } = await seeded();
     const remote = fakeProvider('openai', async () => [interact({ sourceContextId: ctxId }), interact({ sourceContextId: ctxId, elementId: 'e2', verb: 'set', value: '40' })]);

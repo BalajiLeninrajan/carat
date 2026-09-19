@@ -10,7 +10,7 @@ import type {
   SuggestRequest,
   Suggestion,
 } from '@carat/shared';
-import { LIMITS, fnv1a, isDestructiveName, isIntentName, mergeSuggestions, verbFits } from '@carat/shared';
+import { LIMITS, fnv1a, impliedVerb, isDestructiveName, isIntentName, isOffScreen, mergeSuggestions, verbFits } from '@carat/shared';
 import type { Provider } from '@carat/providers';
 import { LocalProvider, createProvider, createSmartProvider } from '@carat/providers';
 import type { InteractionView, RefineResponse, SuggestResponse, SuggestionSource, SuggestionView } from '../messaging';
@@ -100,9 +100,13 @@ export async function orchestrate(input: SuggestInput, requester: Requester, dep
   }
 
   const key = cacheKey(input, elements, filled, context, own);
-  let suggestions = input.force ? undefined : await store.getCached(key);
-  diag.cached = suggestions !== undefined;
-  if (!suggestions) {
+  const cached = input.force ? undefined : await store.getCached(key);
+  diag.cached = cached !== undefined;
+  let suggestions: Suggestion[];
+  if (cached) {
+    // The key ignores what is scrolled into view, so a cached scroll may now name an on-screen element.
+    suggestions = valid(cached, input.fields, elements, filled, context, own);
+  } else {
     const outcome = await callProvider(request(shape, context, own, now()), settings, deps, timeoutMs);
     diag.attempts = outcome.attempts;
     suggestions = valid(outcome.suggestions, input.fields, elements, filled, context, own);
@@ -350,7 +354,8 @@ function withTimeout(provider: Provider, req: SuggestRequest, timeoutMs: number)
  * cite the page's own text; interactions must name a described element with
  * a verb that fits its role and state, cite another tab's text or a recent
  * fill, and never a destructive name. A button or link is clicked only after
- * carat filled something on the page.
+ * carat filled something on the page. A scroll to an element that is already
+ * on-screen becomes the verb it stood in for, or nothing.
  */
 function valid(
   suggestions: Suggestion[],
@@ -363,18 +368,37 @@ function valid(
   const contextIds = new Set(context.map((c) => c.id));
   const ownIds = new Set(own.map((o) => o.id));
   const interactIds = new Set([...contextIds, ...filled]);
-  return suggestions.filter((s) => {
-    if (typeof s.value !== 'string' || s.value.trim().length === 0 || s.confidence < LIMITS.minConfidence) return false;
-    if (s.kind === 'action') return isIntentName(s.intent) && ownIds.has(s.sourceContextId);
+  return suggestions.flatMap((raw): Suggestion[] => {
+    const s = raw.kind === 'interact' ? settleScroll(raw, elements) : raw;
+    if (!s || typeof s.value !== 'string' || s.confidence < LIMITS.minConfidence) return [];
+    const bare = s.kind === 'interact' && s.verb === 'scroll';
+    if (!bare && s.value.trim().length === 0) return [];
+    if (s.kind === 'action') return isIntentName(s.intent) && ownIds.has(s.sourceContextId) ? [s] : [];
     if (s.kind === 'interact') {
       const el = elements.find((e) => e.i === s.elementId);
-      if (!el || isDestructiveName(el.nm) || !interactIds.has(s.sourceContextId)) return false;
-      if (!verbFits(el, s.verb, s.value.trim())) return false;
-      return s.verb !== 'click' || (el.r !== 'button' && el.r !== 'link') || filled.length > 0;
+      if (!el || isDestructiveName(el.nm) || !interactIds.has(s.sourceContextId)) return [];
+      if (!verbFits(el, s.verb, s.value.trim())) return [];
+      return s.verb !== 'click' || (el.r !== 'button' && el.r !== 'link') || filled.length > 0 ? [s] : [];
     }
     const field = fields.find((f) => f.i === s.fieldId);
-    return !!field && !field.v && contextIds.has(s.sourceContextId); // never over what the user typed, never from their own page
+    return !!field && !field.v && contextIds.has(s.sourceContextId) ? [s] : []; // never over what the user typed, never from their own page
   });
+}
+
+/**
+ * A `scroll` only means something for an element that is off-screen; carat
+ * scrolls to an on-screen one's chip by itself. So a scroll to an on-screen
+ * element is rewritten to the one verb the element implies (click a button,
+ * check a box), which then faces the same checks as if the model had said
+ * so, or dropped when the element needs a value (slider, select).
+ */
+function settleScroll(s: InteractSuggestion, elements: ElementDescriptor[]): InteractSuggestion | null {
+  if (s.verb !== 'scroll') return s;
+  const el = elements.find((e) => e.i === s.elementId);
+  if (!el) return null;
+  if (isOffScreen(el)) return s;
+  const verb = impliedVerb(el);
+  return verb ? { ...s, verb, value: el.nm } : null;
 }
 
 function isSuppressed(s: FillSuggestion, input: SuggestInput, keys: string[]): boolean {
@@ -406,8 +430,9 @@ function topBy<T extends { confidence: number }>(list: T[], keyOf: (t: T) => str
 }
 
 function cacheKey(input: SuggestInput, elements: ElementDescriptor[], filled: string[], context: RequestContext, own: RequestContext): string {
-  // Focus and width change as the user moves around without changing what to suggest.
-  const fields = input.fields.map(({ f: _f, w: _w, ...rest }) => rest);
+  // Focus, width and what is scrolled into view change as the user moves around without changing what to suggest.
+  const fields = input.fields.map(({ f: _f, w: _w, o: _o, ...rest }) => rest);
+  const els = elements.map(({ o: _o, ...rest }) => rest);
   const ids = [...context, ...own].map((c) => c.id).join(',');
-  return fnv1a(`${input.page.host}|${JSON.stringify(fields)}|${JSON.stringify(elements)}|${filled.join(',')}|${ids}`).toString(36);
+  return fnv1a(`${input.page.host}|${JSON.stringify(fields)}|${JSON.stringify(els)}|${filled.join(',')}|${ids}`).toString(36);
 }
