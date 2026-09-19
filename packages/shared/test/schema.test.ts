@@ -11,6 +11,8 @@ const fill = {
   intent: '',
   when: '',
   location: '',
+  elementId: '',
+  verb: '',
 };
 
 const action = {
@@ -23,11 +25,27 @@ const action = {
   intent: 'calendar',
   when: '2026-09-18T18:00:00-04:00',
   location: 'Seven Shores Cafe',
+  elementId: '',
+  verb: '',
+};
+
+const interact = {
+  kind: 'interact',
+  fieldId: '',
+  value: 'Save',
+  confidence: 0.85,
+  reason: 'commits the fills',
+  sourceContextId: 'c1',
+  intent: '',
+  when: '',
+  location: '',
+  elementId: 'e0',
+  verb: 'click',
 };
 
 describe('SuggestionListSchema', () => {
-  it('turns the flat wire shape into a fill or an action', () => {
-    expect(SuggestionListSchema.parse({ suggestions: [fill, action] })).toEqual({
+  it('turns the flat wire shape into a fill, an action or an interaction', () => {
+    expect(SuggestionListSchema.parse({ suggestions: [fill, action, interact] })).toEqual({
       suggestions: [
         { kind: 'fill', fieldId: 'f0', value: 'Seven Shores Cafe', confidence: 0.92, reason: 'place name from Discord', sourceContextId: 'c1' },
         {
@@ -40,13 +58,14 @@ describe('SuggestionListSchema', () => {
           reason: 'invitation with a time',
           sourceContextId: 'o1',
         },
+        { kind: 'interact', elementId: 'e0', verb: 'click', value: 'Save', confidence: 0.85, reason: 'commits the fills', sourceContextId: 'c1' },
       ],
     });
     expect(SuggestionListSchema.parse({ suggestions: [] })).toEqual({ suggestions: [] });
   });
 
   it('reads the pre-kind shape as a fill', () => {
-    const { kind: _k, intent: _i, when: _w, location: _l, ...legacy } = fill;
+    const { kind: _k, intent: _i, when: _w, location: _l, elementId: _e, verb: _v, ...legacy } = fill;
     expect(SuggestionListSchema.parse({ suggestions: [legacy] })).toEqual({ suggestions: [{ kind: 'fill', ...legacy }] });
   });
 
@@ -57,6 +76,13 @@ describe('SuggestionListSchema', () => {
     const res = SuggestionListSchema.safeParse({ suggestions: [{ ...action, intent: 'uber' }] });
     expect(res.success).toBe(false);
     if (!res.success) expect(res.error.issues[0]?.path).toEqual(['suggestions', 0, 'intent']);
+  });
+
+  it('rejects an interaction without an elementId or with an unknown verb', () => {
+    expect(SuggestionListSchema.safeParse({ suggestions: [{ ...interact, elementId: '' }] }).success).toBe(false);
+    const res = SuggestionListSchema.safeParse({ suggestions: [{ ...interact, verb: 'toggle' }] });
+    expect(res.success).toBe(false);
+    if (!res.success) expect(res.error.issues[0]?.path).toEqual(['suggestions', 0, 'verb']);
   });
 
   it('rejects out-of-range confidence and wrong types', () => {

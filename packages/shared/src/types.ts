@@ -25,6 +25,38 @@ export interface FieldDescriptor {
   w?: 's' | 'm' | 'l'; // width bucket
 }
 
+/** Roles carat can act on. Derived from the tag, the input type or an explicit ARIA role; nothing else is described. */
+export type ElementRole =
+  | 'button'
+  | 'link'
+  | 'checkbox'
+  | 'radio'
+  | 'switch'
+  | 'slider'
+  | 'select'
+  | 'tab'
+  | 'menuitem'
+  | 'disclosure';
+
+/**
+ * One interactive element, as the model sees it. No coordinates, no DOM: a
+ * role, an accessible name, the current state or value, the range for
+ * sliders, the options for selects, and nearby text.
+ */
+export interface ElementDescriptor {
+  i: string; // 'e0'..'e15'
+  r: ElementRole;
+  nm: string; // accessible name, <= 60, never empty
+  st?: 'on' | 'off' | 'open' | 'closed' | 'selected'; // checkbox/switch/radio/disclosure/tab state
+  v?: string; // current value, <= 40 (slider, select)
+  min?: number; // sliders
+  max?: number;
+  step?: number;
+  op?: string[]; // select options, <= 8 x 20 chars
+  nb?: string; // nearby text, <= 80
+  p?: 1; // the page's primary action (submit button, or styled as primary)
+}
+
 export interface PageMeta {
   host: string;
   title: string;
@@ -37,6 +69,10 @@ export type RequestContext = Array<Pick<ContextItem, 'id' | 'origin' | 'title' |
 export interface SuggestRequest {
   page: PageMeta;
   fields: FieldDescriptor[];
+  /** Interactive elements on the page. Omitted when empty. */
+  elements?: ElementDescriptor[];
+  /** Context ids behind fills carat performed on this tab in the last minute. A click on a Save-like button cites one of them. Omitted when empty. */
+  filled?: string[];
   /** Text from other tabs: the only source for field fills. */
   context: RequestContext;
   /** Text captured from the requesting tab itself: a source for actions, never for fills. Omitted when empty. */
@@ -80,8 +116,26 @@ export interface ActionSuggestion {
   sourceContextId: string;
 }
 
+export type InteractVerb = 'click' | 'check' | 'uncheck' | 'set' | 'choose';
+
+/**
+ * One interaction with one element on the current page. `value` is the target
+ * for `set` (a number as text) and `choose` (an option label); for `click`,
+ * `check` and `uncheck` it repeats the element's name. The content script
+ * performs it, once, after a Tab on the chip.
+ */
+export interface InteractSuggestion {
+  kind: 'interact';
+  elementId: string;
+  verb: InteractVerb;
+  value: string;
+  confidence: number;
+  reason: string;
+  sourceContextId: string;
+}
+
 /** What a provider returns. */
-export type Suggestion = FillSuggestion | ActionSuggestion;
+export type Suggestion = FillSuggestion | ActionSuggestion | InteractSuggestion;
 
 /**
  * An action resolved against the registry and the user's open tabs. `open`
