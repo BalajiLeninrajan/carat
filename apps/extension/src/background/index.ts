@@ -39,3 +39,7 @@ export { fingerprintMatchesDescriptor } from './fingerprint';
 export { isExtensionPage, redactSettings } from './trusted';
 export { describeStatus } from './status';
 export type { StatusInfo, StatusReason } from './status';
+export { HistoryStore, HISTORY_KEY } from './history';
+export type { CommittedDetails, NavigationEvents, TabEvents } from './history';
+export { createNotes, fallbackFacts, NOTES_KEY, NOTES_LIMITS } from './notes';
+export type { Distill, Note, Notes, NotesDeps } from './notes';

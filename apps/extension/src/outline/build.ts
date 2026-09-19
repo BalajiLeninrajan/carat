@@ -6,6 +6,7 @@ import { isIframe, isInput, isSelect, isTextArea } from '../dom/tags';
 import type { FrameRef } from '../frames/merge';
 import { frameNumber } from '../frames/protocol';
 import { accessibleName } from '../interact';
+import { labelOf } from '../snapshot/labels';
 import { inViewport } from '../scroll';
 import { controlRoleOf, isEditable, isRiskyName, stateOf } from './roles';
 
@@ -215,7 +216,7 @@ export function buildOutline(doc: Document, win: Window | null = doc.defaultView
     const role = controlRoleOf(el);
     if (!role) return;
     const focused = el === focusedEl;
-    const name = truncate(normalizeWhitespace(controlName(el, ctx.doc)), OUTLINE_LIMITS.nameChars);
+    const name = truncate(normalizeWhitespace(controlName(el, ctx.doc, role)), OUTLINE_LIMITS.nameChars);
     if (!name && NEEDS_NAME.has(role) && !focused) return;
     flush();
     noteAnchor(el);
@@ -570,10 +571,17 @@ function regionName(el: Element, doc: Document): string {
   return el.getAttribute('title') ?? el.getAttribute('name') ?? '';
 }
 
-function controlName(el: Element, doc: Document): string {
-  const name = accessibleName(el, doc);
-  if (name) return name;
-  return el.getAttribute('placeholder') ?? el.getAttribute('name') ?? '';
+/**
+ * What the control is called. An editable one is never named by its own
+ * content, which is its value, so only its labels and its placeholder count.
+ */
+function controlName(el: Element, doc: Document, role: ControlRole): string {
+  const aria = el.getAttribute('aria-labelledby') || el.getAttribute('aria-label') ? accessibleName(el, doc) : '';
+  if (aria) return aria;
+  if (role === 'textbox' || role === 'searchbox' || role === 'combobox' || isSelect(el)) {
+    return labelOf(el, doc) ?? el.getAttribute('placeholder') ?? el.getAttribute('name') ?? '';
+  }
+  return accessibleName(el, doc) || el.getAttribute('name') || '';
 }
 
 function controlValue(el: Element, role: ControlRole, name: string): string {
