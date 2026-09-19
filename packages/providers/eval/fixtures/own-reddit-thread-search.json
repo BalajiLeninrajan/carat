@@ -1,0 +1,25 @@
+{
+  "name": "own-reddit-thread-search",
+  "request": {
+    "page": { "host": "www.reddit.com", "title": "Best pho in Waterloo? : r/waterloo", "path": "/r/waterloo/comments/1abcdef/best_pho_in_waterloo/" },
+    "state": { "kind": "feed", "y": 0.3, "pages": 3.1, "more": true },
+    "fields": [
+      { "i": "f0", "t": "input:search", "nm": "q", "ph": "Search in r/waterloo", "al": "Search", "w": "m" }
+    ],
+    "context": [],
+    "own": [
+      {
+        "id": "o1",
+        "origin": "https://www.reddit.com",
+        "title": "Best pho in Waterloo? : r/waterloo",
+        "kind": "page",
+        "text": "Best pho in Waterloo? : r/waterloo Posted by u/kwfoodie 4 hours ago. Moving here next month and I want somewhere decent. top comment: honestly go to Pho Dau Bo, the broth is the real thing and it is open late. reply: seconding Pho Dau Bo, the one on King St.",
+        "capturedAt": 1758046800000
+      }
+    ],
+    "now": "2026-09-16T14:16:00-04:00",
+    "locale": "en-CA"
+  },
+  "expect": [],
+  "expectAt": { "eager": [{ "fieldId": "f0", "valueIncludes": "Pho Dau Bo" }] }
+}

@@ -10,6 +10,7 @@ import type {
   InteractSuggestion,
   PageIntent,
   PageMeta,
+  PageState,
   RequestContext,
   Settings,
   SuggestRequest,
@@ -18,28 +19,34 @@ import type {
 import {
   EAGERNESS,
   LIMITS,
+  PAGE_SCROLL_NAME,
+  PAGE_SCROLL_ROLE,
   PAGE_SOURCE,
   clickAllowed,
   fnv1a,
   impliedVerb,
   isDestructiveElement,
+  isDestructiveName,
   isIntentName,
   isOffScreen,
+  isPageScroll,
   isSiteLink,
   linkMatchesQuery,
   linkRelatesToQuery,
   mayPay,
   mergeSuggestions,
   pageIntent,
+  pageJustifies,
   pageQueryClick,
+  refusesFill,
   verbFits,
 } from '@carat/shared';
 import type { EntitySource, Provider, SuggestOptions } from '@carat/providers';
-import { LocalProvider, RaceProvider, createProvider, createSmartProvider, matchEntities } from '@carat/providers';
+import { LocalProvider, RaceProvider, createProvider, createSmartProvider, matchEntities, nextStep } from '@carat/providers';
 import type { InteractionView, RefineResponse, SuggestResponse, SuggestionSource, SuggestionView } from '../messaging';
 import type { ContextStore, EntityStore } from '../store';
 import { interactSuppressionKey, navSuppressionKey, suppressionPrefix } from '../store';
-import type { AnswerOrigin, GateVerdict, ProviderAttempt, SuggestDiag } from './diag';
+import type { AnswerOrigin, ProviderAttempt, SuggestDiag } from './diag';
 import { fingerprintMatchesDescriptor } from './fingerprint';
 import { flowActive } from './flow';
 import { explainGate } from './gate';
@@ -55,6 +62,8 @@ export interface SuggestInput {
   page: PageMeta;
   fields: FieldDescriptor[];
   elements?: ElementDescriptor[];
+  /** The page's kind, query, scroll position and what carat already did here. */
+  state?: PageState;
   /** The user asked with the shortcut: ask the provider again and show what they dismissed. */
   force?: boolean;
 }
@@ -82,16 +91,16 @@ export interface OrchestrateDeps {
 
 const NONE: SuggestResponse = { suggestions: [], navigation: [], interactions: [] };
 
-/** Gate verdicts a transcript still on its way could overturn. */
-const CONTEXT_VERDICTS: ReadonlySet<GateVerdict> = new Set(['no-context', 'stale-context', 'own-context']);
-
 /**
- * The first answer is whatever needs no waiting: the 60s cache, the answer a
- * navigation pre-warmed, or the network-free pass (entities predicted when
- * the text was captured, matched to the page, plus the regex provider). It
- * goes back at once with a ticket, and the configured providers race behind
- * it; each later answer that would change a chip is handed on through the
- * ticket, the smart model last of all when the answer is still weak. Only
+ * One answer per snapshot: what the user will most likely do next on this
+ * page. The first answer is whatever needs no waiting: the 60s cache, the
+ * answer a navigation pre-warmed, the link the page's own query names, or the
+ * network-free pass (the page's own priors, entities predicted when the text
+ * was captured, and the regex provider). It goes back at once with a ticket,
+ * and the configured providers race behind it; each later answer that would
+ * change a chip is handed on through the ticket, the smart model last of all
+ * when the answer is still weak. The provider is asked only when another
+ * tab's text is in play or the local prior is under the level's floor. Only
  * when nothing is immediate does the reply wait, inside the 6s budget, for
  * the first provider to answer.
  */
@@ -112,9 +121,9 @@ export async function orchestrate(input: SuggestInput, requester: Requester, dep
   const filled = requester.tabId === undefined ? [] : await store.recentFillSources(requester.tabId);
   // Freshness follows the store's clock, which stands still while pinned.
   const at = await store.clock();
-  // The later goal layer's say on whether this page is a step in a flow; false until it exists.
-  const flow = flowActive(input.page);
-  diag.gate = explainGate({ ...input, elements, filled, flow }, items, settings, requester, at);
+  // Whether this page is a step in a flow: a checkout, or a form carat already filled on this page load.
+  const flow = flowActive(input.page, input.state, filled.length > 0);
+  diag.gate = explainGate({ ...input, elements, filled, flow }, settings);
   const smart = smartPath(settings, deps, requester);
   // What the user searched for on this page, and the links it names outright. Never a fill source.
   const intent = pageIntent(input.page, input.fields);
@@ -125,9 +134,22 @@ export async function orchestrate(input: SuggestInput, requester: Requester, dep
   }
   const shape: Shape = { input, elements, filled, store, eagerness, flow, pay: mayPay(settings), intent, now };
   if (diag.gate !== 'ok') {
+    deps.onDiag?.(diag);
+    return { ...NONE };
+  }
+
+  const context = scoreAndPickContext(items, requester, at, eagerness);
+  const own = ownContext(items, requester, at);
+  // What the page alone says to do next, and how sure of it the level lets carat be.
+  const step = nextStep(request(shape, context, own, now()), eagerness);
+  if (step.kind) {
+    diag.pageKind = step.kind;
+    diag.prior = step.reason;
+  }
+  if (context.length === 0 && own.length === 0 && step.best === 0 && !matched[0]) {
     const result: SuggestResponse = { ...NONE };
-    // Nothing to read yet, but a screenshot is being transcribed: the smart pass alone may have an answer.
-    if (smart?.pending && CONTEXT_VERDICTS.has(diag.gate)) {
+    // Nothing to answer from and no prior, but a screenshot is being transcribed: the smart pass alone may have an answer.
+    if (smart?.pending) {
       const ticket = smart.queue.open(requester.tabId);
       void smartSuggest(shape, requester, smart, deps, now)
         .then(async (out) => {
@@ -147,12 +169,6 @@ export async function orchestrate(input: SuggestInput, requester: Requester, dep
     return result;
   }
 
-  const context = scoreAndPickContext(items, requester, at, eagerness);
-  const own = ownContext(items, requester, at);
-  if (context.length === 0 && own.length === 0 && !intent) {
-    deps.onDiag?.(diag);
-    return NONE;
-  }
 
   const key = cacheKey(shape, context, own);
   // Counted whether a provider or `valid` dropped them, on the first answer and on every later one; a provider never returns what it dropped.
@@ -503,8 +519,10 @@ function request(shape: Shape, context: RequestContext, own: RequestContext, now
     fields: input.fields,
     ...(elements.length > 0 ? { elements } : {}),
     ...(filled.length > 0 ? { filled } : {}),
-    context,
+    ...(input.state ? { state: input.state } : {}),
+    // `own` first: the page the user is looking at is the closest source, and the prompt says to read it first.
     ...(own.length > 0 ? { own } : {}),
+    context,
     ...(flow ? { flow: true as const } : {}),
     now: new Date(now).toISOString(),
     ...(typeof navigator !== 'undefined' && navigator.language ? { locale: navigator.language } : {}),
@@ -525,6 +543,7 @@ async function offer(suggestions: Suggestion[], shape: Shape, context: RequestCo
   const fills = suggestions.filter(isFill).filter((s) => !isSuppressed(s, input, suppressed));
   const actions = suggestions.filter(isAction).filter((a) => !suppressed.includes(navSuppressionKey(a.intent, a.value)));
   const interactions = suggestions.filter(isInteract).filter((s) => {
+    if (isPageScroll(s)) return !suppressed.includes(interactSuppressionKey(input.page.host, PAGE_SCROLL_ROLE, PAGE_SCROLL_NAME));
     const el = elements.find((e) => e.i === s.elementId);
     return !!el && !suppressed.includes(interactSuppressionKey(input.page.host, el.r, el.nm));
   });
@@ -577,14 +596,17 @@ const isAction = (s: Suggestion): s is ActionSuggestion => s.kind === 'action';
 const isInteract = (s: Suggestion): s is InteractSuggestion => s.kind === 'interact';
 
 /**
- * One 6s budget covers the whole call. A race (the real factory's answer
- * whenever a network provider is configured) resolves with its first
- * non-empty answer and keeps the rest running behind `later` when there is
- * a queue to `stream` them through; without one it runs to the end and
- * answers with the merged view, as one call did before. A plain provider is
- * asked once; a failing network provider degrades to the regex provider on
- * whatever budget is left (with a small floor, since the regex pass is
- * near-instant), and a slow local provider degrades to nothing.
+ * One 6s budget covers the whole call. With `askModel` false the local
+ * predictor answers alone, which is the common case on a results page or an
+ * article with nothing read in another tab: the prior already clears the
+ * level's floor, so a network call could only confirm it. Otherwise a race
+ * (the real factory's answer whenever a network provider is configured)
+ * resolves with its first non-empty answer and keeps the rest running behind
+ * `later` when there is a queue to `stream` them through; without one it runs
+ * to the end and answers with the merged view, as one call did before. A plain
+ * provider is asked once; a failing network provider degrades to the regex
+ * provider on whatever budget is left (with a small floor, since the regex
+ * pass is near-instant), and a slow local provider degrades to nothing.
  */
 async function callProvider(
   req: SuggestRequest,
@@ -593,11 +615,18 @@ async function callProvider(
   timeoutMs: number,
   stream: boolean,
   onUnderFloor?: SuggestOptions['onUnderFloor'],
+  askModel = true,
 ): Promise<ProviderOutcome> {
   const local = deps.localProvider ?? new LocalProvider(settings.eagerness);
   const deadline = Date.now() + timeoutMs;
   const floor = Math.min(FALLBACK_FLOOR_MS, timeoutMs);
   const attempts: ProviderAttempt[] = [];
+
+  if (!askModel) {
+    const only = await attempt(local, req, timeoutMs, onUnderFloor);
+    attempts.push(only);
+    return { suggestions: only.suggestions, attempts, failed: only.error !== undefined };
+  }
 
   let provider: Provider;
   try {
@@ -721,24 +750,27 @@ function withTimeout(provider: Provider, req: SuggestRequest, timeoutMs: number,
 }
 
 /**
- * Fills must name an empty field and cite another tab's text; actions must
- * cite the page's own text; interactions must name a described element with
- * a verb that fits its role and state, cite another tab's text or a recent
- * fill, and never a destructive name. A button or link is clicked only after
- * carat filled something on the page, or when it is the primary action and
- * the level or a flow allows that (`clickAllowed`); a money control only when
- * `mayPay` says so. The one exception to the fill rule is a real link, cited
- * to the page itself, while the page has a query that the link has something
- * to do with. A scroll to an element that is already on-screen becomes the
- * verb it stood in for, or nothing. Whatever passes all that but sits under
- * the level's confidence floor is dropped and counted.
+ * Fills must name an empty field and cite text the user read, this page's own
+ * or another tab's, and must not read the field or the page back to itself.
+ * Actions must cite the page's own text; interactions must name a described
+ * element with a verb that fits its role and state, cite text, a recent fill
+ * or the page state, and never a destructive name. A button or link is
+ * clicked only after carat filled something on the page, when it is the
+ * primary action and the level or a flow allows that (`clickAllowed`), or
+ * where the page kind justifies it; a money control only when `mayPay` says
+ * so. A real link cited to the page itself also has to have something to do
+ * with the page's query, when it has one. A scroll to an element that is
+ * already on-screen becomes the verb it stood in for, or nothing. Whatever
+ * passes all that but sits under the level's confidence floor is dropped and
+ * counted.
  */
 function valid(suggestions: Suggestion[], shape: Shape, context: RequestContext, own: RequestContext, onUnderFloor?: () => void): Suggestion[] {
   const { input, elements, filled, intent } = shape;
   const knobs: EagernessKnobs = EAGERNESS[shape.eagerness];
   const contextIds = new Set(context.map((c) => c.id));
   const ownIds = new Set(own.map((o) => o.id));
-  const interactIds = new Set([...contextIds, ...filled]);
+  const fillIds = new Set([...contextIds, ...ownIds]);
+  const interactIds = new Set([...fillIds, ...filled]);
   const gate = { filled: filled.length > 0, flow: shape.flow, eagerness: shape.eagerness, fillable: input.fields.some((f) => !f.v) };
   const wellFormed = (s: Suggestion): boolean => {
     if (typeof s.value !== 'string') return false;
@@ -746,18 +778,25 @@ function valid(suggestions: Suggestion[], shape: Shape, context: RequestContext,
     if (!bare && s.value.trim().length === 0) return false;
     if (s.kind === 'action') return isIntentName(s.intent) && ownIds.has(s.sourceContextId);
     if (s.kind === 'interact') {
+      // A page scroll names no element; only the page state can justify it.
+      if (isPageScroll(s)) return pageJustifies('scroll', undefined, input.state, input.fields);
       const el = elements.find((e) => e.i === s.elementId);
       if (!el || isDestructiveElement(el)) return false;
       if (el.m === 1 && !shape.pay) return false;
       if (!verbFits(el, s.verb, s.value.trim())) return false;
       if (s.sourceContextId === PAGE_SOURCE) {
-        return s.verb === 'click' && isSiteLink(el) && intent !== null && linkRelatesToQuery(el, intent);
+        if (!pageJustifies(s.verb, el, input.state, input.fields)) return false;
+        // A link the page itself justifies still has to have something to do with what was searched for here.
+        return !isSiteLink(el) || intent === null || linkRelatesToQuery(el, intent);
       }
       if (!interactIds.has(s.sourceContextId)) return false;
-      return s.verb !== 'click' || clickAllowed(el, gate);
+      if (s.verb === 'click' && !clickAllowed(el, gate)) return pageJustifies('click', el, input.state, input.fields);
+      return true;
     }
     const field = input.fields.find((f) => f.i === s.fieldId);
-    return !!field && !field.v && contextIds.has(s.sourceContextId); // never over what the user typed, never from their own page
+    if (!field || field.v || !fillIds.has(s.sourceContextId)) return false; // never over what the user typed
+    // The page's own text may fill a field on it; the page's own furniture may not.
+    return !refusesFill(s.value, field, input.page, ownIds.has(s.sourceContextId));
   };
   return suggestions.flatMap((raw): Suggestion[] => {
     // Settle scrolls first, so a scroll rewritten to a click faces the click rules and the floor like any other.
@@ -777,7 +816,7 @@ function valid(suggestions: Suggestion[], shape: Shape, context: RequestContext,
  * so, or dropped when the element needs a value (slider, select).
  */
 function settleScroll(s: InteractSuggestion, elements: ElementDescriptor[]): InteractSuggestion | null {
-  if (s.verb !== 'scroll') return s;
+  if (s.verb !== 'scroll' || isPageScroll(s)) return s;
   const el = elements.find((e) => e.i === s.elementId);
   if (!el) return null;
   if (isOffScreen(el)) return s;
@@ -801,7 +840,7 @@ function topPerIntent(actions: ActionSuggestion[]): ActionSuggestion[] {
 }
 
 function topPerElement(interactions: InteractSuggestion[]): InteractSuggestion[] {
-  return topBy(interactions, (s) => s.elementId);
+  return topBy(interactions, (s) => s.elementId || PAGE_SCROLL_ROLE);
 }
 
 function topBy<T extends { confidence: number }>(list: T[], keyOf: (t: T) => string): T[] {
@@ -822,6 +861,8 @@ function cacheKey(shape: Shape, context: RequestContext, own: RequestContext): s
   const els = elements.map(({ o: _o, ...rest }) => rest);
   // Context and own ids are kept apart: the same item is a fill source for one tab and the page's own text for another.
   const ids = `${context.map((c) => c.id).join(',')}|${own.map((c) => c.id).join(',')}`;
-  // The level is part of the key: a cached answer was filtered at the floor of the level that asked. So is the page's query.
-  return fnv1a(`${input.page.host}|${input.page.query ?? ''}|${eagerness}|${JSON.stringify(fields)}|${JSON.stringify(els)}|${filled.join(',')}|${ids}`).toString(36);
+  // The page state is part of the question: what is left to do here changes as the user scrolls and accepts.
+  const state = input.state ? `${input.state.kind}|${input.state.q ?? ''}|${input.state.more}|${(input.state.done ?? []).join(',')}` : '';
+  // The level is part of the key: a cached answer was filtered at the floor of the level that asked.
+  return fnv1a(`${input.page.host}|${eagerness}|${state}|${JSON.stringify(fields)}|${JSON.stringify(els)}|${filled.join(',')}|${ids}`).toString(36);
 }

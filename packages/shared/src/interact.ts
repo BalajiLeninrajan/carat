@@ -1,13 +1,7 @@
-<<<<<<< HEAD
-import { isMoneyName } from './destructive';
+import { isDestructiveName, isMoneyName } from './destructive';
 import type { Eagerness } from './eagerness';
 import { EAGERNESS } from './eagerness';
-import type { ElementDescriptor, ElementRole, InteractVerb } from './types';
-||||||| parent of 8a35abe (Add a page state, a prior floor per level, the page scroll and the next-step prompt section)
-import type { ElementDescriptor, ElementRole, InteractVerb } from './types';
-=======
-import type { ElementDescriptor, ElementRole, InteractSuggestion, InteractVerb } from './types';
->>>>>>> 8a35abe (Add a page state, a prior floor per level, the page scroll and the next-step prompt section)
+import type { ElementDescriptor, ElementRole, FieldDescriptor, InteractSuggestion, InteractVerb, PageState } from './types';
 
 /**
  * Verbs the content script can perform on each role, besides `scroll`, which
@@ -103,6 +97,50 @@ const CONTINUE_NAME = /^(?:continue|next|proceed|next step|continue to (?:shippi
 
 export function isContinueName(name: string): boolean {
   return CONTINUE_NAME.test(name.replace(/\s+/g, ' ').trim());
+}
+
+const OPTIONAL = /\boptional\b/i;
+
+/** A field whose label, placeholder or nearby text says it is optional. */
+export function isOptionalField(f: Pick<FieldDescriptor, 'lb' | 'ph' | 'al' | 'nb'>): boolean {
+  return OPTIONAL.test([f.lb, f.ph, f.al, f.nb].filter(Boolean).join(' '));
+}
+
+/**
+ * Whether a form still has a field to fill before its Continue is the next
+ * step. `fields` only lists empty (or focused) fields, so when any of them is
+ * marked required only the required ones count; otherwise every empty one
+ * does, except those that call themselves optional.
+ */
+export function emptyFieldRemains(fields: ReadonlyArray<Pick<FieldDescriptor, 'v' | 'rq' | 'lb' | 'ph' | 'al' | 'nb'>>): boolean {
+  const empty = fields.filter((f) => !f.v);
+  const required = empty.filter((f) => f.rq === 1);
+  return (required.length > 0 ? required : empty.filter((f) => !isOptionalField(f))).length > 0;
+}
+
+/**
+ * Whether the page itself, with no text from another tab behind it, justifies
+ * an interaction: the one rule the providers, the service worker and the
+ * content script all check before a `page`-sourced suggestion gets a chip.
+ * A link click on a results page; a Continue-like button on a form or
+ * checkout once no empty field remains; a page scroll when there is more
+ * below and the last accepted action was not already a scroll. Nothing else:
+ * checks, sliders and selects need a stated preference, and a destructive
+ * name never passes.
+ */
+export function pageJustifies(
+  verb: InteractVerb,
+  el: ElementDescriptor | undefined,
+  state: PageState | undefined,
+  fields: ReadonlyArray<Pick<FieldDescriptor, 'v' | 'rq' | 'lb' | 'ph' | 'al' | 'nb'>>,
+): boolean {
+  if (!state) return false;
+  if (verb === 'scroll' && !el) return state.more && !(state.done ?? []).includes(PAGE_SCROLL_DONE);
+  if (!el || verb !== 'click' || isDestructiveName(el.nm)) return false;
+  if ((state.done ?? []).includes(elementKey(el.r, el.nm))) return false;
+  if (el.r === 'link') return state.kind === 'serp';
+  if (el.r === 'button') return (state.kind === 'checkout' || state.kind === 'form') && isContinueName(el.nm) && !emptyFieldRemains(fields);
+  return false;
 }
 
 /**

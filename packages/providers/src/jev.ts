@@ -1,9 +1,9 @@
 import type { Eagerness, EagernessKnobs, FillSuggestion, InteractSuggestion, SuggestRequest, Suggestion } from '@carat/shared';
-import { DEFAULT_EAGERNESS, EAGERNESS, verbFits } from '@carat/shared';
+import { DEFAULT_EAGERNESS, EAGERNESS, refusesFill, verbFits } from '@carat/shared';
 import type { Provider, SuggestOptions } from './provider';
 import { sameSite } from './same-site';
 import { CANDIDATE_LABEL } from './local/candidates';
-import { GATE_QUESTION, INTERACT_QUESTION, NONE, buildJevRequest, questionKey, sourceLabel, type JevRequest } from './jev/request';
+import { GATE_QUESTION, INTERACT_QUESTION, NEXT_QUESTION, NONE, buildJevRequest, questionKey, sourceLabel, type JevRequest } from './jev/request';
 import { choice, noul, parseJevResponse, type Answers } from './jev/response';
 
 export const JEV_MODEL = 'typesafe/jev';
@@ -40,8 +40,9 @@ export class JevProvider implements Provider {
   async suggest(req: SuggestRequest, opts: SuggestOptions): Promise<Suggestion[]> {
     if (opts.signal.aborted) return [];
     const eagerness = this.options.eagerness ?? DEFAULT_EAGERNESS;
-    const context = EAGERNESS[eagerness].sameOriginContext ? req.context : req.context.filter((c) => !sameSite(c.origin, req.page.host));
-    const built = buildJevRequest(req, context, eagerness);
+    const foreign = EAGERNESS[eagerness].sameOriginContext ? req.context : req.context.filter((c) => !sameSite(c.origin, req.page.host));
+    // The page the user is looking at goes first: its text is the likeliest answer to a field on it.
+    const built = buildJevRequest(req, [...(req.own ?? []), ...foreign], eagerness);
     if (!built) return [];
 
     let body: unknown;
@@ -82,12 +83,29 @@ type Drop = ((s: Suggestion) => void) | undefined;
 
 /**
  * Jev is calibrated, so the chosen option's probability is the confidence
- * as-is. The `relevant` gate covers the fills only; the interaction question
- * gates itself with `none`. Both thresholds come from the eagerness table.
+ * as-is. The `relevant` gate covers the fills only; the interaction and
+ * next-step questions gate themselves with `none`. All thresholds come from
+ * the eagerness table.
  */
 export function decide(built: JevRequest, answers: Answers, eagerness: Eagerness = DEFAULT_EAGERNESS, onUnderFloor?: Drop): Suggestion[] {
   const knobs = EAGERNESS[eagerness];
-  return [...fills(built, answers, knobs, onUnderFloor), ...interaction(built, answers, knobs, onUnderFloor)];
+  return [...fills(built, answers, knobs, onUnderFloor), ...interaction(built, answers, knobs, onUnderFloor), ...next(built, answers, knobs, onUnderFloor)];
+}
+
+/** The next-step pick, with Jev's probability as its confidence; under the level's choice floor it is dropped and counted. */
+function next(built: JevRequest, answers: Answers, knobs: EagernessKnobs, onUnderFloor: Drop): Suggestion[] {
+  if (built.nextOptions.length === 0) return [];
+  const answer = choice(answers, NEXT_QUESTION);
+  if (!answer || answer.choice === NONE) return [];
+  const option = built.nextOptions.find((o) => o.key === answer.choice);
+  if (!option) return [];
+  const confidence = answer.probabilities[answer.choice] ?? answer.confidence;
+  const picked: Suggestion = { ...option.suggestion, confidence, reason: option.because };
+  if (confidence < knobs.minConfidence) {
+    onUnderFloor?.(picked);
+    return [];
+  }
+  return [picked];
 }
 
 function fills(built: JevRequest, answers: Answers, knobs: EagernessKnobs, onUnderFloor: Drop): FillSuggestion[] {
@@ -111,6 +129,8 @@ function fills(built: JevRequest, answers: Answers, knobs: EagernessKnobs, onUnd
       reason: `${CANDIDATE_LABEL[option.candidate.kind]} in ${option.source.title || sourceLabel(option.source)}`,
       sourceContextId: option.source.id,
     };
+    // A candidate read off the page being filled must not be that page's own furniture.
+    if (refusesFill(fill.value, field, built.page, built.ownIds.has(option.source.id))) continue;
     if (confidence < knobs.minConfidence) {
       onUnderFloor?.(fill);
       continue;

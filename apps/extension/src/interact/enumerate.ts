@@ -75,6 +75,8 @@ export interface EnumerateOptions {
   frame?: boolean;
   /** The page the results-page adapter is picked for; defaults to the document's own location. */
   site?: Site;
+  /** Byte budget for the descriptors, once the page state has taken its share of the request. */
+  maxBytes?: number;
 }
 
 interface Candidate {
@@ -104,7 +106,8 @@ function tier(c: Candidate): number {
  * to four below, ranked primary first, then those in the viewport, then
  * value-bearing controls, then real links (in page order), then plain
  * buttons by size and DOM order; capped at MAX_ELEMENTS in all, MAX_LINKS of
- * them links, and the byte budget, so off-screen ones go first. An
+ * them links, and `opts.maxBytes`, the budget left over once the page state
+ * has taken its share of the request, so off-screen ones go first. An
  * off-screen element is flagged `o: 1`. Anything with a destructive name is
  * left out here, before the model ever sees it; a money name is left out too
  * unless payments are allowed, and then flagged `m: 1`. A card with a Select
@@ -113,6 +116,7 @@ function tier(c: Candidate): number {
  * location.
  */
 export function enumerateElements(doc: Document, win: Window | null = doc.defaultView, opts: EnumerateOptions = {}): ElementSnapshot {
+  const maxBytes = opts.maxBytes ?? MAX_ELEMENTS_BYTES;
   const registry = new Map<string, ElementEntry>();
   if (!win || (!opts.frame && win.self !== win.top)) return { descriptors: [], registry };
 
@@ -198,7 +202,7 @@ export function enumerateElements(doc: Document, win: Window | null = doc.defaul
   }
 
   const descriptors = ranked.map((c, idx) => describe(c, `e${idx}`));
-  const kept = serializeDescriptors(descriptors, MAX_ELEMENTS_BYTES).descriptors;
+  const kept = serializeDescriptors(descriptors, Math.max(0, maxBytes)).descriptors;
   kept.forEach((d, idx) => {
     const { el, role, name, money, site: dest, at } = ranked[idx]!;
     el.setAttribute(ELEMENT_ID_ATTR, d.i);

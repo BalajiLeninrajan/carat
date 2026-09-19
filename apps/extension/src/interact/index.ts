@@ -3,4 +3,6 @@ export type { ElementEntry, ElementSnapshot, EnumerateOptions, SliderFacts } fro
 export { enumerateLinks, LINK_WINDOW_BELOW, MAX_LINKS } from './links';
 export type { LinkEntry, Site } from './links';
 export { performInteraction, snap, stillFits } from './perform';
+export { enumerateLinks, MAX_LINKS } from './links';
+export type { LinkCandidate } from './links';
 export { accessibleName } from './name';

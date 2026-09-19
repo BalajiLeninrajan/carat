@@ -1,5 +1,5 @@
-import type { ElementDescriptor, FieldDescriptor } from '@carat/shared';
-import { interactionChipText, mergeSuggestions } from '@carat/shared';
+import type { ElementDescriptor, FieldDescriptor, PageState as SnapshotState } from '@carat/shared';
+import { PAGE_SCROLL_DONE, PAGE_SCROLL_NAME, PAGE_SCROLL_ROLE, interactionChipText, isPageScroll, mergeSuggestions } from '@carat/shared';
 import type { AcceptKey, Chip } from '../chip';
 import { deepActiveElement, isTextEntry } from '../chip/keys';
 import type { FillOutcome } from '../fill';
@@ -8,11 +8,11 @@ import { relativeAge } from '../format/age';
 import type { FrameHub, KnownFrame, MergeInput } from '../frames';
 import { createFrameHub, mergeElements, mergeFields } from '../frames';
 import type { ElementEntry } from '../interact';
-import { enumerateElements, performInteraction, stillFits } from '../interact';
+import { MAX_ELEMENTS_BYTES, enumerateElements, performInteraction, stillFits } from '../interact';
 import type { InteractionView, NavigationView, RefineResponse, SuggestionSource, SuggestionView } from '../messaging';
-import { inViewport, scrollToTarget } from '../scroll';
+import { documentHeight, hasMoreBelow, inViewport, scrollPageDown, scrollToTarget } from '../scroll';
 import type { FieldEntry } from '../snapshot';
-import { enumerateFields, valueOf } from '../snapshot';
+import { enumerateFields, pageStateOf, valueOf } from '../snapshot';
 import type { ScriptContext } from './context';
 import { debounce } from './context';
 import { pageMeta } from './page-meta';
@@ -46,6 +46,9 @@ interface Registries {
 
 type Answer = Pick<LastSnapshot, 'suggestions' | 'navigation' | 'interactions'>;
 const EMPTY: Answer = { suggestions: [], navigation: [], interactions: [] };
+
+/** What a page scroll is settled and suppressed under; it names no element of its own. */
+const PAGE_KEY = 'page';
 
 /** The chip on screen right now, enough to put a surer value in the same place. */
 type Shown =
@@ -114,8 +117,10 @@ export function startSuggestions(
   // The field carat just filled keeps focus; the next chip must still take Tab from it.
   let justFilled: Element | null = null;
   let shown: Shown | null = null;
-  // Elements already acted on in this page load (`role|name`); never offered twice.
+  // Elements already acted on in this page load (`role|name`), plus `scroll` for the page itself; never offered twice.
   const done = new Set<string>();
+  // How tall the document was when the last page scroll was accepted: growing past it is new content to offer another.
+  let scrolledAtHeight = 0;
   // The descriptors and registries the current answer was presented against, so Esc can move on to the next chip in it.
   let view: { descriptors: FieldDescriptor[]; registries: Registries } | null = null;
   // A ticket is open, so every chip shown from this answer carries the indicator.
@@ -161,15 +166,20 @@ export function startSuggestions(
       }),
     );
     frames = new Map(merged.map((m) => [m.frame.token, m.frame] as const));
+    // A feed that grew since the last scroll has new content below, so the offer comes back.
+    if (done.has(PAGE_SCROLL_DONE) && documentHeight(win, doc) > scrolledAtHeight + win.innerHeight / 2) done.delete(PAGE_SCROLL_DONE);
+    const state = pageStateOf(doc, win, [...done]);
     const fields = mergeFields(enumerateFields(doc, win), merged);
-    const elements = mergeElements(enumerateElements(doc, win, { allowPayments }), merged);
+    // The page state and the elements share one budget; the lowest-ranked elements go first.
+    const maxBytes = MAX_ELEMENTS_BYTES - (state ? JSON.stringify(state).length : 0);
+    const elements = mergeElements(enumerateElements(doc, win, { allowPayments, maxBytes }), merged);
     const descriptors = fields.descriptors;
     const registries: Registries = { fields: fields.registry, elements: elements.registry };
     if (descriptors.length === 0 && elements.descriptors.length === 0) {
       chip.hide();
       return;
     }
-    const key = snapshotKey(descriptors, elements.descriptors);
+    const key = snapshotKey(descriptors, elements.descriptors, state);
     const now = Date.now();
     if (!force && last && last.key === key && now - last.at < SNAPSHOT_TIMING.identicalMs) {
       present(last, descriptors, registries);
@@ -181,6 +191,7 @@ export function startSuggestions(
       page: pageMeta(doc),
       fields: descriptors,
       ...(elements.descriptors.length > 0 ? { elements: elements.descriptors } : {}),
+      ...(state ? { state } : {}),
       ...(force ? { force: true } : {}),
     });
     // A ticket means a better answer may still land, so the status line keeps saying "thinking" until it closes.
@@ -264,6 +275,7 @@ export function startSuggestions(
     view = { descriptors, registries };
     if (presentFill(answer.suggestions, descriptors, registries)) return;
     if (presentInteract(answer.interactions, registries.elements)) return;
+    if (presentPageScroll(answer.interactions)) return;
     presentNav(answer.navigation);
   }
 
@@ -409,6 +421,7 @@ export function startSuggestions(
     opts: PresentOptions = {},
   ): boolean {
     const fits = (s: InteractionView): boolean => {
+      if (isPageScroll(s)) return false;
       const entry = registry.get(s.elementId);
       if (!entry || done.has(entry.key)) return false;
       if (entry.frame) return frameOf(entry) !== null && entry.el.isConnected;
@@ -512,6 +525,55 @@ export function startSuggestions(
   }
 
   /**
+   * `Scroll down? Tab`: the page itself, one viewport, when the page is for
+   * reading and nothing above the fold is a better step. It is not a fill, so
+   * the page is not marked as being filled; it is an accepted interaction, so
+   * it is reported and not offered again until the page grows. Esc suppresses
+   * it for this host for ten minutes, like any other chip.
+   */
+  function presentPageScroll(interactions: InteractionView[]): boolean {
+    const pick = interactions.find(isPageScroll);
+    if (!pick || done.has(PAGE_SCROLL_DONE) || !hasMoreBelow(win, doc)) return false;
+    const host = doc.location.host;
+    const forget = (): void => {
+      if (!last) return;
+      last.interactions = last.interactions.filter((s) => s !== pick);
+      last.settled.add(`e|${PAGE_KEY}`);
+    };
+    const feedback = (accepted: boolean): void => {
+      void send('feedback', { kind: 'interact', host, role: PAGE_SCROLL_ROLE, name: PAGE_SCROLL_NAME, accepted });
+    };
+    chip.showCorner({
+      label: 'Scroll down',
+      bare: true,
+      value: '',
+      ...(pick.reason ? { reason: pick.reason } : {}),
+      onAccept() {
+        forget();
+        done.add(PAGE_SCROLL_DONE);
+        scrolledAtHeight = documentHeight(win, doc);
+        feedback(true);
+        void scrollPageDown(win).then(() => {
+          if (!ctx.isValid) return;
+          // A screen further down is a different question; the memoised answer knows nothing about it.
+          last = null;
+          snapshotSoon();
+        });
+      },
+      onDismiss(reason) {
+        if (reason !== 'escape' && reason !== 'typed') return;
+        forget();
+        feedback(false);
+        if (reason === 'escape') advance();
+      },
+    });
+    shown = { kind: 'scroll', id: PAGE_KEY };
+    justFilled = null;
+    if (last) last.shown = true;
+    return true;
+  }
+
+  /**
    * The suggestion's target is scrolled out of view, so the field chip would
    * be invisible. Offer the scroll instead, as a banner: `Scroll to "Add
    * location"? Tab`. Tab brings the element to the middle of the viewport
@@ -604,6 +666,7 @@ export function startSuggestions(
     last = null;
     settle();
     done.clear();
+    scrolledAtHeight = 0;
     if (page) page.filling = false;
     chip.hide();
     snapshotSoon();
@@ -646,7 +709,10 @@ function isField(target: EventTarget | null): boolean {
   return role !== null && FIELD_ROLES.has(role);
 }
 
-// Focus and scrolling move without changing what is worth suggesting; the rest of the descriptor does.
-function snapshotKey(descriptors: FieldDescriptor[], elements: ElementDescriptor[]): string {
-  return JSON.stringify([descriptors.map(({ f: _f, o: _o, ...d }) => d), elements.map(({ o: _o, ...e }) => e)]);
+// Focus and how far down the page the user is move without changing what is
+// worth suggesting; the kind of page, its query, whether anything is left
+// below and what carat already did here all change it.
+function snapshotKey(descriptors: FieldDescriptor[], elements: ElementDescriptor[], state: SnapshotState | undefined): string {
+  const page = state ? [state.kind, state.q ?? '', state.more, state.done ?? []] : null;
+  return JSON.stringify([descriptors.map(({ f: _f, o: _o, ...d }) => d), elements.map(({ o: _o, ...e }) => e), page]);
 }

@@ -297,10 +297,66 @@ describe('OpenAICompatProvider', () => {
     expect(await at(fetchImpl, 'conservative').suggest(unfilled, { signal: new AbortController().signal })).toEqual([]);
   });
 
-  it('never turns text from the page itself into a fill, at any level', async () => {
+  it('keeps a page-sourced click or scroll only where the page state justifies it, and never a page-sourced fill', async () => {
+    const serp: SuggestRequest = {
+      page: { host: 'www.google.com', title: 'doordash - Google Search', path: '/search' },
+      state: { kind: 'serp', q: 'doordash', y: 0, pages: 3, more: true },
+      fields: [{ i: 'f0', t: 'input:search', nm: 'q' }],
+      elements: [
+        { i: 'e0', r: 'link', nm: 'DoorDash Food Delivery', v: 'www.doordash.com' },
+        { i: 'e1', r: 'button', nm: 'Tools' },
+        { i: 'e2', r: 'checkbox', nm: 'Verbatim', st: 'off' },
+      ],
+      context: [],
+      now: '2026-09-16T14:04:00-04:00',
+    };
+    const base = { kind: 'interact', fieldId: '', value: 'DoorDash Food Delivery', confidence: 0.85, reason: 'matches the query', sourceContextId: 'page', intent: '', when: '', location: '', elementId: 'e0', verb: 'click' };
+    const reply = completion(
+      JSON.stringify({
+        suggestions: [
+          base,
+          { ...base, elementId: 'e1', value: 'Tools' }, // a button on a results page: not the next step
+          { ...base, elementId: 'e2', verb: 'check', value: 'Verbatim' }, // a check needs a stated preference
+          { ...base, elementId: '', verb: 'scroll', value: '', confidence: 0.6 }, // a page scroll, but a surer click is on offer
+          { kind: 'fill', fieldId: 'f0', value: 'doordash', confidence: 0.9, reason: '', sourceContextId: 'page', intent: '', when: '', location: '', elementId: '', verb: '' },
+        ],
+      }),
+    );
+    const out = await at(async () => reply.clone(), 'balanced').suggest(serp, { signal: new AbortController().signal });
+    expect(out).toEqual([{ kind: 'interact', elementId: 'e0', verb: 'click', value: 'DoorDash Food Delivery', confidence: 0.85, reason: 'matches the query', sourceContextId: 'page' }]);
+
+    // The same link click on an article is not justified; a page scroll there is, while there is more below and it was not just done.
+    const article = { ...serp, state: { kind: 'article' as const, y: 0.5, pages: 6, more: true } };
+    const scrollOnly = completion(JSON.stringify({ suggestions: [base, { ...base, elementId: '', verb: 'scroll', value: '', confidence: 0.6 }] }));
+    expect(await at(async () => scrollOnly.clone(), 'balanced').suggest(article, { signal: new AbortController().signal })).toEqual([
+      expect.objectContaining({ kind: 'interact', elementId: '', verb: 'scroll', confidence: 0.6 }),
+    ]);
+    const scrolled = { ...article, state: { ...article.state, done: ['scroll'] } };
+    expect(await at(async () => scrollOnly.clone(), 'balanced').suggest(scrolled, { signal: new AbortController().signal })).toEqual([]);
+  });
+
+  it('fills from the page\'s own text but never with the page\'s own furniture', async () => {
+    const maps: SuggestRequest = {
+      page: { host: 'www.google.com', title: 'Google Maps', path: '/maps' },
+      fields: [{ i: 'f0', t: 'input:text', nm: 'searchboxinput', ph: 'Search Google Maps', al: 'Search Google Maps' }],
+      context: [],
+      own: [{ id: 'o1', origin: 'https://www.google.com', title: 'Google Maps', kind: 'page', text: 'dinner at Seven Shores Cafe?', capturedAt: 1 }],
+      now: '2026-09-16T14:04:00-04:00',
+    };
+    const fill = (value: string) => ({ kind: 'fill', fieldId: 'f0', value, confidence: 0.9, reason: '', sourceContextId: 'o1', intent: '', when: '', location: '', elementId: '', verb: '' });
+    const answer = (value: string) => vi.fn(async () => completion(JSON.stringify({ suggestions: [fill(value)] })));
+
+    expect(await at(answer('Seven Shores Cafe'), 'balanced').suggest(maps, { signal: new AbortController().signal })).toEqual([
+      expect.objectContaining({ kind: 'fill', fieldId: 'f0', value: 'Seven Shores Cafe', sourceContextId: 'o1' }),
+    ]);
+    // The page's title, its placeholder and a bare interface word are all the field reading itself back.
+    for (const junk of ['Google Maps', 'Search Google Maps', 'Search']) {
+      expect(await at(answer(junk), 'balanced').suggest(maps, { signal: new AbortController().signal }), junk).toEqual([]);
+    }
+    // A source id in neither `own` nor `context` is a few-shot the model echoed.
+    const echoed = vi.fn(async () => completion(JSON.stringify({ suggestions: [{ ...good, sourceContextId: 'c9' }] })));
     for (const level of EAGERNESS_LEVELS) {
-      const fetchImpl = vi.fn(async () => completion(JSON.stringify({ suggestions: [{ ...good, sourceContextId: 'o7' }] })));
-      expect(await at(fetchImpl, level).suggest(discord, { signal: new AbortController().signal }), level).toEqual([]);
+      expect(await at(echoed, level).suggest(discord, { signal: new AbortController().signal }), level).toEqual([]);
     }
   });
 

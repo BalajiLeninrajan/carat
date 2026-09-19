@@ -37,6 +37,7 @@ export type { IntentEntity, IntentSpec } from './intents';
 export { DENYLIST_HOSTS, isDenylisted } from './denylist';
 export { DESTRUCTIVE_NAMES, MONEY_NAMES, isDestructiveElement, isDestructiveName, isMoneyName, mayPay } from './destructive';
 export type { PayContext } from './destructive';
+export { echoesField, echoesPage, refusesFill } from './fill-guard';
 export {
   CONTROL_ROLES,
   ELEMENT_ROLES,
@@ -46,6 +47,7 @@ export {
   VERBS_BY_ROLE,
   clickAllowed,
   elementKey,
+  emptyFieldRemains,
   isPrimaryActionName,
   impliedVerb,
   interactionChipText,
@@ -53,7 +55,9 @@ export {
   isElementRole,
   isInteractVerb,
   isOffScreen,
+  isOptionalField,
   isPageScroll,
+  pageJustifies,
   verbFits,
 } from './interact';
 export type { ChipText, ClickGate } from './interact';

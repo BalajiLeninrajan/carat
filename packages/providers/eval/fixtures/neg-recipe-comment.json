@@ -2,6 +2,7 @@
   "name": "neg-recipe-comment",
   "request": {
     "page": { "host": "www.seriouseats.com", "title": "Classic Basil Pesto Recipe", "path": "/classic-basil-pesto-recipe" },
+    "state": { "kind": "article", "y": 0.2, "pages": 6.1, "more": true },
     "fields": [
       { "i": "f0", "t": "textarea", "nm": "comment", "lb": "Leave a comment", "ph": "Share your thoughts...", "nb": "Comments (48)", "f": 1, "w": "l" },
       { "i": "f1", "t": "input:search", "nm": "search", "ph": "Search recipes", "al": "Search", "w": "m" }
@@ -20,5 +21,5 @@
     "locale": "en-CA"
   },
   "expect": [],
-  "weakOkAt": ["eager"]
+  "expectAt": { "eager": [{ "elementId": "", "verb": "scroll" }] }
 }

@@ -1,0 +1,17 @@
+{
+  "name": "article-scroll-down",
+  "request": {
+    "page": { "host": "www.theatlantic.com", "title": "Why We Stopped Walking - The Atlantic", "path": "/ideas/archive/2026/09/why-we-stopped-walking/" },
+    "state": { "kind": "article", "y": 0.4, "pages": 9.5, "more": true },
+    "fields": [],
+    "elements": [
+      { "i": "e0", "r": "button", "nm": "Share" },
+      { "i": "e1", "r": "button", "nm": "Save to reading list" }
+    ],
+    "context": [],
+    "now": "2026-09-16T14:12:00-04:00",
+    "locale": "en-CA"
+  },
+  "expect": [],
+  "expectAt": { "eager": [{ "elementId": "", "verb": "scroll" }] }
+}

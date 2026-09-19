@@ -1,10 +1,11 @@
-import type { ClickGate, Eagerness, ElementDescriptor, FieldDescriptor, InteractVerb, PageIntent, SuggestRequest } from '@carat/shared';
+import type { ClickGate, Eagerness, ElementDescriptor, FieldDescriptor, InteractVerb, PageIntent, SuggestRequest, Suggestion } from '@carat/shared';
 import {
   DEFAULT_EAGERNESS,
   EAGERNESS,
   PAGE_SOURCE,
   clickAllowed,
   isDestructiveElement,
+  isPageScroll,
   isPrimaryActionName,
   isSiteLink,
   linkRelatesToQuery,
@@ -13,6 +14,7 @@ import {
 import { isNeverFill } from '../local/fields';
 import { CANDIDATE_LABEL, extractCandidates, type Candidate } from '../local/candidates';
 import { mentions } from '../local/interact';
+import { fieldName, nextStep } from '../next-step';
 
 /**
  * What one Jev call looks like for carat. Jev evaluates a `state` against typed
@@ -26,8 +28,10 @@ import { mentions } from '../local/interact';
 
 export const GATE_QUESTION = 'relevant';
 export const INTERACT_QUESTION = 'interact';
+export const NEXT_QUESTION = 'next';
 export const NONE = 'none';
 const MAX_OPTIONS = 16;
+const MAX_NEXT = 8;
 
 export type Ctx = SuggestRequest['context'][number];
 
@@ -51,12 +55,24 @@ export interface JevQuestion {
   criteria: unknown;
 }
 
+/** One next-step candidate the local predictor assembled; Jev only ranks them. */
+export interface JevNextOption {
+  key: string; // 'n0'..
+  suggestion: Suggestion;
+  because: string;
+}
+
 export interface JevRequest {
   state: Record<string, unknown>;
   questions: Record<string, JevQuestion>;
   options: JevOption[];
   askedFields: FieldDescriptor[];
   interactOptions: JevInteractOption[];
+  nextOptions: JevNextOption[];
+  /** The page being filled, so a pick can be checked against its own furniture. */
+  page: SuggestRequest['page'];
+  /** Which source ids are that page's own text. */
+  ownIds: ReadonlySet<string>;
 }
 
 export const questionKey = (fieldId: string): string => `field_${fieldId}`;
@@ -86,9 +102,17 @@ const INTERACT_RULES = [
   'When unsure, pick `none`. No chip beats a wrong click.',
 ];
 
+const NEXT_RULES = [
+  'The candidates are the next actions the page kind makes likely, assembled by pattern matching. Pick the one the user is about to do on this page, or `none`.',
+  'On a results page the result whose site or title matches the query beats an unrelated one. A scroll is right for reading (an article, a feed, results already read past) and wrong when a field or a button is what the user is here for.',
+  'A fill is right only when its value is exactly what the user would type into that field; a Continue only once the form has what it needs.',
+  'When unsure, pick `none`.',
+];
+
 /**
- * Null when there is nothing to ask: no fillable field with a candidate and no
- * element worth a question. `context` must already exclude the page being filled.
+ * Null when there is nothing to ask: no fillable field with a candidate, no
+ * element worth a question and no next-step candidate. `context` is every
+ * source Jev may draw on, the page's own text first.
  */
 export function buildJevRequest(req: SuggestRequest, context: Ctx[], eagerness: Eagerness = DEFAULT_EAGERNESS): JevRequest | null {
   const rules = fillRules(eagerness);
@@ -101,8 +125,9 @@ export function buildJevRequest(req: SuggestRequest, context: Ctx[], eagerness: 
           .slice(0, MAX_OPTIONS)
           .map((candidate, i) => ({ key: `k${i}`, candidate, source: byId.get(candidate.sourceContextId)! }));
   const gate: ClickGate = { filled: (req.filled?.length ?? 0) > 0, flow: req.flow === true, eagerness, fillable: askedFields.length > 0 };
-  const interactOptions = interactionOptions(req.elements ?? [], context, req.filled ?? [], gate, pageIntent(req.page, req.fields));
-  if (options.length === 0 && interactOptions.length === 0) return null;
+  const interactOptions = interactionOptions(req.elements ?? [], context, req.filled ?? [], gate, pageIntent(req.state, req.fields));
+  const nextOptions = nextStepOptions(req, eagerness);
+  if (options.length === 0 && interactOptions.length === 0 && nextOptions.length === 0) return null;
 
   const state: Record<string, unknown> = {
     page: req.page,
@@ -175,7 +200,46 @@ export function buildJevRequest(req: SuggestRequest, context: Ctx[], eagerness: 
     };
   }
 
-  return { state, questions, options, askedFields, interactOptions };
+  if (nextOptions.length > 0) {
+    state.state = req.state;
+    if (!state.elements && req.elements && req.elements.length > 0) state.elements = req.elements.map(describeElement);
+    const criteria: Record<string, unknown> = {};
+    for (const o of nextOptions) criteria[o.key] = { action: describeNext(o.suggestion, req), because: o.because };
+    criteria[NONE] = 'None of these is what the user will do next on this page';
+    questions[NEXT_QUESTION] = {
+      type: 'choice',
+      instructions: {
+        task: 'The user is on `page` in `state`. Pick the one action they will take next, or `none`.',
+        rules: NEXT_RULES,
+      },
+      criteria,
+    };
+  }
+
+  return { state, questions, options, askedFields, interactOptions, nextOptions, page: req.page, ownIds: new Set((req.own ?? []).map((c) => c.id)) };
+}
+
+/**
+ * The next-step candidates, every prior the page kind yields plus the
+ * context fills the form prior found, before any floor: Jev is the picker,
+ * so it sees them all and its probability becomes the confidence.
+ */
+function nextStepOptions(req: SuggestRequest, eagerness: Eagerness): JevNextOption[] {
+  if (!req.state) return [];
+  return nextStep(req, eagerness).candidates.slice(0, MAX_NEXT).map((c, i) => ({ key: `n${i}`, suggestion: c.suggestion, because: c.note }));
+}
+
+function describeNext(s: Suggestion, req: SuggestRequest): string {
+  if (s.kind === 'fill') {
+    const field = req.fields.find((f) => f.i === s.fieldId);
+    return `fill "${field ? fieldName(field) : s.fieldId}" with "${s.value}"`;
+  }
+  if (s.kind === 'interact') {
+    if (isPageScroll(s)) return 'scroll the page one screen down';
+    const el = (req.elements ?? []).find((e) => e.i === s.elementId);
+    return `${s.verb} "${el?.nm ?? s.elementId}"${el?.v ? ` (${el.v})` : ''}`;
+  }
+  return `open ${s.intent} for "${s.value}"`;
 }
 
 /**

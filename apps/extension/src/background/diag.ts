@@ -1,4 +1,4 @@
-import type { Eagerness, Settings } from '@carat/shared';
+import type { Eagerness, PageKind, Settings } from '@carat/shared';
 import type { StorageArea } from '../store';
 import type { PrewarmDiag } from './prewarm';
 
@@ -8,10 +8,7 @@ export type GateVerdict =
   | 'disabled'
   | 'site-off'
   | 'denylisted'
-  | 'no-fields'
-  | 'no-context'
-  | 'own-context'
-  | 'stale-context';
+  | 'no-snapshot';
 
 /** What happened to the last capture a tab sent. */
 export type CaptureVerdict = 'stored' | 'disabled' | 'site-off' | 'denylisted' | 'pinned' | 'empty' | 'not-http';
@@ -73,6 +70,10 @@ export interface SuggestDiag {
   /** Interactive elements the page described alongside its fields. */
   elements?: number;
   gate: GateVerdict;
+  /** What kind of page the content script thought it was on. */
+  pageKind?: PageKind;
+  /** The prior the local predictor found for that kind, in the words the popup shows. */
+  prior?: string;
   /** Set once the gate passed. */
   cached?: boolean;
   /** The answer came from the cache the navigation pre-warmed. */

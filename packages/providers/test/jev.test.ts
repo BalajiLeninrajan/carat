@@ -399,6 +399,42 @@ describe('JevProvider', () => {
     expect(interactions(await provider(eager, 'eager').suggest(afterFills, { signal: signal() })).map((s) => s.confidence)).toEqual([0.69]);
   });
 
+  it('asks one choice over the next-step candidates when the page has a state, and returns the pick at Jev\'s probability', async () => {
+    const serp: SuggestRequest = {
+      page: { host: 'www.google.com', title: 'doordash - Google Search', path: '/search' },
+      state: { kind: 'serp', q: 'doordash', y: 0, pages: 3, more: true },
+      fields: [],
+      elements: [
+        { i: 'e0', r: 'link', nm: 'DoorDash - Wikipedia', v: 'en.wikipedia.org' },
+        { i: 'e1', r: 'link', nm: 'DoorDash Food Delivery', v: 'www.doordash.com' },
+      ],
+      context: [],
+      now: calendar.now,
+    };
+    const b = buildJevRequest(serp, [])!;
+    expect(Object.keys(b.questions)).toEqual(['next']);
+    expect(b.state.state).toEqual(serp.state);
+    expect(b.nextOptions.map((o) => [o.key, o.suggestion.kind])).toEqual([['n0', 'interact']]);
+    const criteria = b.questions.next!.criteria as Record<string, unknown>;
+    expect(criteria.n0).toEqual({ action: 'click "DoorDash Food Delivery" (www.doordash.com)', because: "first result matches query 'doordash'" });
+    expect(criteria).toHaveProperty('none');
+
+    const fetchImpl = vi.fn(async () => envelope({ next: pick('n0', 0.77, ['n0', 'none']) }));
+    expect(await provider(fetchImpl).suggest(serp, { signal: signal() })).toEqual([
+      { kind: 'interact', elementId: 'e1', verb: 'click', value: 'DoorDash Food Delivery', confidence: 0.77, reason: "first result matches query 'doordash'", sourceContextId: 'page' },
+    ]);
+    // `none`, an unknown key, or a pick under the level's floor gives nothing; the drop is reported.
+    for (const answer of [pick('none', 0.9, ['n0', 'none']), pick('n7', 0.9, ['n7']), pick('n0', 0.5, ['n0', 'none'])]) {
+      const dropped: Suggestion[] = [];
+      const f = vi.fn(async () => envelope({ next: answer }));
+      expect(await provider(f, 'balanced').suggest(serp, { signal: signal(), onUnderFloor: (s) => void dropped.push(s) })).toEqual([]);
+      if (answer.choice === 'n0') expect(dropped.map((s) => s.confidence)).toEqual([0.5]);
+    }
+    // Without a state there is no next-step question, so a page with only links is not worth a call.
+    const { state: _s, ...bare } = serp;
+    expect(buildJevRequest(bare, [])).toBeNull();
+  });
+
   it('answers fills and the interaction from one call, each gated on its own', async () => {
     const mixed: SuggestRequest = { ...calendar, elements: rsvp.elements, filled: ['c1'] };
     const b = buildJevRequest(mixed, mixed.context)!;

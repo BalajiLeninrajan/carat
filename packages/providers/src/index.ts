@@ -11,3 +11,5 @@ export { extractCandidates, candidatesFrom } from './local/candidates';
 export type { Candidate, CandidateKind } from './local/candidates';
 export { EntityPredictor, PREDICT_TIMEOUT_MS, createEntityPredictor, entitiesFromCandidates, matchEntities } from './predict';
 export type { EntityPredictorOptions, EntitySource, Predictor } from './predict';
+export { nextStep, fieldName, PRIOR_CONFIDENCE } from './next-step';
+export type { NextStep, Prior } from './next-step';

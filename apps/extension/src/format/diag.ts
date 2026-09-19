@@ -1,3 +1,4 @@
+import type { PageKind } from '@carat/shared';
 import { DEFAULT_EAGERNESS, EAGERNESS } from '@carat/shared';
 import type { AnswerOrigin, CaptureDiag, CaptureVerdict, GateVerdict, PerformDiag, ProviderAttempt, SuggestDiag, VisionDiag, VisionVerdict } from '../background/diag';
 import type { PrewarmDiag, PrewarmVerdict } from '../background/prewarm';
@@ -17,10 +18,7 @@ const GATE: Record<Exclude<GateVerdict, 'ok'>, string> = {
   disabled: 'carat is off',
   'site-off': 'carat is off for this site',
   denylisted: 'host is on the denylist',
-  'no-fields': 'no empty field on the page',
-  'no-context': 'nothing has been read yet',
-  'own-context': 'the only context is from another tab on this site',
-  'stale-context': 'all context is older than 30 min',
+  'no-snapshot': 'nothing on the page to act on',
 };
 
 const VISION: Record<VisionVerdict, string> = {
@@ -54,9 +52,10 @@ const ORIGIN: Record<Exclude<AnswerOrigin, 'cache' | 'prewarm'>, string> = {
   chat: 'chat model',
 };
 
-/** One line: "checked 5s ago: regex pass answered first in 4 ms; openai answered in 812 ms with 1, offered 1, 2 candidates under the eager floor (0.35)". */
+/** One line: "checked 5s ago on a serp (first result matches query 'doordash'): regex pass answered first in 4 ms; openai answered in 812 ms with 1, offered 1, 2 candidates under the eager floor (0.35)". */
 export function describeSuggest(d: SuggestDiag, now: number = Date.now()): string {
-  const when = `checked ${relativeAge(d.at, now)}`;
+  const page = d.pageKind ? ` on ${article(d.pageKind)}${d.prior ? ` (${d.prior})` : ''}` : '';
+  const when = `checked ${relativeAge(d.at, now)}${page}`;
   if (d.gate !== 'ok') return `${when}: no request, ${GATE[d.gate]}`;
   const first = d.cached
     ? 'answer from cache'
@@ -96,6 +95,11 @@ export function describePrewarm(d: PrewarmDiag, now: number = Date.now()): strin
   }
   if (d.verdict === 'failed') return `${when}: provider failed${call?.error ? ` (${call.error})` : ''}, nothing cached`;
   return `${when}: nothing pre-warmed, ${PREWARM[d.verdict]}`;
+}
+
+/** "a serp", "an article": the page kind reads as a noun in the check line. */
+function article(kind: PageKind): string {
+  return `${/^[aeiou]/.test(kind) ? 'an' : 'a'} ${kind}`;
 }
 
 function describeAttempt(a: ProviderAttempt): string {

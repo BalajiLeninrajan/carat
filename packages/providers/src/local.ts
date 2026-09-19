@@ -1,26 +1,16 @@
-import type { ActionSuggestion, Eagerness, FillSuggestion, IntentName, PageMeta, RequestContext, SuggestRequest, Suggestion } from '@carat/shared';
-import { DEFAULT_EAGERNESS, EAGERNESS, isIntentDestination } from '@carat/shared';
+import type { ActionSuggestion, Eagerness, IntentName, PageMeta, RequestContext, SuggestRequest, Suggestion } from '@carat/shared';
+import { DEFAULT_EAGERNESS, EAGERNESS, isIntentDestination, mergeSuggestions } from '@carat/shared';
 import type { Provider, SuggestOptions } from './provider';
 import { sameSite } from './same-site';
-import { classifyField, type FieldKind } from './local/fields';
+import { CONFIDENCE, fillSources, fills } from './local/fills';
 import { interactions, linkForQuery } from './local/interact';
-import { candidatesFrom, type Candidate } from './local/candidates';
 import { extractAddress, extractEmailRequest, extractPlan, extractWhen } from './local/extract';
-
-const CONFIDENCE = 0.75;
-// A bare name with no cue around it: above the eager floor, under the balanced one.
-const LOOSE_CONFIDENCE = 0.45;
-type Ctx = SuggestRequest['context'][number];
-
-// score: how specific the match is; the best hit across all context items wins.
-// A street address outranks a planned place for location fields (brief: an
-// address belongs in a location field), whichever context item is listed first.
-type Hit = { value: string; reason: string; score: number; confidence: number };
-const SCORE = { address: 4, exact: 3, event: 2, titleCase: 1, name: 0.5 } as const;
+import { nextStep } from './next-step';
 
 /**
  * Regex fallback: no network, one field per kind, one action per intent,
- * narrow interactions, and the search result the page's own query names. At
+ * narrow interactions, the search result the page's own query names, and the
+ * next-step priors for the page kind. At
  * `eager` it also offers bare capitalised names and lowercase quoted strings
  * for search and title fields, at a confidence that says so, and reads other
  * tabs on the page's own site.
@@ -34,37 +24,18 @@ export class LocalProvider implements Provider {
     if (opts.signal.aborted) return [];
     const knobs = EAGERNESS[this.eagerness];
     const context = knobs.sameOriginContext ? req.context : req.context.filter((c) => !sameSite(c.origin, req.page.host));
-    return [
-      ...fills(req.fields, context, knobs.looseNames),
-      ...interactions(req.elements ?? [], context, {
+    const known: Suggestion[] = [
+      ...fills(req.fields, fillSources(req, context), knobs.looseNames),
+      ...interactions(req.elements ?? [], [...(req.own ?? []), ...context], {
         filled: req.filled ?? [],
         gate: { eagerness: this.eagerness, flow: req.flow === true, fillable: req.fields.some((f) => !f.v) },
       }),
-      ...linkForQuery(req.page, req.fields, req.elements ?? []),
-      ...actions(req.own ?? [], req.page, req.now),
+      ...linkForQuery(req.state, req.fields, req.elements ?? []),
     ];
+    const step = nextStep(req, this.eagerness, known);
+    // The page's priors fill the slots context left empty; per slot the surer one stays.
+    return [...mergeSuggestions(known, step.suggestions), ...actions(req.own ?? [], req.page, req.now)];
   }
-}
-
-function fills(fields: SuggestRequest['fields'], context: Ctx[], loose: boolean): FillSuggestion[] {
-  if (context.length === 0) return [];
-  const candidates = context.map((ctx) => ({ ctx, found: candidatesFrom(ctx, loose) }));
-  const out: FillSuggestion[] = [];
-  const filledKinds = new Set<FieldKind>();
-  for (const field of fields) {
-    if (field.v) continue;
-    const kind = classifyField(field);
-    if (!kind || filledKinds.has(kind)) continue;
-    let best: { hit: Hit; ctx: Ctx } | null = null;
-    for (const { ctx, found } of candidates) {
-      const hit = find(kind, found);
-      if (hit && (!best || hit.score > best.hit.score)) best = { hit, ctx };
-    }
-    if (!best) continue;
-    out.push({ kind: 'fill', fieldId: field.i, value: best.hit.value, confidence: best.hit.confidence, reason: best.hit.reason, sourceContextId: best.ctx.id });
-    filledKinds.add(kind);
-  }
-  return out;
 }
 
 /**
@@ -100,49 +71,4 @@ function actions(own: RequestContext, page: PageMeta, now: string): ActionSugges
 
 function action(intent: IntentName, value: string, sourceContextId: string, reason: string): ActionSuggestion {
   return { kind: 'action', intent, value, when: '', location: '', confidence: CONFIDENCE, reason, sourceContextId };
-}
-
-// The `name` candidate only exists at eager, so search and title fall through to it there and nowhere else.
-function find(kind: FieldKind, found: Candidate[]): Hit | null {
-  const of = (k: Candidate['kind']) => found.find((c) => c.kind === k);
-  switch (kind) {
-    case 'email': {
-      const c = of('email');
-      return c ? { value: c.value, reason: 'email address found in recent text', score: SCORE.exact, confidence: CONFIDENCE } : null;
-    }
-    case 'phone': {
-      const c = of('phone');
-      return c ? { value: c.value, reason: 'phone number found in recent text', score: SCORE.exact, confidence: CONFIDENCE } : null;
-    }
-    case 'location': {
-      const address = of('address');
-      if (address) return { value: address.value, reason: 'street address found in recent text', score: SCORE.address, confidence: CONFIDENCE };
-      return placeHit(of('place'));
-    }
-    case 'title': {
-      const plan = of('plan');
-      if (plan) return { value: plan.value, reason: 'plan mentioned in recent text', score: SCORE.exact, confidence: CONFIDENCE };
-      const event = of('event');
-      if (event) return { value: event.value, reason: 'event name found in recent text', score: SCORE.event, confidence: CONFIDENCE };
-      return placeHit(of('place')) ?? nameHit(of('name'));
-    }
-    case 'search': {
-      return placeHit(of('place')) ?? nameHit(of('name'));
-    }
-  }
-}
-
-function placeHit(place: Candidate | undefined): Hit | null {
-  if (!place) return null;
-  return {
-    value: place.value,
-    reason: place.activity ? 'plan mentioned in recent text' : 'place name found in recent text',
-    score: place.activity ? SCORE.exact : SCORE.titleCase,
-    confidence: CONFIDENCE,
-  };
-}
-
-function nameHit(name: Candidate | undefined): Hit | null {
-  if (!name) return null;
-  return { value: name.value, reason: 'capitalised name in recent text, no cue around it', score: SCORE.name, confidence: LOOSE_CONFIDENCE };
 }

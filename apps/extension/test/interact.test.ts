@@ -47,8 +47,10 @@ describe('enumerateElements', () => {
     const { descriptors, registry } = enumerateElements(document);
     const by = (nm: string) => descriptors.find((d) => d.nm === nm)!;
 
-    expect(descriptors.length).toBe(15);
-    expect(named(descriptors)).not.toContain('Real link');
+    expect(descriptors.length).toBe(16);
+    // A real link is described now, last of all, carrying the host it goes to.
+    expect(named(descriptors).at(-1)).toBe('Real link');
+    expect(by('Real link')).toMatchObject({ r: 'link', v: 'example.com' });
     expect(named(descriptors)).not.toContain('Standard'); // a checked radio cannot be chosen again
     expect(by('Save')).toMatchObject({ r: 'button', p: 1 });
     expect(by('Save').nb).toBe('Event details');

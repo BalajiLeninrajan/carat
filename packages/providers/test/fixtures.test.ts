@@ -73,6 +73,14 @@ describe('judge', () => {
     expect(judge(tolerant, [weak]).pass).toBe(true);
   });
 
+  it('matches a page scroll on an empty elementId with no value, and prints it as page.scroll', () => {
+    const wantScroll: Fixture = { ...positive, expect: [{ elementId: '', verb: 'scroll', valueIncludes: '' }] };
+    const scroll = { ...click, elementId: '', verb: 'scroll' as const, value: '', sourceContextId: 'page' };
+    expect(judge(wantScroll, [scroll])).toEqual({ pass: true, detail: 'page.scroll("")' });
+    expect(judge(wantScroll, [click]).detail).toContain('wanted page.scroll~""');
+    expect(judge(negative, [scroll]).pass).toBe(false);
+  });
+
   it('matches an action on intent, value and the start of when', () => {
     const wantMaps: Fixture = { ...positive, expect: [{ intent: 'maps', valueIncludes: 'Seven Shores' }] };
     expect(judge(wantMaps, [nav]).pass).toBe(true);

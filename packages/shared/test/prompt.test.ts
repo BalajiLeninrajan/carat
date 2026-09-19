@@ -66,7 +66,8 @@ describe('buildMessages', () => {
     for (const l of EAGERNESS_LEVELS) {
       const p = systemPrompt(l);
       expect(p).toContain('5. An address belongs in a location field.');
-      expect(p).toContain('7. Fills and interactions never use `own`');
+      expect(p).toContain("7. Text from `own` may fill a field on that page, but the page's own furniture may not");
+      expect(p).toContain('never propose a field\'s own label, placeholder, aria-label or current value');
       expect(p).toContain('Never propose generic words.');
     }
   });
