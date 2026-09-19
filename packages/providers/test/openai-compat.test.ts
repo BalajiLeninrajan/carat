@@ -209,6 +209,47 @@ describe('OpenAICompatProvider', () => {
     expect(await provider(fetchImpl).suggest(onMaps, { signal: new AbortController().signal })).toEqual([]);
   });
 
+  it('keeps an interaction on a described element with a fitting verb, and drops the rest', async () => {
+    const calendar: SuggestRequest = {
+      page: { host: 'calendar.google.com', title: 'Calendar', path: '/calendar/u/0/r/eventedit' },
+      fields: [],
+      elements: [
+        { i: 'e0', r: 'button', nm: 'Save', p: 1 },
+        { i: 'e1', r: 'checkbox', nm: 'All day', st: 'on' },
+        { i: 'e2', r: 'slider', nm: 'Volume', v: '80', min: 0, max: 100 },
+        { i: 'e3', r: 'button', nm: 'Delete event' },
+      ],
+      filled: ['c1'],
+      context: [{ id: 'c1', origin: 'https://discord.com', title: 'Discord', kind: 'page', text: 'dinner at Seven Shores Cafe, Friday at 6?', capturedAt: 1 }],
+      now: '2026-09-16T14:04:00-04:00',
+    };
+    const click = { kind: 'interact', fieldId: '', value: 'Save', confidence: 0.85, reason: 'commits the fills', sourceContextId: 'c1', intent: '', when: '', location: '', elementId: 'e0', verb: 'click' };
+    const fetchImpl = vi.fn(async () =>
+      completion(
+        JSON.stringify({
+          suggestions: [
+            click,
+            { ...click, elementId: 'e1', verb: 'check', value: 'All day' }, // already on
+            { ...click, elementId: 'e1', verb: 'uncheck', value: 'All day', confidence: 0.6 }, // too weak
+            { ...click, elementId: 'e2', verb: 'set', value: '140' }, // out of range
+            { ...click, elementId: 'e2', verb: 'set', value: '40', sourceContextId: 'o9' }, // unknown source
+            { ...click, elementId: 'e3', verb: 'click', value: 'Delete event' }, // destructive
+            { ...click, elementId: 'e9', verb: 'click', value: 'Ghost' }, // not described
+            { ...click, elementId: 'e0', verb: 'click', value: 'Save', confidence: 0.8 }, // duplicate, lower
+          ],
+        }),
+      ),
+    );
+    const out = await provider(fetchImpl).suggest(calendar, { signal: new AbortController().signal });
+    expect(out).toEqual([
+      { kind: 'interact', elementId: 'e0', verb: 'click', value: 'Save', confidence: 0.85, reason: 'commits the fills', sourceContextId: 'c1' },
+    ]);
+
+    // Without a fill behind it, a button click is not the model's to propose.
+    const { filled: _f, ...unfilled } = calendar;
+    expect(await provider(fetchImpl).suggest(unfilled, { signal: new AbortController().signal })).toEqual([]);
+  });
+
   it('never turns text from the page itself into a fill', async () => {
     const fetchImpl = vi.fn(async () => completion(JSON.stringify({ suggestions: [{ ...good, sourceContextId: 'o7' }] })));
     expect(await provider(fetchImpl).suggest(discord, { signal: new AbortController().signal })).toEqual([]);

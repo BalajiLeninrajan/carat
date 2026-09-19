@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import type { SuggestRequest } from '@carat/shared';
 import { LocalProvider } from '../src/local';
 import { classifyField } from '../src/local/fields';
+import { affirms, amountFor } from '../src/local/interact';
 import { extractAddress, extractEmailRequest, extractPhone, extractPlace, extractWhen } from '../src/local/extract';
 import { judge, loadFixtures, type Fixture } from '../eval/fixtures';
 
@@ -118,6 +119,81 @@ describe('LocalProvider actions', () => {
     const own = [{ ...req.own![0]!, text: `${req.own![0]!.text} alex 2:05 PM address is 10 Regina St N, Waterloo, ON N2J 2Z8` }];
     const out = await local.suggest({ ...req, own }, { signal });
     expect(out.find((s) => s.kind === 'action' && s.intent === 'calendar')).toMatchObject({ location: '10 Regina St N, Waterloo, ON N2J 2Z8' });
+  });
+});
+
+describe('LocalProvider interactions', () => {
+  it('offers the primary Save button after carat filled fields on the page, citing the fill source', async () => {
+    const out = await local.suggest(fixture('calendar-save-after-fills').request, { signal });
+    expect(out).toEqual([
+      { kind: 'interact', elementId: 'e0', verb: 'click', value: 'Save', confidence: 0.75, reason: expect.any(String), sourceContextId: 'c2' },
+    ]);
+  });
+
+  it('offers no button at all when carat filled nothing, whatever the text says', async () => {
+    const req = fixture('calendar-save-after-fills').request;
+    const { filled: _f, ...unfilled } = req;
+    expect(await local.suggest(unfilled, { signal })).toEqual([]);
+    expect(await local.suggest({ ...req, filled: [] }, { signal })).toEqual([]);
+  });
+
+  it('checks the box whose name a context sentence affirms, and only that one', async () => {
+    const out = await local.suggest(fixture('form-vegetarian-checkbox').request, { signal });
+    expect(out).toEqual([expect.objectContaining({ kind: 'interact', elementId: 'e0', verb: 'check', value: 'Vegetarian', sourceContextId: 'c1' })]);
+  });
+
+  it('sets the slider named with an amount, snapped to its step and range', async () => {
+    const out = await local.suggest(fixture('settings-volume-slider').request, { signal });
+    expect(out).toEqual([expect.objectContaining({ kind: 'interact', elementId: 'e0', verb: 'set', value: '40', sourceContextId: 'c1' })]);
+  });
+
+  it('never clicks a destructive name, even as the primary action after fills', async () => {
+    expect(await local.suggest(fixture('neg-delete-with-matching-text').request, { signal })).toEqual([]);
+    expect(await local.suggest(fixture('neg-gmail-send').request, { signal })).toEqual([]);
+  });
+
+  it('does not check a box on a generic name, a negated sentence, or a box already on', async () => {
+    const req = fixture('form-vegetarian-checkbox').request;
+    const ctx = req.context[0]!;
+    const withText = (text: string, elements = req.elements!) => ({ ...req, elements, context: [{ ...ctx, text }] });
+    const out = async (r: typeof req) => (await local.suggest(r, { signal })).map((s) => s.kind === 'interact' && `${s.elementId}.${s.verb}`);
+
+    expect(await out(withText("I'm not a vegetarian, but Sam is vegan"))).toEqual(['e1.check']);
+    expect(await out(withText('no vegetarian options there sadly'))).toEqual([]);
+    expect(await out(withText('vegetarian', [{ i: 'e0', r: 'checkbox', nm: 'Yes', st: 'off' }]))).toEqual([]);
+    expect(await out(withText('yes I am', [{ i: 'e0', r: 'checkbox', nm: 'Yes', st: 'off' }]))).toEqual([]);
+    expect(await out(withText("I'm a vegetarian", [{ i: 'e0', r: 'checkbox', nm: 'Vegetarian', st: 'on' }]))).toEqual([]);
+    expect(await out(withText('the vegetarianism debate', [{ i: 'e0', r: 'checkbox', nm: 'Vegetarian', st: 'off' }]))).toEqual([]);
+  });
+
+  it('takes interactions only from other tabs, never from the page itself', async () => {
+    const req = fixture('form-vegetarian-checkbox').request;
+    expect(await local.suggest({ ...req, context: [], own: req.context }, { signal })).toEqual([]);
+  });
+});
+
+describe('affirms and amountFor', () => {
+  it('matches whole words without negation nearby', () => {
+    expect(affirms("I'm a vegetarian", 'Vegetarian')).toBe(true);
+    expect(affirms('Gluten free please', 'Gluten free')).toBe(true);
+    expect(affirms('gluten-free please', 'Gluten free')).toBe(false);
+    expect(affirms("I don't need parking", 'Needs parking')).toBe(false);
+    expect(affirms('not vegetarian. vegan though', 'Vegan')).toBe(true);
+  });
+
+  it('reads an amount after or before the name and scales percentages to the range', () => {
+    const volume = { i: 'e0', r: 'slider' as const, nm: 'Volume', min: 0, max: 100, step: 1 };
+    expect(amountFor('turn the volume to 40%', volume)).toBe('40');
+    expect(amountFor('volume at 55 please', volume)).toBe('55');
+    expect(amountFor('set it to 40% volume', volume)).toBe('40');
+    expect(amountFor('volume up a bit', volume)).toBeNull();
+    expect(amountFor('the volume was fine. 40 people came', volume)).toBeNull();
+    expect(amountFor('volume to 140', volume)).toBe('100');
+    const balance = { i: 'e1', r: 'slider' as const, nm: 'Balance', min: -50, max: 50, step: 5 };
+    expect(amountFor('balance to 75%', balance)).toBe('25');
+    expect(amountFor('balance to 12', balance)).toBe('10');
+    const brightness = { i: 'e2', r: 'slider' as const, nm: 'Brightness', min: 0, max: 1, step: 0.1 };
+    expect(amountFor('brightness to 70%', brightness)).toBe('0.7');
   });
 });
 

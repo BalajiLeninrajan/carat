@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { FIXTURES_DIR, judge, loadFixtures, type Fixture } from '../eval/fixtures';
 
-const FIXTURE_COUNT = 13;
+const FIXTURE_COUNT = 18;
 const cleanup: string[] = [];
 afterAll(() => Promise.all(cleanup.map((d) => rm(d, { recursive: true, force: true }))));
 
@@ -30,6 +30,7 @@ describe('judge', () => {
   const negative: Fixture = { ...positive, name: 'n', expect: [] };
   const hit = { kind: 'fill' as const, fieldId: 'f0', value: 'Seven Shores Cafe', confidence: 0.75, reason: '', sourceContextId: 'c1' };
   const nav = { kind: 'action' as const, intent: 'maps' as const, value: 'Seven Shores Cafe', when: '', location: '', confidence: 0.75, reason: '', sourceContextId: 'o1' };
+  const click = { kind: 'interact' as const, elementId: 'e0', verb: 'click' as const, value: 'Save', confidence: 0.75, reason: '', sourceContextId: 'c1' };
 
   it('fails a positive on [] or the wrong field, passes on a substring match', () => {
     expect(judge(positive, []).pass).toBe(false);
@@ -41,6 +42,15 @@ describe('judge', () => {
     expect(judge(negative, [])).toEqual({ pass: true, detail: '[]' });
     expect(judge(negative, [hit]).pass).toBe(false);
     expect(judge(negative, [nav]).pass).toBe(false);
+  });
+
+  it('matches an interaction on element, verb and value, and fails a negative on one', () => {
+    const wantClick: Fixture = { ...positive, expect: [{ elementId: 'e0', verb: 'click', valueIncludes: 'Save' }] };
+    expect(judge(wantClick, [click])).toEqual({ pass: true, detail: 'e0.click("Save")' });
+    expect(judge(wantClick, [{ ...click, verb: 'check' }]).pass).toBe(false);
+    expect(judge(wantClick, [{ ...click, elementId: 'e1' }]).detail).toContain('wanted e0.click~"Save"');
+    expect(judge(wantClick, [hit]).pass).toBe(false);
+    expect(judge(negative, [click]).pass).toBe(false);
   });
 
   it('matches an action on intent, value and the start of when', () => {

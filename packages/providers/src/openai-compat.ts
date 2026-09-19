@@ -1,5 +1,5 @@
-import type { ChatMessage, SuggestRequest, Suggestion } from '@carat/shared';
-import { LIMITS, SUGGESTION_RESPONSE_FORMAT, SuggestionListSchema, buildMessages, isIntentDestination } from '@carat/shared';
+import type { ChatMessage, ElementDescriptor, InteractSuggestion, SuggestRequest, Suggestion } from '@carat/shared';
+import { LIMITS, SUGGESTION_RESPONSE_FORMAT, SuggestionListSchema, buildMessages, isDestructiveName, isIntentDestination, verbFits } from '@carat/shared';
 import type { Provider } from './provider';
 import { sameSite } from './same-site';
 
@@ -114,18 +114,42 @@ function finalize(suggestions: Suggestion[], req: SuggestRequest): Suggestion[] 
   // means the model echoed an example; a same-site fill source breaks rule 7.
   const fillSources = new Set(req.context.filter((c) => !sameSite(c.origin, req.page.host)).map((c) => c.id));
   const actionSources = new Set((req.own ?? []).map((c) => c.id));
+  const filled = req.filled ?? [];
+  const interactSources = new Set([...fillSources, ...filled]);
+  const elements = new Map((req.elements ?? []).map((e) => [e.i, e] as const));
   const here = `https://${req.page.host}${req.page.path}`;
-  // One winner per field and per intent.
+  // One winner per field, per element and per intent.
   const best = new Map<string, Suggestion>();
   for (const s of suggestions) {
     if (s.confidence < LIMITS.minConfidence) continue;
     if (s.kind === 'fill' && (!fillable.has(s.fieldId) || !fillSources.has(s.sourceContextId))) continue;
     if (s.kind === 'action' && (!actionSources.has(s.sourceContextId) || isIntentDestination(s.intent, here))) continue;
-    const key = s.kind === 'fill' ? `f:${s.fieldId}` : `a:${s.intent}`;
+    if (s.kind === 'interact' && !interactionAllowed(s, elements.get(s.elementId), interactSources, filled.length > 0)) continue;
+    const key = s.kind === 'fill' ? `f:${s.fieldId}` : s.kind === 'interact' ? `e:${s.elementId}` : `a:${s.intent}`;
     const prev = best.get(key);
     if (!prev || s.confidence > prev.confidence) best.set(key, { ...s, value: s.value.trim() });
   }
   return [...best.values()]
     .filter((s) => s.value !== '')
     .sort((a, b) => b.confidence - a.confidence);
+}
+
+/**
+ * An interaction names a described element, a verb that fits its role and
+ * state, and a source the user read. A click on a button or link only stands
+ * once carat filled something on the page; the model does not get to press
+ * buttons on a page it merely looked at. Destructive names never pass, even
+ * if the content script somehow described one.
+ */
+function interactionAllowed(
+  s: InteractSuggestion,
+  element: ElementDescriptor | undefined,
+  sources: Set<string>,
+  filledSomething: boolean,
+): boolean {
+  if (!element || !sources.has(s.sourceContextId)) return false;
+  if (isDestructiveName(element.nm)) return false;
+  if (!verbFits(element, s.verb, s.value.trim())) return false;
+  if (s.verb === 'click' && (element.r === 'button' || element.r === 'link') && !filledSomething) return false;
+  return true;
 }

@@ -4,10 +4,15 @@ import { fileURLToPath } from 'node:url';
 import type { SuggestRequest, Suggestion } from '@carat/shared';
 import { z } from 'zod';
 
-/** A fill is expected by `fieldId`, an action by `intent`; `whenStartsWith` pins an action's start time. */
+/**
+ * A fill is expected by `fieldId`, an action by `intent`, an interaction by
+ * `elementId` plus `verb`; `whenStartsWith` pins an action's start time.
+ */
 export interface Expectation {
   fieldId?: string;
   intent?: string;
+  elementId?: string;
+  verb?: string;
   valueIncludes: string;
   whenStartsWith?: string;
 }
@@ -22,10 +27,16 @@ const ExpectationSchema = z
   .object({
     fieldId: z.string().min(1).optional(),
     intent: z.string().min(1).optional(),
+    elementId: z.string().min(1).optional(),
+    verb: z.string().min(1).optional(),
     valueIncludes: z.string().min(1),
     whenStartsWith: z.string().min(1).optional(),
   })
-  .refine((e) => (e.fieldId === undefined) !== (e.intent === undefined), 'an expectation names a fieldId or an intent, not both');
+  .refine(
+    (e) => [e.fieldId, e.intent, e.elementId].filter((v) => v !== undefined).length === 1,
+    'an expectation names exactly one of fieldId, intent or elementId',
+  )
+  .refine((e) => (e.verb === undefined) === (e.elementId === undefined), 'verb goes with elementId');
 
 const FixtureSchema = z.object({
   name: z.string().min(1),
@@ -54,12 +65,14 @@ export interface Verdict {
 
 function describe(s: Suggestion): string {
   if (s.kind === 'fill') return `${s.fieldId}=${JSON.stringify(s.value)}`;
+  if (s.kind === 'interact') return `${s.elementId}.${s.verb}(${JSON.stringify(s.value)})`;
   return `${s.intent}=${JSON.stringify(s.value)}${s.when ? `@${s.when}` : ''}`;
 }
 
 function meets(e: Expectation, s: Suggestion): boolean {
   if (!s.value.includes(e.valueIncludes)) return false;
   if (s.kind === 'fill') return e.fieldId === s.fieldId;
+  if (s.kind === 'interact') return e.elementId === s.elementId && e.verb === s.verb;
   if (e.intent !== s.intent) return false;
   return e.whenStartsWith === undefined || s.when.startsWith(e.whenStartsWith);
 }
@@ -73,7 +86,7 @@ export function judge(fixture: Fixture, got: Suggestion[]): Verdict {
   const missing = fixture.expect.filter((e) => !got.some((s) => meets(e, s)));
   if (missing.length === 0) return { pass: true, detail: summary };
   const want = missing
-    .map((e) => `${e.fieldId ?? e.intent}~${JSON.stringify(e.valueIncludes)}${e.whenStartsWith ? `@${e.whenStartsWith}` : ''}`)
+    .map((e) => `${e.fieldId ?? e.intent ?? `${e.elementId}.${e.verb}`}~${JSON.stringify(e.valueIncludes)}${e.whenStartsWith ? `@${e.whenStartsWith}` : ''}`)
     .join(' ');
   return { pass: false, detail: `wanted ${want} got ${summary}` };
 }

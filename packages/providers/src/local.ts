@@ -3,6 +3,7 @@ import { isIntentDestination } from '@carat/shared';
 import type { Provider } from './provider';
 import { sameSite } from './same-site';
 import { classifyField, type FieldKind } from './local/fields';
+import { interactions } from './local/interact';
 import {
   extractAddress,
   extractEmail,
@@ -26,14 +27,18 @@ const TITLE_ACTIVITIES = new Set(['dinner', 'lunch', 'brunch', 'breakfast', 'cof
 type Hit = { value: string; reason: string; score: number };
 const SCORE = { address: 4, exact: 3, event: 2, titleCase: 1 } as const;
 
-// Regex fallback: no network, fixed confidence, one field per kind, one action per intent.
+// Regex fallback: no network, fixed confidence, one field per kind, one action per intent, narrow interactions.
 export class LocalProvider implements Provider {
   readonly id = 'local' as const;
 
   async suggest(req: SuggestRequest, opts: { signal: AbortSignal }): Promise<Suggestion[]> {
     if (opts.signal.aborted) return [];
     const context = req.context.filter((c) => !sameSite(c.origin, req.page.host));
-    return [...fills(req.fields, context), ...actions(req.own ?? [], req.page, req.now)];
+    return [
+      ...fills(req.fields, context),
+      ...interactions(req.elements ?? [], context, req.filled ?? []),
+      ...actions(req.own ?? [], req.page, req.now),
+    ];
   }
 }
 
