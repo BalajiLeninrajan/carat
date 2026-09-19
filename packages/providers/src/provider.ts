@@ -20,6 +20,13 @@ export interface Provider {
   readonly id: Settings['provider'];
   /** The action, or null when this provider has nothing (a failure resolves as a rejection). */
   next(req: NextActionRequest, opts: NextOptions): Promise<NextAction | null>;
+  /**
+   * Put the request's cached prefix in front of the model before the page has
+   * been read, so the real call only pays for the outline. Fire and forget:
+   * the answer is thrown away and a failure is never raised. Providers with
+   * no network behind them leave it out.
+   */
+  warm?(req: NextActionRequest, opts: { signal: AbortSignal }): Promise<void>;
 }
 
 /** The model that also reads screenshots and distills a page the user left into notes. */

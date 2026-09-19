@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { NextAction, NextActionRequest, Settings } from '@carat/shared';
 import type { NextOptions, Provider } from '../src/provider';
 import { RaceProvider } from '../src/race';
@@ -90,5 +90,38 @@ describe('the race', () => {
     );
     const settled = await race.next(req, { signal: new AbortController().signal });
     expect(settled?.label).toBe('model');
+  });
+});
+
+describe('the placeholder before the network', () => {
+  it('answers in the first tick with a two-second model still in flight', async () => {
+    vi.useFakeTimers();
+    try {
+      const placeholder = action({ kind: 'fill', value: 'Seven Shores Cafe', confidence: 0.5 });
+      const race = new RaceProvider([new Fake('local', placeholder), new Fake('openai', action({ confidence: 0.9 }), 2000)], {
+        id: 'openai',
+      });
+      const first = await race.first(req, { signal: new AbortController().signal });
+      expect(first).toBe(placeholder);
+      // Nothing was advanced, so the model's two seconds are still ahead of it.
+      expect(vi.getTimerCount()).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('warms every provider that has a prefix and swallows the ones that fail', async () => {
+    const warmed: string[] = [];
+    const warms = (id: Settings['provider'], fail = false): Provider => ({
+      id,
+      next: async () => null,
+      warm: async () => {
+        warmed.push(id);
+        if (fail) throw new Error('no');
+      },
+    });
+    const race = new RaceProvider([new Fake('local', null), warms('openai', true), warms('baseten')], { id: 'openai' });
+    await expect(race.warm(req, { signal: new AbortController().signal })).resolves.toBeUndefined();
+    expect(warmed).toEqual(['openai', 'baseten']);
   });
 });
