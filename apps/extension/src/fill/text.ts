@@ -1,7 +1,9 @@
+import { isInput, isTextArea, windowOf } from '../dom/tags';
+
 export type TextControl = HTMLInputElement | HTMLTextAreaElement;
 
 export function isTextControl(el: Element | null): el is TextControl {
-  return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
+  return isInput(el) || isTextArea(el);
 }
 
 /**
@@ -11,8 +13,11 @@ export function isTextControl(el: Element | null): el is TextControl {
  * looks like real typing and the framework picks the new value up.
  */
 export function fillTextControl(el: TextControl, value: string): void {
-  const proto =
-    el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+  // The setter comes from the element's own window: a field in a child frame is not an instance of this one's classes.
+  const win = windowOf(el);
+  const proto = isTextArea(el)
+    ? (win?.HTMLTextAreaElement.prototype ?? HTMLTextAreaElement.prototype)
+    : (win?.HTMLInputElement.prototype ?? HTMLInputElement.prototype);
   const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
 
   el.focus();

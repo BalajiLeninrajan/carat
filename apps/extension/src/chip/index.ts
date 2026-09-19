@@ -4,6 +4,12 @@ import { CHIP_CSS } from './styles';
 
 export type DismissReason = 'escape' | 'timeout' | 'typed' | 'detached';
 
+/** The key that accepts a chip. Tab for everything but a control that moves money, which takes Enter and lets Tab through. */
+export type AcceptKey = 'Tab' | 'Enter';
+
+/** A key or a keystroke that happened in a frame the chip cannot listen to itself, relayed by that frame's agent. */
+export type RelayedKey = AcceptKey | 'Escape' | 'typed';
+
 interface ChipCallbacks {
   /** Called after the chip has hidden itself; the caller performs the fill or the navigation. */
   onAccept: () => void;
@@ -22,6 +28,8 @@ interface ChipText extends ChipCallbacks {
    * The chip carries a pulsing dot until `settle()`.
    */
   pending?: boolean;
+  /** Default Tab. Enter marks a money control: the keycap changes, the colour changes, and Tab is not taken. */
+  key?: AcceptKey;
 }
 
 export interface ChipShowOptions extends ChipText {
@@ -35,6 +43,12 @@ export interface ChipShowOptions extends ChipText {
    * just filled, which still holds focus while the next chip is up.
    */
   interceptFrom?: Element | null;
+  /**
+   * Where the chip sits when the target's own box is not the answer: a field
+   * inside a cross-origin frame, whose box the frame reported. Null means
+   * off-screen right now.
+   */
+  anchor?: () => DOMRect | null;
 }
 
 /** A chip with no field: a larger banner centred at the bottom of the viewport that takes Tab from anywhere on the page. */
@@ -58,11 +72,15 @@ export interface Chip {
   settle(): void;
   hide(): void;
   destroy(): void;
+  /** A key pressed inside a frame this chip cannot hear: accept on the chip's own key, dismiss on Escape or typing, ignore the rest. */
+  relay(key: RelayedKey): void;
   readonly visible: boolean;
   /** The words on the chip, e.g. `Click "Save"?`; the shadow root is closed, so tests read it here. */
   readonly text: string;
   /** Whether the indicator is up; the shadow root is closed, so tests read it here. */
   readonly pending: boolean;
+  /** The key the chip currently takes. */
+  readonly key: AcceptKey;
 }
 
 export const AUTO_DISMISS_MS = 20_000;
@@ -75,14 +93,18 @@ const HOST_ATTR = 'data-carat-chip';
 interface SessionBase extends ChipCallbacks {
   timer: ReturnType<typeof setTimeout>;
   onScreen: boolean;
-  /** When set, Tab defers to a text field that has focus unless it is this or `interceptFrom`. */
+  /** When set, the key defers to a text field that has focus unless it is this or `interceptFrom`. */
   target: Element | null;
   interceptFrom: Element | null;
+  key: AcceptKey;
+  /** The window of a same-origin child frame the target lives in; its keys never reach the top window. */
+  targetWin: Window | null;
 }
 interface FieldSession extends SessionBase {
   mode: 'field';
   target: Element;
   observer: ResizeObserver | null;
+  anchor: (() => DOMRect | null) | null;
 }
 interface CornerSession extends SessionBase {
   mode: 'corner';
@@ -132,7 +154,8 @@ export function createChip(doc: Document = document): Chip {
       dismiss('escape');
       return;
     }
-    if (e.key !== 'Tab' || e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) return;
+    // A money chip takes Enter and nothing else; Tab goes wherever the page sends it.
+    if (e.key !== session.key || e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) return;
     // A tab-offer banner has no field of its own to defer to; Tab is its whole interface.
     if (session.target && !shouldInterceptTab(deepActiveElement(doc), session.target, session.interceptFrom)) return;
     e.preventDefault();
@@ -157,7 +180,11 @@ export function createChip(doc: Document = document): Chip {
     const wasHidden = host.style.display === 'none';
     if (wasHidden) host.style.visibility = 'hidden';
     host.style.display = 'block';
-    const { top, left, visible } = placeChip(session.target, pill.offsetWidth, pill.offsetHeight);
+    const anchored = session.anchor ? session.anchor() : undefined;
+    const { top, left, visible } =
+      anchored === null
+        ? { top: 0, left: 0, visible: false }
+        : placeChip(session.target, pill.offsetWidth, pill.offsetHeight, anchored);
     session.onScreen = visible;
     host.style.visibility = '';
     if (!visible) {
@@ -193,6 +220,9 @@ export function createChip(doc: Document = document): Chip {
     sub.hidden = !opts.detail;
     reason = opts.reason ?? '';
     setPending(opts.pending === true);
+    const acceptKey: AcceptKey = opts.key ?? 'Tab';
+    key.textContent = acceptKey;
+    pill.classList.toggle('is-money', acceptKey === 'Enter');
     if (!host.isConnected) doc.documentElement.appendChild(host);
     // Capture phase so the page's own Tab handlers never see an accepted Tab.
     win.addEventListener('keydown', onKeydown, true);
@@ -204,6 +234,8 @@ export function createChip(doc: Document = document): Chip {
       onScreen: false,
       target: null,
       interceptFrom: null,
+      key: acceptKey,
+      targetWin: null,
       timer: setTimeout(() => dismiss('timeout'), AUTO_DISMISS_MS),
     };
   }
@@ -215,13 +247,25 @@ export function createChip(doc: Document = document): Chip {
     const base = mount(opts.verb ?? 'Fill', opts.tail ?? '', opts, swap);
     const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(() => reposition()) : null;
     observer?.observe(opts.target);
-    session = { ...base, mode: 'field', target: opts.target, interceptFrom: opts.interceptFrom ?? null, observer };
+    const targetWin = opts.target.ownerDocument.defaultView;
+    session = {
+      ...base,
+      mode: 'field',
+      target: opts.target,
+      interceptFrom: opts.interceptFrom ?? null,
+      observer,
+      anchor: opts.anchor ?? null,
+      targetWin: targetWin && targetWin !== win ? targetWin : null,
+    };
     pill.classList.remove('is-banner');
     host.style.right = '';
     host.style.bottom = '';
     host.style.transform = '';
     win.addEventListener('scroll', reposition, { capture: true, passive: true });
     win.addEventListener('resize', reposition, { passive: true });
+    // A target in a same-origin child frame: its keys and scrolls stay in that window.
+    session.targetWin?.addEventListener('keydown', onKeydown, true);
+    session.targetWin?.addEventListener('scroll', reposition, { capture: true, passive: true });
     opts.target.addEventListener('input', onTyped);
     // Typing on in the field carat just filled means the user is busy there, not ready for the next chip.
     opts.interceptFrom?.addEventListener('input', onTyped);
@@ -260,6 +304,8 @@ export function createChip(doc: Document = document): Chip {
       s.observer?.disconnect();
       win.removeEventListener('scroll', reposition, true);
       win.removeEventListener('resize', reposition);
+      s.targetWin?.removeEventListener('keydown', onKeydown, true);
+      s.targetWin?.removeEventListener('scroll', reposition, true);
       s.target.removeEventListener('input', onTyped);
       s.interceptFrom?.removeEventListener('input', onTyped);
     } else {
@@ -288,6 +334,13 @@ export function createChip(doc: Document = document): Chip {
     s.onDismiss(reason);
   }
 
+  function relay(k: RelayedKey): void {
+    if (!session || !session.onScreen) return;
+    if (k === 'Escape') dismiss('escape');
+    else if (k === 'typed') dismiss('typed');
+    else if (k === session.key) accept();
+  }
+
   function destroy(): void {
     hide();
     host.remove();
@@ -307,6 +360,7 @@ export function createChip(doc: Document = document): Chip {
     settle,
     hide,
     destroy,
+    relay,
     get visible() {
       return session !== null;
     },
@@ -315,6 +369,9 @@ export function createChip(doc: Document = document): Chip {
     },
     get pending() {
       return pending;
+    },
+    get key() {
+      return session?.key ?? 'Tab';
     },
   };
 }

@@ -1,18 +1,22 @@
-import type { InteractVerb } from '@carat/shared';
+import type { ElementRole, InteractVerb } from '@carat/shared';
+import { normalizeWhitespace } from '@carat/shared';
+import { isHtml, isInput, isSelect } from '../dom/tags';
 import { fillSelect } from '../fill/select';
 import { inViewport, scrollToTarget } from '../scroll';
-import { sliderFacts, toggleState } from './enumerate';
+import { SELECT_BUTTON, isSelectedCard, sliderFacts, toggleState } from './enumerate';
 
 const MAX_KEY_STEPS = 200;
 
 /**
  * One interaction, performed once. Returns false when the element cannot take
  * the verb, in which case nothing was touched. Called only from a chip's Tab.
+ * `role` is what the snapshot called the element; an option card is clicked
+ * through its own Select button or radio when it has one.
  */
-export function performInteraction(el: Element, verb: InteractVerb, value: string): boolean {
+export function performInteraction(el: Element, verb: InteractVerb, value: string, role?: ElementRole): boolean {
   switch (verb) {
     case 'click':
-      return click(el);
+      return role === 'option' ? selectCard(el) : click(el);
     case 'check':
     case 'uncheck': {
       const state = toggleState(el);
@@ -22,10 +26,10 @@ export function performInteraction(el: Element, verb: InteractVerb, value: strin
       return click(el);
     }
     case 'set':
-      if (el instanceof HTMLInputElement && el.type === 'range') return setRange(el, value);
+      if (isInput(el) && el.type === 'range') return setRange(el, value);
       return el.getAttribute('role') === 'slider' && setAriaSlider(el as HTMLElement, value);
     case 'choose':
-      return el instanceof HTMLSelectElement && fillSelect(el, value);
+      return isSelect(el) && fillSelect(el, value);
     case 'scroll': {
       // The scheduler awaits the scroll itself so it can follow with a chip; here it is fire and forget.
       const win = el.ownerDocument.defaultView;
@@ -41,10 +45,11 @@ export function performInteraction(el: Element, verb: InteractVerb, value: strin
  * have been ticked since the snapshot, and an element the user has since
  * scrolled to has nothing left to scroll to.
  */
-export function stillFits(el: Element, verb: InteractVerb): boolean {
+export function stillFits(el: Element, verb: InteractVerb, role?: ElementRole): boolean {
   if (!el.isConnected) return false;
   if (verb === 'check') return toggleState(el) === 'off';
   if (verb === 'uncheck') return toggleState(el) === 'on';
+  if (verb === 'click' && role === 'option') return !isSelectedCard(el);
   if (verb === 'scroll') {
     const win = el.ownerDocument.defaultView;
     return !!win && !inViewport(el, win);
@@ -53,9 +58,29 @@ export function stillFits(el: Element, verb: InteractVerb): boolean {
 }
 
 function click(el: Element): boolean {
-  if (!(el instanceof HTMLElement)) return false;
+  if (!isHtml(el)) return false;
   el.focus();
   el.click();
+  return true;
+}
+
+/**
+ * A card is picked through the control it offers for that: its Select
+ * button, its radio, else the card itself. Custom cards often listen for
+ * pointer events rather than click, so the whole press is dispatched.
+ */
+function selectCard(card: Element): boolean {
+  const button = Array.from(card.querySelectorAll('button,[role="button"]')).find((b) =>
+    SELECT_BUTTON.test(normalizeWhitespace(b.textContent ?? b.getAttribute('aria-label') ?? '')),
+  );
+  const control = button ?? card.querySelector('input[type="radio"],[role="radio"]') ?? card;
+  if (!isHtml(control)) return false;
+  if (control !== card) return click(control);
+  control.focus();
+  for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup'] as const) {
+    control.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, composed: true }));
+  }
+  control.click();
   return true;
 }
 

@@ -196,6 +196,50 @@ describe('chip', () => {
     rich.destroy();
   });
 
+  it('takes Enter and lets Tab through for a money control, in its own colour, and relays a key heard in a frame', () => {
+    chip.hide(); // the chip from beforeEach would hear the keys meant for this one
+    const roots: ShadowRoot[] = [];
+    const spy = vi.spyOn(Element.prototype, 'attachShadow').mockImplementation(function (this: Element, init) {
+      const root = attachShadow.call(this, init);
+      roots.push(root);
+      return root;
+    });
+    const pay = createChip();
+    spy.mockRestore();
+    const root = roots[0]!;
+    const button = document.createElement('button');
+    onScreen(button);
+    document.body.append(button);
+
+    pay.show({ target: button, verb: 'Click', value: 'Pay $312.40', key: 'Enter', onAccept, onDismiss });
+    expect(pay.key).toBe('Enter');
+    expect(root.querySelector('kbd')!.textContent).toBe('Enter');
+    expect(root.querySelector('.chip')!.classList.contains('is-money')).toBe(true);
+    // Tab is not this chip's key: the page gets it.
+    button.focus();
+    expect(key(button, 'Tab').defaultPrevented).toBe(false);
+    expect(onAccept).not.toHaveBeenCalled();
+    expect(key(button, 'Enter').defaultPrevented).toBe(true);
+    expect(onAccept).toHaveBeenCalledTimes(1);
+
+    // A key the chip could not hear itself, relayed by the frame that heard it.
+    pay.show({ target: button, verb: 'Click', value: 'Pay $312.40', key: 'Enter', onAccept, onDismiss });
+    pay.relay('Tab');
+    expect(onAccept).toHaveBeenCalledTimes(1);
+    pay.relay('Enter');
+    expect(onAccept).toHaveBeenCalledTimes(2);
+    pay.show({ target: button, value: 'Dinner', onAccept, onDismiss });
+    expect(pay.key).toBe('Tab');
+    expect(root.querySelector('kbd')!.textContent).toBe('Tab');
+    expect(root.querySelector('.chip')!.classList.contains('is-money')).toBe(false);
+    pay.relay('Escape');
+    expect(onDismiss).toHaveBeenCalledWith('escape');
+    pay.show({ target: button, value: 'Dinner', onAccept, onDismiss });
+    pay.relay('typed');
+    expect(onDismiss).toHaveBeenCalledWith('typed');
+    pay.destroy();
+  });
+
   it('hides visually and ignores Tab and Escape while the target is off screen', () => {
     target.getBoundingClientRect = () =>
       ({ top: -500, left: 20, bottom: -470, right: 220, width: 200, height: 30 }) as DOMRect;
