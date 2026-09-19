@@ -19,6 +19,8 @@ const model = field<HTMLInputElement>('model');
 const statusLine = field<HTMLInputElement>('statusLine');
 const cfAccountId = field<HTMLInputElement>('cfAccountId');
 const cfApiToken = field<HTMLInputElement>('cfApiToken');
+const visionModel = field<HTMLInputElement>('visionModel');
+const screenshots = field<HTMLInputElement>('screenshots');
 
 // A fresh service worker can take a moment to wake; a dead one never answers.
 // Cap the wait so the page can offer a retry instead of hanging.
@@ -38,6 +40,8 @@ function render(s: Settings): void {
   statusLine.checked = s.statusLine;
   cfAccountId.value = s.cfAccountId;
   cfApiToken.value = s.cfApiToken;
+  visionModel.value = s.visionModel;
+  screenshots.checked = s.screenshots;
 }
 
 function read(): Partial<Settings> {
@@ -50,6 +54,8 @@ function read(): Partial<Settings> {
     statusLine: statusLine.checked,
     cfAccountId: cfAccountId.value,
     cfApiToken: cfApiToken.value,
+    visionModel: visionModel.value,
+    screenshots: screenshots.checked,
   });
 }
 

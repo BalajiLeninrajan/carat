@@ -9,6 +9,8 @@ export interface SettingsFormValues {
   statusLine: boolean;
   cfAccountId: string;
   cfApiToken: string;
+  visionModel: string;
+  screenshots: boolean;
 }
 
 const PROVIDERS: ReadonlySet<Settings['provider']> = new Set(['openai', 'baseten', 'local', 'cloudflare']);
@@ -19,6 +21,7 @@ const PROVIDERS: ReadonlySet<Settings['provider']> = new Set(['openai', 'baseten
 export function normalizeSettings(v: SettingsFormValues): Partial<Settings> {
   const baseURL = v.baseURL.trim().replace(/\/+$/, '');
   const model = v.model.trim();
+  const visionModel = v.visionModel.trim();
   return {
     enabled: v.enabled,
     provider: PROVIDERS.has(v.provider as Settings['provider'])
@@ -30,5 +33,7 @@ export function normalizeSettings(v: SettingsFormValues): Partial<Settings> {
     statusLine: v.statusLine,
     cfAccountId: v.cfAccountId.trim(),
     cfApiToken: v.cfApiToken.trim(),
+    visionModel: visionModel === '' ? DEFAULT_SETTINGS.visionModel : visionModel,
+    screenshots: v.screenshots,
   };
 }

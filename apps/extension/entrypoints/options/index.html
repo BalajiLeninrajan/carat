@@ -35,6 +35,7 @@
       label.row { grid-auto-flow: column; justify-content: start; align-items: center; gap: 8px; }
       .name { font-weight: 500; }
       .hint { font-size: 12px; color: var(--subtext0); }
+      p.hint { margin: -6px 0 0 24px; }
       input:not([type="checkbox"]), select {
         width: 100%;
         padding: 8px 10px;
@@ -111,6 +112,7 @@
         <label>
           <span class="name">Model</span>
           <input type="text" name="model" placeholder="gpt-5.6-luna" autocomplete="off" spellcheck="false" />
+          <span class="hint">The fast model. Every chip comes from this one first.</span>
         </label>
 
         <label>
@@ -124,6 +126,20 @@
           <input type="password" name="cfApiToken" autocomplete="off" spellcheck="false" />
           <span class="hint">A token with the Workers AI permission. Stored like the API key above: local extension storage, background worker only.</span>
         </label>
+
+        <label>
+          <span class="name">Smart model</span>
+          <input type="text" name="visionModel" placeholder="gpt-5.6" autocomplete="off" spellcheck="false" />
+          <span class="hint">Used only when screenshots are on: it reads them, and it gets a slower second try when the fast answer was unsure. Must accept images. With the Cloudflare provider this is still the chat model at Base URL; Jev never gets the second try.</span>
+        </label>
+
+        <label class="row">
+          <input type="checkbox" name="screenshots" />
+          <span class="name">Screenshots of tabs with little text</span>
+        </label>
+        <p class="hint" id="screenshots-help">
+          Off unless you turn it on. When on, and a tab you are reading is mostly an image, a pasted screenshot or a canvas app, Carat takes one picture of that tab while it is in front and keeps it in session memory for at most three minutes, two pictures at most. When you switch away, the picture goes to the smart model, which writes down the text it can see; the picture is deleted and only that text is kept, for 30 minutes like everything else. No picture is ever taken of a page Carat has offered to fill, of a page with a password field, or of a page on the denylist.
+        </p>
 
         <label class="row">
           <input type="checkbox" name="statusLine" />

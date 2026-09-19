@@ -42,6 +42,8 @@ function sanitize(raw: unknown): Settings {
     cfApiToken: str(r.cfApiToken, DEFAULT_SETTINGS.cfApiToken).trim(),
     disabledHosts: hosts(r.disabledHosts),
     statusLine: typeof r.statusLine === 'boolean' ? r.statusLine : DEFAULT_SETTINGS.statusLine,
+    screenshots: typeof r.screenshots === 'boolean' ? r.screenshots : DEFAULT_SETTINGS.screenshots,
+    visionModel: str(r.visionModel, DEFAULT_SETTINGS.visionModel).trim() || DEFAULT_SETTINGS.visionModel,
   };
 }
 

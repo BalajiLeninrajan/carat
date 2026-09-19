@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ContextStore, STORE_LIMITS, createSettingsStore, isSiteOff, siteHost, withSite } from '../src/store';
+import { ContextStore, STORE_LIMITS, ShotStore, createSettingsStore, isSiteOff, siteHost, withSite } from '../src/store';
 import type { StorageArea } from '../src/store';
 
 class FakeArea implements StorageArea {
@@ -266,7 +266,18 @@ describe('settings store', () => {
       cfApiToken: '',
       disabledHosts: [],
       statusLine: false,
+      screenshots: false,
+      visionModel: 'gpt-5.6',
     });
+  });
+
+  it('keeps screenshots off unless stored as true and fills a blank smart model', async () => {
+    const settings = createSettingsStore(new FakeArea());
+    const next = await settings.set({ screenshots: 'yes' as never, visionModel: '  ' });
+    expect(next.screenshots).toBe(false);
+    expect(next.visionModel).toBe('gpt-5.6');
+    expect((await settings.set({ screenshots: true, visionModel: ' big ' })).screenshots).toBe(true);
+    expect((await settings.get()).visionModel).toBe('big');
   });
 
   it('merges patches and drops unknown values', async () => {
@@ -343,5 +354,93 @@ describe('ContextStore recent fills', () => {
     await store.sweep();
     await store.flush();
     expect(area.data.filled).toEqual({});
+  });
+});
+
+describe('ContextStore vision items', () => {
+  it('keeps one vision item per tab, apart from the page item of the same tab', async () => {
+    const { store } = setup();
+    await store.upsertPage(page(1, 'page text of tab one'));
+    const first = await store.upsertVision(page(1, 'read off a screenshot'));
+    const second = await store.upsertVision(page(1, 'read off a newer screenshot'));
+    const items = await store.items();
+    expect(items.map((i) => i.kind).sort()).toEqual(['page', 'vision']);
+    expect(items.find((i) => i.kind === 'vision')?.id).toBe(second?.id);
+    expect(second?.id).not.toBe(first?.id);
+    expect(second?.id.startsWith('v')).toBe(true);
+  });
+
+  it('caps vision text like a page and expires it like everything else', async () => {
+    const { store, tick } = setup();
+    const item = await store.upsertVision(page(1, 'v'.repeat(5000)));
+    expect(item?.text.length).toBe(4000);
+    tick(31 * MIN);
+    await store.sweep();
+    expect(await store.items()).toEqual([]);
+  });
+});
+
+describe('ShotStore', () => {
+  const shot = (tabId: number) => ({
+    tabId,
+    url: `https://site${tabId}.test/p?q=1`,
+    title: `Tab ${tabId}`,
+    dataUrl: `data:image/jpeg;base64,${tabId}`,
+  });
+  function shots(start = 1_000_000) {
+    let clock = start;
+    const area = new FakeArea();
+    return { area, shots: new ShotStore(area, { now: () => clock }), tick: (ms: number) => (clock += ms) };
+  }
+
+  it('keeps one shot per tab and at most two, dropping the oldest', async () => {
+    const { shots: s, tick } = shots();
+    await s.put(shot(1));
+    tick(1000);
+    await s.put(shot(2));
+    tick(1000);
+    await s.put(shot(1));
+    expect((await s.live()).map((x) => x.tabId)).toEqual([2, 1]);
+    tick(1000);
+    await s.put(shot(3));
+    expect((await s.live()).map((x) => x.tabId)).toEqual([1, 3]);
+    expect(STORE_LIMITS.maxShots).toBe(2);
+  });
+
+  it('take hands a shot out once and removes it', async () => {
+    const { shots: s, area } = shots();
+    await s.put(shot(1));
+    expect((await s.take(1))?.dataUrl).toBe('data:image/jpeg;base64,1');
+    expect(await s.take(1)).toBeUndefined();
+    expect(area.data.shots).toBeUndefined();
+  });
+
+  it('forgets a shot after three minutes even without a sweep', async () => {
+    const { shots: s, area, tick } = shots();
+    await s.put(shot(1));
+    tick(STORE_LIMITS.shotTtlMs + 1);
+    expect(await s.take(1)).toBeUndefined();
+    await s.put(shot(2));
+    tick(STORE_LIMITS.shotTtlMs + 1);
+    await s.sweep();
+    expect(area.data.shots).toBeUndefined();
+  });
+
+  it('remove drops one tab and clear drops the key', async () => {
+    const { shots: s, area } = shots();
+    await s.put(shot(1));
+    await s.put(shot(2));
+    await s.remove(1);
+    expect((await s.live()).map((x) => x.tabId)).toEqual([2]);
+    await s.clear();
+    expect(area.data).toEqual({});
+  });
+
+  it('lives under its own key so a fresh instance and the context store do not see each other', async () => {
+    const { shots: s, area } = shots();
+    await s.put(shot(1));
+    expect(Object.keys(area.data)).toEqual(['shots']);
+    expect((await new ShotStore(area, { now: () => 1_000_000 }).live()).map((x) => x.tabId)).toEqual([1]);
+    expect(await new ContextStore(area).items()).toEqual([]);
   });
 });

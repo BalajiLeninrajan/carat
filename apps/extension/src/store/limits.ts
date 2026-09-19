@@ -8,6 +8,9 @@ export const STORE_LIMITS = {
   cacheTtlMs: 60_000,
   filledTtlMs: 60_000,
   previewChars: 120,
+  /** Screenshots: gone after three minutes, two at most, one per tab. */
+  shotTtlMs: 3 * 60_000,
+  maxShots: 2,
 } as const;
 
 export const STORE_KEYS = ['ctx', 'consumed', 'dismissed', 'cache', 'pinned', 'filled'] as const;
