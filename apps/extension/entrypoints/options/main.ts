@@ -1,6 +1,12 @@
 import type { Settings } from '@carat/shared';
 import { sendMessage } from '@/src/messaging';
-import { normalizeSettings } from './settings-form';
+import {
+  EAGERNESS_NAMES,
+  eagernessAt,
+  eagernessNote,
+  eagernessPosition,
+  normalizeSettings,
+} from './settings-form';
 
 const app = document.getElementById('app') as HTMLElement;
 const form = document.getElementById('form') as HTMLFormElement;
@@ -21,7 +27,16 @@ const cfAccountId = field<HTMLInputElement>('cfAccountId');
 const cfApiToken = field<HTMLInputElement>('cfApiToken');
 const smartModel = field<HTMLInputElement>('smartModel');
 const screenshots = field<HTMLInputElement>('screenshots');
-const eagerness = field<RadioNodeList>('eagerness');
+const eagerness = field<HTMLInputElement>('eagerness');
+const eagernessNoteEl = document.getElementById('eagerness-note') as HTMLElement;
+
+// The thumb carries a position; everything a reader needs — the level's name
+// for a screen reader, the line under the track — is derived from it here.
+function showEagerness(): void {
+  const level = eagernessAt(eagerness.value);
+  eagerness.setAttribute('aria-valuetext', EAGERNESS_NAMES[level]);
+  eagernessNoteEl.textContent = eagernessNote(eagerness.value);
+}
 
 // A fresh service worker can take a moment to wake; a dead one never answers.
 // Cap the wait so the page can offer a retry instead of hanging.
@@ -43,7 +58,8 @@ function render(s: Settings): void {
   cfApiToken.value = s.cfApiToken;
   smartModel.value = s.smartModel;
   screenshots.checked = s.screenshots;
-  eagerness.value = s.eagerness;
+  eagerness.value = String(eagernessPosition(s.eagerness));
+  showEagerness();
 }
 
 function read(): Partial<Settings> {
@@ -58,7 +74,7 @@ function read(): Partial<Settings> {
     cfApiToken: cfApiToken.value,
     smartModel: smartModel.value,
     screenshots: screenshots.checked,
-    eagerness: eagerness.value,
+    eagerness: eagernessAt(eagerness.value),
   });
 }
 
@@ -96,6 +112,9 @@ form.addEventListener('input', () => {
   if (status.textContent === 'Saved') setStatus('');
 });
 
+eagerness.addEventListener('input', showEagerness);
+
 retryButton.addEventListener('click', () => void load());
 
+showEagerness();
 void load();

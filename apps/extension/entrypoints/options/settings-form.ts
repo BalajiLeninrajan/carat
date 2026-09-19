@@ -1,4 +1,11 @@
-import { DEFAULT_SETTINGS, isEagerness, type Settings } from '@carat/shared';
+import {
+  DEFAULT_SETTINGS,
+  EAGERNESS_HELP,
+  EAGERNESS_LEVELS,
+  isEagerness,
+  type Eagerness,
+  type Settings,
+} from '@carat/shared';
 
 export interface SettingsFormValues {
   enabled: boolean;
@@ -38,4 +45,32 @@ export function normalizeSettings(v: SettingsFormValues): Partial<Settings> {
     screenshots: v.screenshots,
     eagerness: isEagerness(v.eagerness) ? v.eagerness : DEFAULT_SETTINGS.eagerness,
   };
+}
+
+/**
+ * The options page shows eagerness as a slider, one stop per level, in the
+ * order EAGERNESS_LEVELS declares: 0 conservative, 1 balanced, 2 eager. Only
+ * the position crosses the DOM; what gets saved is still the level's string.
+ */
+export const EAGERNESS_NAMES: Record<Eagerness, string> = {
+  conservative: 'Conservative',
+  balanced: 'Balanced',
+  eager: 'Eager',
+};
+
+/** The level at a slider position. An off-scale position falls back to the default. */
+export function eagernessAt(position: number | string): Eagerness {
+  const i = Math.round(Number(position));
+  return EAGERNESS_LEVELS[i] ?? DEFAULT_SETTINGS.eagerness;
+}
+
+/** Where the thumb sits for a stored level. An unknown level sits at the default. */
+export function eagernessPosition(level: string): number {
+  const known = isEagerness(level) ? level : DEFAULT_SETTINGS.eagerness;
+  return EAGERNESS_LEVELS.indexOf(known);
+}
+
+/** The one line under the track, for whichever level the thumb is on. */
+export function eagernessNote(position: number | string): string {
+  return EAGERNESS_HELP[eagernessAt(position)];
 }
