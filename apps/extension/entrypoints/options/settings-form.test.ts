@@ -2,21 +2,21 @@ import { DEFAULT_SETTINGS } from '@carat/shared';
 import { describe, expect, it } from 'vitest';
 import { normalizeSettings } from './settings-form';
 
-const base = { enabled: true, provider: 'openai', baseURL: '', apiKey: '', model: '', statusLine: false, cfAccountId: '', cfApiToken: '', visionModel: '', screenshots: false };
+const base = { enabled: true, provider: 'openai', baseURL: '', apiKey: '', model: '', statusLine: false, cfAccountId: '', cfApiToken: '', smartModel: '', screenshots: false };
 
 describe('normalizeSettings', () => {
   it('fills blank baseURL and model with the defaults', () => {
     const s = normalizeSettings({ ...base, baseURL: '   ', model: '' });
     expect(s.baseURL).toBe(DEFAULT_SETTINGS.baseURL);
     expect(s.model).toBe(DEFAULT_SETTINGS.model);
-    expect(s.visionModel).toBe(DEFAULT_SETTINGS.visionModel);
+    expect(s.smartModel).toBe(DEFAULT_SETTINGS.smartModel);
   });
 
   it('keeps screenshots off unless the box is ticked, and trims the smart model', () => {
     expect(normalizeSettings(base).screenshots).toBe(false);
-    const s = normalizeSettings({ ...base, screenshots: true, visionModel: ' gpt-5.6 ' });
+    const s = normalizeSettings({ ...base, screenshots: true, smartModel: ' gpt-5.6 ' });
     expect(s.screenshots).toBe(true);
-    expect(s.visionModel).toBe('gpt-5.6');
+    expect(s.smartModel).toBe('gpt-5.6');
   });
 
   it('strips trailing slashes and surrounding whitespace', () => {

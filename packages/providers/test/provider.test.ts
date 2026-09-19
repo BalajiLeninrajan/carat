@@ -68,17 +68,17 @@ describe('createSmartProvider', () => {
     expect(createSmartProvider({ ...DEFAULT_SETTINGS, provider: 'local', apiKey: 'sk-x' })).toBeUndefined();
   });
 
-  it('runs on the vision model, falling back to the fast model when that is blank', () => {
-    const smart = createSmartProvider({ ...DEFAULT_SETTINGS, apiKey: 'sk-x', model: 'fast', visionModel: 'smart' }) as OpenAICompatProvider;
+  it('runs on the smart model, falling back to the fast model when that is blank', () => {
+    const smart = createSmartProvider({ ...DEFAULT_SETTINGS, apiKey: 'sk-x', model: 'fast', smartModel: 'smart' }) as OpenAICompatProvider;
     expect(smart.options.model).toBe('smart');
     expect(smart.options.mode).toBe('json_schema');
     expect(typeof smart.transcribe).toBe('function');
-    const blank = createSmartProvider({ ...DEFAULT_SETTINGS, apiKey: 'sk-x', model: 'fast', visionModel: '' }) as OpenAICompatProvider;
+    const blank = createSmartProvider({ ...DEFAULT_SETTINGS, apiKey: 'sk-x', model: 'fast', smartModel: '' }) as OpenAICompatProvider;
     expect(blank.options.model).toBe('fast');
   });
 
   it('is the chat model behind Jev for cloudflare, never Jev itself, and nothing when there is no chat key', () => {
-    const smart = createSmartProvider({ ...DEFAULT_SETTINGS, provider: 'cloudflare', ...cf, apiKey: 'sk-x', visionModel: 'smart' }) as OpenAICompatProvider;
+    const smart = createSmartProvider({ ...DEFAULT_SETTINGS, provider: 'cloudflare', ...cf, apiKey: 'sk-x', smartModel: 'smart' }) as OpenAICompatProvider;
     expect(smart).toBeInstanceOf(OpenAICompatProvider);
     expect(smart.options.model).toBe('smart');
     expect(smart.options.mode).toBe('json_schema');
@@ -86,7 +86,7 @@ describe('createSmartProvider', () => {
   });
 
   it('leaves the fast provider on the fast model', () => {
-    const fast = createProvider({ ...DEFAULT_SETTINGS, apiKey: 'sk-x', model: 'fast', visionModel: 'smart' }) as OpenAICompatProvider;
+    const fast = createProvider({ ...DEFAULT_SETTINGS, apiKey: 'sk-x', model: 'fast', smartModel: 'smart' }) as OpenAICompatProvider;
     expect(fast.options.model).toBe('fast');
   });
 });

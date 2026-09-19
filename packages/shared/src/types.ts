@@ -171,8 +171,8 @@ export interface Settings {
   statusLine: boolean; // small bottom-right line on every page: running or not, and which model
   /** Opt-in: screenshot thin source tabs and run the slower smart path. Default off. */
   screenshots: boolean;
-  /** Vision-capable model for transcription and the smart second pass. */
-  visionModel: string;
+  /** The slower model: a text-only second opinion after the fast answer, and the reader of screenshots at capture time. Must accept images. */
+  smartModel: string;
 }
 
 /** A downscaled screenshot handed to a vision model, plus where it came from. */
@@ -193,7 +193,7 @@ export const DEFAULT_SETTINGS: Settings = {
   disabledHosts: [],
   statusLine: false,
   screenshots: false,
-  visionModel: 'gpt-5.6',
+  smartModel: 'gpt-5.6',
 };
 
 export const LIMITS = {

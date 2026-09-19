@@ -17,7 +17,7 @@ export type CaptureVerdict = 'stored' | 'disabled' | 'site-off' | 'denylisted' |
 
 /**
  * What happened to the last screenshot cue from a tab. `shot`: a picture was
- * taken and parked. `reading`: it went to the vision model. `transcribed`:
+ * taken and parked. `reading`: it went to the smart model. `transcribed`:
  * the text landed as a vision item. The rest say why nothing happened.
  */
 export type VisionVerdict =

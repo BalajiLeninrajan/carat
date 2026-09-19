@@ -33,7 +33,7 @@ export function createProvider(settings: Settings, fetchImpl: typeof fetch = fet
 }
 
 /**
- * The chat model on `visionModel` (or `model` when that is blank), at the same
+ * The chat model on `smartModel` (or `model` when that is blank), at the same
  * endpoint the fast path uses. Undefined when there is no chat model to be
  * smart with: the regex fallback cannot read images, and Jev can neither read
  * an image nor write a value, so a cloudflare setup without a key has no
@@ -41,7 +41,7 @@ export function createProvider(settings: Settings, fetchImpl: typeof fetch = fet
  */
 export function createSmartProvider(settings: Settings, fetchImpl: typeof fetch = fetch): VisionProvider | undefined {
   if (settings.provider === 'local') return undefined;
-  return chatProvider(settings, settings.visionModel || settings.model, fetchImpl) ?? undefined;
+  return chatProvider(settings, settings.smartModel || settings.model, fetchImpl) ?? undefined;
 }
 
 function chatProvider(settings: Settings, model: string, fetchImpl: typeof fetch): OpenAICompatProvider | null {

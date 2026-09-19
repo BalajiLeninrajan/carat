@@ -43,7 +43,8 @@ function sanitize(raw: unknown): Settings {
     disabledHosts: hosts(r.disabledHosts),
     statusLine: typeof r.statusLine === 'boolean' ? r.statusLine : DEFAULT_SETTINGS.statusLine,
     screenshots: typeof r.screenshots === 'boolean' ? r.screenshots : DEFAULT_SETTINGS.screenshots,
-    visionModel: str(r.visionModel, DEFAULT_SETTINGS.visionModel).trim() || DEFAULT_SETTINGS.visionModel,
+    // `visionModel` is the name this setting had before; a stored one carries over the first time it is read.
+    smartModel: str(r.smartModel, '').trim() || str(r.visionModel, '').trim() || DEFAULT_SETTINGS.smartModel,
   };
 }
 

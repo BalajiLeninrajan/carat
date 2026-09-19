@@ -129,8 +129,8 @@
 
         <label>
           <span class="name">Smart model</span>
-          <input type="text" name="visionModel" placeholder="gpt-5.6" autocomplete="off" spellcheck="false" />
-          <span class="hint">Used only when screenshots are on: it reads them, and it gets a slower second try when the fast answer was unsure. Must accept images. With the Cloudflare provider this is still the chat model at Base URL; Jev never gets the second try.</span>
+          <input type="text" name="smartModel" placeholder="gpt-5.6" autocomplete="off" spellcheck="false" />
+          <span class="hint">The fast model answers from text. The smart model gives a second opinion from the same text when the fast answer was unsure, and reads screenshots into text at capture time, so it must accept images. Used only when screenshots are on. With the Cloudflare provider this is still the chat model at Base URL; Jev never gets the second opinion.</span>
         </label>
 
         <label class="row">
