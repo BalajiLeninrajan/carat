@@ -9,11 +9,12 @@ export default defineContentScript({
   main(ctx) {
     // One page item per tab: a frame's text must not replace the top document's.
     if (window.self !== window.top) return;
-    startCapture(ctx, document);
     const suggestions = startSuggestions(ctx, createChip(document), document);
+    // The page's own text is what a navigation chip is built from, so a new capture re-asks.
+    startCapture(ctx, document, { onCaptured: () => suggestions.refresh() });
     // The keyboard shortcut lands here from the background; the only message a content script receives.
     const stop = onMessage('forceSuggest', () => {
-      if (ctx.isValid) suggestions.refresh();
+      if (ctx.isValid) suggestions.force();
     });
     ctx.onInvalidated(stop);
   },

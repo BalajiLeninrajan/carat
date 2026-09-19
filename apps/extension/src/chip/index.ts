@@ -4,39 +4,62 @@ import { CHIP_CSS } from './styles';
 
 export type DismissReason = 'escape' | 'timeout' | 'typed' | 'detached';
 
-export interface ChipShowOptions {
-  target: Element;
+interface ChipCallbacks {
+  /** Called after the chip has hidden itself; the caller performs the fill or the navigation. */
+  onAccept: () => void;
+  onDismiss: (reason: DismissReason) => void;
+}
+
+/** What both chip shapes say besides the value. */
+interface ChipText extends ChipCallbacks {
   value: string;
-  /** Second line under the offer: where the value came from, e.g. "discord.com · 2m ago". */
+  /** Second line under the offer: where the value came from, e.g. "from discord.com · 2m ago". */
   detail?: string;
   /** Why it was offered; shown as the native tooltip on hover. */
   reason?: string;
+}
+
+export interface ChipShowOptions extends ChipText {
+  target: Element;
   /**
    * An element Tab is also taken from, besides the target: the field carat
    * just filled, which still holds focus while the next chip is up.
    */
   interceptFrom?: Element | null;
-  /** Called after the chip has hidden itself; the caller performs the fill. */
-  onAccept: () => void;
-  onDismiss: (reason: DismissReason) => void;
+}
+
+/** A chip with no field: it sits in the bottom-right corner and takes Tab from anywhere on the page. */
+export interface CornerShowOptions extends ChipText {
+  label: string; // "Open in Google Maps"
 }
 
 export interface Chip {
   show(opts: ChipShowOptions): void;
+  showCorner(opts: CornerShowOptions): void;
   hide(): void;
   destroy(): void;
   readonly visible: boolean;
 }
 
 export const AUTO_DISMISS_MS = 20_000;
+export const CORNER_INSET_PX = 16;
 const VALUE_MAX = 40;
 const HOST_ATTR = 'data-carat-chip';
 
-interface Session extends ChipShowOptions {
+interface SessionBase extends ChipCallbacks {
   timer: ReturnType<typeof setTimeout>;
-  observer: ResizeObserver | null;
   onScreen: boolean;
 }
+interface FieldSession extends SessionBase {
+  mode: 'field';
+  target: Element;
+  interceptFrom: Element | null;
+  observer: ResizeObserver | null;
+}
+interface CornerSession extends SessionBase {
+  mode: 'corner';
+}
+type Session = FieldSession | CornerSession;
 
 export function createChip(doc: Document = document): Chip {
   const host = doc.createElement('div');
@@ -76,7 +99,8 @@ export function createChip(doc: Document = document): Chip {
       return;
     }
     if (e.key !== 'Tab' || e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) return;
-    if (!shouldInterceptTab(deepActiveElement(doc), session.target, session.interceptFrom)) return;
+    // A corner chip has no field of its own to defer to; Tab is its whole interface.
+    if (session.mode === 'field' && !shouldInterceptTab(deepActiveElement(doc), session.target, session.interceptFrom)) return;
     e.preventDefault();
     e.stopImmediatePropagation();
     accept();
@@ -91,7 +115,7 @@ export function createChip(doc: Document = document): Chip {
   const onMousedown = (e: MouseEvent): void => e.preventDefault();
 
   const reposition = (): void => {
-    if (!session) return;
+    if (!session || session.mode !== 'field') return;
     if (!session.target.isConnected) {
       dismiss('detached');
       return;
@@ -110,32 +134,44 @@ export function createChip(doc: Document = document): Chip {
     host.style.left = `${Math.round(left)}px`;
   };
 
-  function show(opts: ChipShowOptions): void {
+  function mount(verb: string, opts: ChipText): SessionBase {
     hide();
-    label.replaceChildren('Fill ', valueNode(opts.value), '?');
+    label.replaceChildren(`${verb} `, valueNode(opts.value), '?');
     sub.textContent = opts.detail ?? '';
     sub.hidden = !opts.detail;
     if (opts.reason) pill.setAttribute('title', opts.reason);
     else pill.removeAttribute('title');
-    const observer =
-      typeof ResizeObserver === 'function' ? new ResizeObserver(() => reposition()) : null;
-    observer?.observe(opts.target);
-    session = {
-      ...opts,
-      observer,
-      onScreen: false,
-      timer: setTimeout(() => dismiss('timeout'), AUTO_DISMISS_MS),
-    };
-
     if (!host.isConnected) doc.documentElement.appendChild(host);
     // Capture phase so the page's own Tab handlers never see an accepted Tab.
     win.addEventListener('keydown', onKeydown, true);
+    pill.addEventListener('click', onClick);
+    pill.addEventListener('mousedown', onMousedown);
+    return { onAccept: opts.onAccept, onDismiss: opts.onDismiss, onScreen: false, timer: setTimeout(() => dismiss('timeout'), AUTO_DISMISS_MS) };
+  }
+
+  function show(opts: ChipShowOptions): void {
+    const base = mount('Fill', opts);
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(() => reposition()) : null;
+    observer?.observe(opts.target);
+    session = { ...base, mode: 'field', target: opts.target, interceptFrom: opts.interceptFrom ?? null, observer };
+    host.style.right = '';
+    host.style.bottom = '';
     win.addEventListener('scroll', reposition, { capture: true, passive: true });
     win.addEventListener('resize', reposition, { passive: true });
     opts.target.addEventListener('input', onTyped);
-    pill.addEventListener('click', onClick);
-    pill.addEventListener('mousedown', onMousedown);
     reposition();
+  }
+
+  function showCorner(opts: CornerShowOptions): void {
+    const base = mount(`${opts.label}:`, opts);
+    session = { ...base, mode: 'corner', onScreen: true };
+    host.style.top = 'auto';
+    host.style.left = 'auto';
+    host.style.right = `${CORNER_INSET_PX}px`;
+    host.style.bottom = `${CORNER_INSET_PX}px`;
+    host.style.display = 'block';
+    // Typing anywhere means the user is busy; the offer gets out of the way.
+    doc.addEventListener('input', onTyped, true);
   }
 
   function hide(): void {
@@ -143,13 +179,17 @@ export function createChip(doc: Document = document): Chip {
     const s = session;
     session = null;
     clearTimeout(s.timer);
-    s.observer?.disconnect();
     win.removeEventListener('keydown', onKeydown, true);
-    win.removeEventListener('scroll', reposition, true);
-    win.removeEventListener('resize', reposition);
-    s.target.removeEventListener('input', onTyped);
     pill.removeEventListener('click', onClick);
     pill.removeEventListener('mousedown', onMousedown);
+    if (s.mode === 'field') {
+      s.observer?.disconnect();
+      win.removeEventListener('scroll', reposition, true);
+      win.removeEventListener('resize', reposition);
+      s.target.removeEventListener('input', onTyped);
+    } else {
+      doc.removeEventListener('input', onTyped, true);
+    }
     host.style.display = 'none';
   }
 
@@ -182,6 +222,7 @@ export function createChip(doc: Document = document): Chip {
 
   return {
     show,
+    showCorner,
     hide,
     destroy,
     get visible() {

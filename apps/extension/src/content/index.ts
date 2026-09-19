@@ -1,4 +1,5 @@
 export { startCapture, CAPTURE_TIMING } from './capture-scheduler';
+export type { CaptureOptions } from './capture-scheduler';
 export { startSuggestions, SNAPSHOT_TIMING } from './suggest-scheduler';
 export type { SuggestionsHandle } from './suggest-scheduler';
 export { send } from './send';

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
-import { AUTO_DISMISS_MS, createChip, type Chip, type DismissReason } from '../src/chip';
+import { AUTO_DISMISS_MS, CORNER_INSET_PX, createChip, type Chip, type DismissReason } from '../src/chip';
 
 function key(target: EventTarget, k: string, init: KeyboardEventInit = {}): KeyboardEvent {
   const e = new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, ...init });
@@ -186,5 +186,87 @@ describe('chip', () => {
     expect(esc.defaultPrevented).toBe(false);
     expect(onAccept).not.toHaveBeenCalled();
     expect(onDismiss).not.toHaveBeenCalled();
+  });
+});
+
+describe('corner chip', () => {
+  let chip: Chip;
+  let composer: HTMLTextAreaElement;
+  let onAccept: Mock<() => void>;
+  let onDismiss: Mock<(reason: DismissReason) => void>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    composer = document.createElement('textarea');
+    document.body.append(composer);
+    chip = createChip();
+    onAccept = vi.fn<() => void>();
+    onDismiss = vi.fn<(reason: DismissReason) => void>();
+    chip.showCorner({ label: 'Open in Google Maps', value: 'Seven Shores Cafe', onAccept, onDismiss });
+  });
+
+  afterEach(() => {
+    chip.destroy();
+    document.body.innerHTML = '';
+    vi.useRealTimers();
+  });
+
+  it('sits in the bottom-right corner with the label, the value and a Tab keycap', () => {
+    const host = hosts()[0] as HTMLElement;
+    expect(host.style.display).toBe('block');
+    expect(host.style.right).toBe(`${CORNER_INSET_PX}px`);
+    expect(host.style.bottom).toBe(`${CORNER_INSET_PX}px`);
+    expect(host.style.top).toBe('auto');
+    expect(host.style.left).toBe('auto');
+    expect(chip.visible).toBe(true);
+  });
+
+  it('accepts Tab even while a text field has focus, and swallows it', () => {
+    composer.focus();
+    const pageHandler = vi.fn();
+    document.addEventListener('keydown', pageHandler);
+    const e = key(composer, 'Tab');
+    expect(e.defaultPrevented).toBe(true);
+    expect(onAccept).toHaveBeenCalledTimes(1);
+    expect(pageHandler).not.toHaveBeenCalled();
+    expect(chip.visible).toBe(false);
+    document.removeEventListener('keydown', pageHandler);
+  });
+
+  it('lets Shift+Tab through', () => {
+    composer.focus();
+    expect(key(composer, 'Tab', { shiftKey: true }).defaultPrevented).toBe(false);
+    expect(onAccept).not.toHaveBeenCalled();
+  });
+
+  it('dismisses on Escape and when the user types anywhere', () => {
+    key(document.body, 'Escape');
+    expect(onDismiss).toHaveBeenCalledWith('escape');
+
+    chip.showCorner({ label: 'Open in Google Maps', value: 'Seven Shores Cafe', onAccept, onDismiss });
+    composer.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(onDismiss).toHaveBeenLastCalledWith('typed');
+    expect(chip.visible).toBe(false);
+  });
+
+  it('auto-dismisses after 20s and stops listening once hidden', () => {
+    vi.advanceTimersByTime(AUTO_DISMISS_MS);
+    expect(onDismiss).toHaveBeenCalledWith('timeout');
+    composer.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(key(document.body, 'Tab').defaultPrevented).toBe(false);
+    expect(onAccept).not.toHaveBeenCalled();
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns to field placement when a field chip follows it', () => {
+    const target = document.createElement('input');
+    onScreen(target);
+    document.body.append(target);
+    chip.show({ target, value: 'x', onAccept, onDismiss });
+    const host = hosts()[0] as HTMLElement;
+    expect(host.style.right).toBe('');
+    expect(host.style.bottom).toBe('');
+    expect(host.style.top).toBe('136px');
+    expect(hosts().length).toBe(1);
   });
 });
