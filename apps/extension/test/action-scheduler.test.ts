@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NextAction } from '@carat/shared';
-import { createChip } from '../src/chip';
+import { CHIP_SETTLE_MS, createChip } from '../src/chip';
 import type { ScriptContext } from '../src/content';
 import { SNAPSHOT_TIMING, startActions } from '../src/content/action-scheduler';
 import type { FrameHub } from '../src/frames';
@@ -76,7 +76,30 @@ function answer(action: NextAction | null, ticket?: string): void {
   }) as unknown as typeof safeSendMessage);
 }
 
+/** Answer each `nextAction` with the next action in the list; the last one stands. */
+function answerEach(actions: Array<NextAction | null>): void {
+  let i = 0;
+  sent.mockImplementation((async (type: string) => {
+    if (type === 'nextAction') return { action: actions[Math.min(i++, actions.length - 1)] ?? null };
+    if (type === 'nextActionRefine') return {};
+    if (type === 'navigate') return { ok: true };
+    return undefined;
+  }) as unknown as typeof safeSendMessage);
+}
+
+const asks = (): unknown[] => sent.mock.calls.filter((c) => c[0] === 'nextAction').map((c) => c[1]);
+const feedbacks = (): Array<{ accepted: boolean; kind: string }> =>
+  sent.mock.calls.filter((c) => c[0] === 'feedback').map((c) => c[1] as { accepted: boolean; kind: string });
+
 const tick = (ms = 0) => vi.advanceTimersByTimeAsync(ms);
+/** The first ask goes out on the DOMContentLoaded tick; jsdom is already past it. */
+const firstAsk = () => tick(0);
+/** Long enough for the settle timer and the gap in front of it. */
+const settled = () => tick(SNAPSHOT_TIMING.settleMs + SNAPSHOT_TIMING.minGapMs);
+
+const tab = (): void => {
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+};
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -95,11 +118,10 @@ describe('the one-chip scheduler', () => {
     answer(action({ kind: 'fill', target: 1, value: 'Dinner', label: 'Fill Title with "Dinner"' }));
     const chip = createChip(document);
     startActions(fakeCtx(), chip, document, { hub: noFrames });
-    await tick(SNAPSHOT_TIMING.initialMs);
+    await firstAsk();
 
-    const asked = sent.mock.calls.filter((c) => c[0] === 'nextAction');
-    expect(asked).toHaveLength(1);
-    const request = asked[0]![1] as { controls: Array<{ name: string }>; outline: string };
+    expect(asks()).toHaveLength(1);
+    const request = asks()[0] as { controls: Array<{ name: string }>; outline: string };
     expect(request.controls.map((c) => c.name)).toEqual(['Title', 'Save']);
     expect(chip.visible).toBe(true);
     expect(chip.text).toBe('Fill Title with "Dinner"');
@@ -114,12 +136,12 @@ describe('the one-chip scheduler', () => {
     window.scrollBy = scrollBy as unknown as typeof window.scrollBy;
     const chip = createChip(document);
     startActions(fakeCtx(), chip, document, { hub: noFrames });
-    await tick(SNAPSHOT_TIMING.initialMs);
+    await firstAsk();
     expect(chip.text).toBe('Scroll down');
     const host = document.querySelector('[data-carat-chip]') as HTMLElement;
     expect(host.style.left).toBe('50%');
 
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+    tab();
     await tick(1500);
     expect(scrollBy).toHaveBeenCalled();
     chip.destroy();
@@ -131,8 +153,8 @@ describe('the one-chip scheduler', () => {
     answer(action({ kind: 'open', target: null, value: 'maps:Seven Shores Cafe', label: 'Open "Seven Shores Cafe" in Maps' }));
     const chip = createChip(document);
     startActions(fakeCtx(), chip, document, { hub: noFrames });
-    await tick(SNAPSHOT_TIMING.initialMs);
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+    await firstAsk();
+    tab();
     await tick(0);
     expect(sent.mock.calls.some((c) => c[0] === 'navigate' && (c[1] as { value: string }).value === 'maps:Seven Shores Cafe')).toBe(true);
     chip.destroy();
@@ -146,31 +168,12 @@ describe('the one-chip scheduler', () => {
     answer(action({ target: 1, label: 'Click "Save"' }));
     const chip = createChip(document);
     startActions(fakeCtx(), chip, document, { hub: noFrames });
-    await tick(SNAPSHOT_TIMING.initialMs);
+    await firstAsk();
     expect([chip.visible, chip.text]).toEqual([true, 'Click "Save"']);
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+    tab();
     await tick(0);
     expect(clicks).toHaveBeenCalledTimes(1);
-    const feedback = sent.mock.calls.find((c) => c[0] === 'feedback')![1] as { accepted: boolean; kind: string };
-    expect(feedback).toMatchObject({ accepted: true, kind: 'click' });
-    chip.destroy();
-  });
-
-  it('tells the background nothing was wanted when Esc lands, and does not offer it again', async () => {
-    document.body.innerHTML = '<main><button>Save</button></main>';
-    layAll();
-    answer(action({ target: 1 }));
-    const chip = createChip(document);
-    const handle = startActions(fakeCtx(), chip, document, { hub: noFrames });
-    await tick(SNAPSHOT_TIMING.initialMs);
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
-    expect(chip.visible).toBe(false);
-    const feedback = sent.mock.calls.find((c) => c[0] === 'feedback')![1] as { accepted: boolean };
-    expect(feedback.accepted).toBe(false);
-
-    handle.refresh();
-    await tick(SNAPSHOT_TIMING.debounceMs);
-    expect(chip.visible).toBe(false);
+    expect(feedbacks()[0]).toMatchObject({ accepted: true, kind: 'click' });
     chip.destroy();
   });
 
@@ -180,7 +183,379 @@ describe('the one-chip scheduler', () => {
     answer(null);
     const chip = createChip(document);
     startActions(fakeCtx(), chip, document, { hub: noFrames });
-    await tick(SNAPSHOT_TIMING.initialMs);
+    await firstAsk();
+    expect(chip.visible).toBe(false);
+    chip.destroy();
+  });
+});
+
+describe('when it asks', () => {
+  it('asks at DOMContentLoaded, against a smaller outline than the ones after it', async () => {
+    document.body.innerHTML = `<main><input aria-label="Title"><p>${'word '.repeat(3000)}</p><button>Save</button></main>`;
+    layAll();
+    answer(null);
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    expect(asks()).toHaveLength(1);
+    const first = (asks()[0] as { outline: string }).outline;
+    expect(first.length).toBeLessThanOrEqual(SNAPSHOT_TIMING.firstBudget);
+
+    // The page changes, settles, and the second look is the full one.
+    const extra = document.createElement('p');
+    extra.textContent = 'and one more paragraph';
+    document.querySelector('main')!.append(extra);
+    await settled();
+    expect(asks()).toHaveLength(2);
+    expect((asks()[1] as { outline: string }).outline.length).toBeGreaterThan(first.length);
+    chip.destroy();
+  });
+
+  it('does not ask again when the page settles with the same outline', async () => {
+    document.body.innerHTML = '<main><button>Save</button></main>';
+    layAll();
+    answer(null);
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    expect(asks()).toHaveLength(1);
+
+    // A mutation that leaves the outline as it was: a class change, nothing to read.
+    document.querySelector('button')!.classList.add('hot');
+    await settled();
+    expect(asks()).toHaveLength(1);
+    chip.destroy();
+  });
+
+  it('asks again when the page hands it new text, though the outline has not moved', async () => {
+    document.body.innerHTML = '<main><button>Save</button></main>';
+    layAll();
+    answer(null);
+    const chip = createChip(document);
+    const handle = startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    expect(asks()).toHaveLength(1);
+
+    handle.refresh();
+    await settled();
+    expect(asks()).toHaveLength(2);
+    chip.destroy();
+  });
+
+  it('asks again as soon as the focus moves', async () => {
+    document.body.innerHTML = '<main><input aria-label="Title"><input aria-label="Notes"></main>';
+    layAll();
+    answer(null);
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    expect(asks()).toHaveLength(1);
+
+    // Past the gap, so the focus ask is not merely waiting its turn.
+    await tick(SNAPSHOT_TIMING.minGapMs);
+    document.querySelector<HTMLInputElement>('[aria-label="Notes"]')!.focus();
+    await tick(0);
+    expect(asks()).toHaveLength(2);
+    chip.destroy();
+  });
+
+  it('asks again once a scroll of the user’s own settles', async () => {
+    // The outline now stops at the fold, so a scroll changes what the model would see.
+    document.body.innerHTML = '<main><button>Save</button></main>';
+    layAll();
+    answer(null);
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    expect(asks()).toHaveLength(1);
+
+    window.dispatchEvent(new Event('scroll'));
+    await settled();
+    expect(asks()).toHaveLength(2);
+    chip.destroy();
+  });
+
+  it('coalesces a burst of interactions into one request', async () => {
+    document.body.innerHTML = '<main><input aria-label="Title"><button>Save</button></main>';
+    layAll();
+    answer(null);
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    expect(asks()).toHaveLength(1);
+
+    const input = document.querySelector<HTMLInputElement>('input')!;
+    for (let i = 0; i < 12; i++) {
+      input.value = `Din${'n'.repeat(i)}er`;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      await tick(30);
+    }
+    await settled();
+    expect(asks()).toHaveLength(2);
+    chip.destroy();
+  });
+});
+
+describe('keeping going', () => {
+  it('offers the next field once the first is filled, and then the button', async () => {
+    document.body.innerHTML = '<main><input aria-label="Title"><input aria-label="Notes"><button>Save</button></main>';
+    layAll();
+    answerEach([
+      action({ kind: 'fill', target: 1, value: 'Dinner', label: 'Fill Title with "Dinner"' }),
+      action({ kind: 'fill', target: 2, value: 'Seven Shores', label: 'Fill Notes with "Seven Shores"' }),
+      action({ kind: 'click', target: 3, label: 'Click "Save"' }),
+    ]);
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    expect(chip.text).toBe('Fill Title with "Dinner"');
+
+    tab();
+    await settled();
+    // Nobody asked for this one: accepting the fill is what brought it.
+    expect(chip.visible).toBe(true);
+    expect(chip.text).toBe('Fill Notes with "Seven Shores"');
+    // The accept is in the timeline before the question that follows it.
+    const order = sent.mock.calls.map((c) => c[0]);
+    expect(order.indexOf('feedback')).toBeLessThan(order.lastIndexOf('nextAction'));
+
+    tab();
+    await settled();
+    expect(chip.text).toBe('Click "Save"');
+    chip.destroy();
+  });
+
+  it('never offers the same action twice on one page load', async () => {
+    document.body.innerHTML = '<main><input aria-label="Title"><button>Save</button></main>';
+    layAll();
+    const fill = action({ kind: 'fill', target: 1, value: 'Dinner', label: 'Fill Title with "Dinner"' });
+    answer(fill);
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    expect(chip.visible).toBe(true);
+
+    tab();
+    await settled();
+    // The background offered the same fill again; it is already done here.
+    expect(asks().length).toBeGreaterThan(1);
+    expect(chip.visible).toBe(false);
+    chip.destroy();
+  });
+
+  it('says nothing more after Esc until the user does something', async () => {
+    document.body.innerHTML = '<main><input aria-label="Title"><button>Save</button></main>';
+    layAll();
+    answerEach([action({ target: 2, label: 'Click "Save"' }), action({ kind: 'fill', target: 1, value: 'Dinner', label: 'Fill Title with "Dinner"' })]);
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    expect(chip.visible).toBe(false);
+    expect(feedbacks()[0]!.accepted).toBe(false);
+
+    // The page keeps changing under it; none of that is the user.
+    const grown = document.createElement('p');
+    grown.textContent = 'the page rewrote itself';
+    document.querySelector('main')!.append(grown);
+    await settled();
+    expect(asks()).toHaveLength(1);
+
+    // Now they click, and the next question goes out once they pause.
+    document.querySelector('button')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await settled();
+    expect(asks()).toHaveLength(2);
+    expect(chip.text).toBe('Fill Title with "Dinner"');
+    chip.destroy();
+  });
+
+  it('holds a request that would land inside the gap', async () => {
+    document.body.innerHTML = '<main><input aria-label="Title"><button>Save</button></main>';
+    layAll();
+    answer(null);
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    expect(asks()).toHaveLength(1);
+
+    document.querySelector<HTMLInputElement>('input')!.focus();
+    await tick(0);
+    // The focus asked at once, but the gap since the first request is not up.
+    expect(asks()).toHaveLength(1);
+    await tick(SNAPSHOT_TIMING.minGapMs);
+    expect(asks()).toHaveLength(2);
+    chip.destroy();
+  });
+});
+
+describe('getting out of the way', () => {
+  const upOnSave = async (chip: ReturnType<typeof createChip>): Promise<void> => {
+    document.body.innerHTML = '<main><input aria-label="Title"><button>Save</button></main>';
+    layAll();
+    answer(action({ target: 2, label: 'Click "Save"' }));
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    expect(chip.visible).toBe(true);
+    // Past the window that belongs to carat's own scrolling.
+    await tick(CHIP_SETTLE_MS);
+  };
+
+  it('goes on a pointerdown off the chip, and says nothing about the offer', async () => {
+    const chip = createChip(document);
+    await upOnSave(chip);
+    document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    expect(chip.visible).toBe(false);
+    expect(feedbacks()).toHaveLength(0);
+    chip.destroy();
+  });
+
+  it('goes on a key that is not Tab or Esc, but not on a bare modifier', async () => {
+    const chip = createChip(document);
+    await upOnSave(chip);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', bubbles: true }));
+    expect(chip.visible).toBe(true);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true }));
+    expect(chip.visible).toBe(false);
+    expect(feedbacks()).toHaveLength(0);
+    chip.destroy();
+  });
+
+  it('goes on a wheel, a touchmove and a scroll', async () => {
+    for (const type of ['wheel', 'touchmove', 'scroll']) {
+      const chip = createChip(document);
+      await upOnSave(chip);
+      window.dispatchEvent(new Event(type));
+      expect([type, chip.visible]).toEqual([type, false]);
+      expect(feedbacks()).toHaveLength(0);
+      chip.destroy();
+    }
+  });
+
+  it('goes when the focus lands on another control', async () => {
+    const chip = createChip(document);
+    await upOnSave(chip);
+    document.querySelector<HTMLInputElement>('input')!.focus();
+    expect(chip.visible).toBe(false);
+    expect(feedbacks()).toHaveLength(0);
+    chip.destroy();
+  });
+
+  it('ignores the tail of the scroll carat itself did to place the chip', async () => {
+    document.body.innerHTML = '<main><input aria-label="Title"><button>Save</button></main>';
+    layAll();
+    answer(action({ target: 2, label: 'Click "Save"' }));
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    expect(chip.visible).toBe(true);
+    // Inside the settle window the chip stays; past it the next one takes it away.
+    window.dispatchEvent(new Event('scroll'));
+    expect(chip.visible).toBe(true);
+    await tick(CHIP_SETTLE_MS);
+    window.dispatchEvent(new Event('scroll'));
+    expect(chip.visible).toBe(false);
+    chip.destroy();
+  });
+
+  it('takes a scroll of the user’s own as the scroll it offered, and does not offer it again', async () => {
+    document.body.innerHTML = '<main><p>a long article</p><button>Save</button></main>';
+    layAll();
+    answer(action({ kind: 'scroll', target: null, label: 'Scroll down' }));
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    expect(chip.text).toBe('Scroll down');
+
+    await tick(CHIP_SETTLE_MS);
+    window.dispatchEvent(new Event('wheel'));
+    expect(chip.visible).toBe(false);
+    expect(feedbacks()).toHaveLength(0);
+
+    // The user acting is a reason to ask again; the scroll is not offered a second time.
+    await settled();
+    expect(asks().length).toBeGreaterThan(1);
+    expect(chip.visible).toBe(false);
+    chip.destroy();
+  });
+});
+
+describe('the early ring', () => {
+  it('rings the control the model named before the words arrive', async () => {
+    document.body.innerHTML = '<main><input aria-label="Title"><button>Save</button></main>';
+    layAll();
+    const words = action({ target: 2, label: 'Click "Save"' });
+    let refines = 0;
+    // The words are held back, so the ring has to stand on its own first.
+    let sayIt: (update: unknown) => void = () => undefined;
+    sent.mockImplementation((async (type: string) => {
+      if (type === 'nextAction') return { action: null, ticket: 't1' };
+      if (type === 'nextActionRefine') {
+        if (refines++ === 0) return { target: 2, more: true };
+        return new Promise((r) => (sayIt = r));
+      }
+      return undefined;
+    }) as unknown as typeof safeSendMessage);
+
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    // Only the number has landed: the ring is up and there is nothing to read yet.
+    const ring = document.querySelector('[data-carat-ring]') as HTMLElement;
+    expect(ring.style.display).toBe('block');
+    expect(chip.text).toBe('');
+    expect(chip.visible).toBe(false);
+
+    sayIt({ action: words });
+    await tick(0);
+    expect(chip.text).toBe('Click "Save"');
+    chip.destroy();
+  });
+});
+
+describe('a context clear', () => {
+  it('drops the chip, the memo and what this page load had answered', async () => {
+    document.body.innerHTML = '<main><input aria-label="Title"><button>Save</button></main>';
+    layAll();
+    const save = action({ target: 2, label: 'Click "Save"' });
+    answer(save);
+    const chip = createChip(document);
+    const handle = startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    tab();
+    await settled();
+    // Accepted once, so it will not be offered again.
+    expect(chip.visible).toBe(false);
+
+    handle.clear();
+    expect(chip.visible).toBe(false);
+    const before = asks().length;
+
+    // Nothing on the spot; the next ordinary trigger asks, and the memo no longer stands in.
+    expect(asks()).toHaveLength(before);
+    document.querySelector('button')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await settled();
+    expect(asks().length).toBe(before + 1);
+    // What was accepted was forgotten with everything else, so the same action is on offer again.
+    expect(chip.text).toBe('Click "Save"');
+    chip.destroy();
+  });
+
+  it('drops a request that was already in flight', async () => {
+    document.body.innerHTML = '<main><button>Save</button></main>';
+    layAll();
+    let release: (v: unknown) => void = () => undefined;
+    sent.mockImplementation((async (type: string) => {
+      if (type === 'nextAction') return new Promise((r) => (release = r));
+      return undefined;
+    }) as unknown as typeof safeSendMessage);
+    const chip = createChip(document);
+    const handle = startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    expect(asks()).toHaveLength(1);
+
+    handle.clear();
+    release({ action: action({ target: 1, label: 'Click "Save"' }) });
+    await tick(0);
     expect(chip.visible).toBe(false);
     chip.destroy();
   });

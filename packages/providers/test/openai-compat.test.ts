@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { NextActionRequest } from '@carat/shared';
+import { WARMUP_OUTLINE, buildNextActionMessages, renderPrefix } from '@carat/shared';
 import { OpenAICompatProvider, cacheKey, memoryRelaxStore } from '../src/openai-compat';
 
 const req: NextActionRequest = {
@@ -129,6 +130,52 @@ describe('distill', () => {
   it('skips a page with almost nothing on it', async () => {
     const fetchImpl = vi.fn() as unknown as typeof fetch;
     expect(await provider(fetchImpl).distill('short', 'discord.com', new AbortController().signal)).toEqual([]);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
+
+describe('the warm-up call', () => {
+  const bodyOf = (fetchImpl: ReturnType<typeof vi.fn>): Record<string, unknown> =>
+    JSON.parse((fetchImpl.mock.calls[0]![1] as RequestInit).body as string) as Record<string, unknown>;
+
+  it('sends the prefix the real request will send, with one token of room and the same cache key', async () => {
+    const fetchImpl = vi.fn(async () => new Response('{}', { status: 200 }));
+    await provider(fetchImpl as unknown as typeof fetch).warm(req, { signal: new AbortController().signal });
+    const warm = bodyOf(fetchImpl);
+    expect(warm.max_completion_tokens).toBe(1);
+    expect(warm.prompt_cache_key).toBe(cacheKey(req.page.host, req.page.path));
+    expect(warm.stream).toBeUndefined();
+
+    const real = buildNextActionMessages(req);
+    const sent = warm.messages as Array<{ role: string; content: string }>;
+    expect(sent.slice(0, -1)).toEqual(real.slice(0, -1));
+    const prefix = renderPrefix(req);
+    expect(sent.at(-1)!.content.startsWith(prefix)).toBe(true);
+    expect(sent.at(-1)!.content).toContain(WARMUP_OUTLINE);
+    expect(sent.at(-1)!.content).not.toContain(req.outline);
+  });
+
+  it('never throws, whatever the server says, and leaves the relax store alone', async () => {
+    const relax = memoryRelaxStore();
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ error: { message: 'no', param: 'reasoning_effort' } }), { status: 400 }));
+    const p = provider(fetchImpl as unknown as typeof fetch, { relaxStore: relax });
+    await expect(p.warm(req, { signal: new AbortController().signal })).resolves.toBeUndefined();
+    expect(await relax.dropped('gpt-5.6-luna')).toEqual([]);
+  });
+
+  it('leaves out what the model has already rejected', async () => {
+    const relax = memoryRelaxStore();
+    await relax.drop('gpt-5.6-luna', 'prompt_cache_key');
+    const fetchImpl = vi.fn(async () => new Response('{}', { status: 200 }));
+    await provider(fetchImpl as unknown as typeof fetch, { relaxStore: relax }).warm(req, { signal: new AbortController().signal });
+    expect(bodyOf(fetchImpl).prompt_cache_key).toBeUndefined();
+  });
+
+  it('does not reach the network on a signal that has already fired', async () => {
+    const fetchImpl = vi.fn();
+    const controller = new AbortController();
+    controller.abort();
+    await provider(fetchImpl as unknown as typeof fetch).warm(req, { signal: controller.signal });
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 });

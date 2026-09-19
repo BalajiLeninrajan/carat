@@ -8,25 +8,39 @@ import type { OutlineTarget } from '../outline';
 import { assembleEvidence } from '../outline';
 import { inViewport, scrollPageDown, scrollToTarget } from '../scroll';
 import type { ScriptContext } from './context';
-import { debounce } from './context';
 import type { PageState } from './page-state';
 import { send } from './send';
 
 export const SNAPSHOT_TIMING = {
-  initialMs: 800,
-  debounceMs: 400,
-  /** The same outline is not asked about again inside this window. */
+  /** The first ask goes out at DOMContentLoaded against a smaller outline, so it is cheap and early. */
+  firstBudget: 4000,
+  /** The page has stopped rewriting itself under us. */
+  mutationQuietMs: 400,
+  /** How long after carat acted, or after the user did, the page counts as settled. */
+  settleMs: 500,
+  /** No two requests closer together than this, whatever asked for them. */
+  minGapMs: 500,
+  /** The same outline, with nothing new in the timeline, is not asked about again inside this window. */
   identicalMs: 60_000,
 } as const;
+
+/**
+ * Why a request is going out. They differ in what may stop them: `quiet`
+ * needs the outline to have changed, `force` skips every gate, and the rest
+ * go through the memo.
+ */
+type Trigger = 'first' | 'quiet' | 'evidence' | 'focus' | 'performed' | 'user' | 'force';
 
 export interface ActionsHandle {
   /** The page's own text changed; ask again unless a chip is already up. */
   refresh(): void;
   /** The user pressed the shortcut: ask again right now, past the memo and past the answer cache. */
   force(): void;
+  /** The background wiped what it knew; this page load starts over with nothing. */
+  clear(): void;
 }
 
-const NO_HANDLE: ActionsHandle = { refresh: () => undefined, force: () => undefined };
+const NO_HANDLE: ActionsHandle = { refresh: () => undefined, force: () => undefined, clear: () => undefined };
 
 /** Told when a request leaves and when its answer is in; the status line pulses in between. */
 export interface RequestObserver {
@@ -42,11 +56,15 @@ export interface ActionOptions extends RequestObserver {
 }
 
 /**
- * One chip at a time, for one action. The page is read into an outline, the
- * background answers with the one thing the user is most likely to do next,
- * and Tab does it. A ticket may bring a better answer while the chip is up:
- * the ring moves to the model's control as soon as it names one, and the
- * words change when the action itself lands.
+ * One chip at a time, for one action, and then the next one. The page is read
+ * into an outline, the background answers with the one thing the user is most
+ * likely to do next, and Tab does it. Carrying an action out is itself a
+ * reason to ask again, so a form is filled chip by chip without the user
+ * asking for each one.
+ *
+ * A ticket may bring a better answer while the chip is up: the ring moves to
+ * the model's control as soon as it names one, and the words change when the
+ * action itself lands.
  */
 export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = document, opts: ActionOptions = {}): ActionsHandle {
   const maybeWin = doc.defaultView;
@@ -56,70 +74,176 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
 
   let seq = 0;
   let gen = 0;
+  let registry = new Map<number, OutlineTarget>();
+  /** What carat has already done here, so the same chip is not offered twice on one page load. */
+  const done = new Set<string>();
+  /** Esc on an action keeps it quiet for the rest of this page load. */
+  const dismissed = new Set<string>();
+  /** The control carat last acted on; the chip after it takes Tab from there too. */
+  let lastActed: Element | null = null;
+  let pending = false;
+
+  // The memo: the same outline with nothing new behind it is not asked about twice.
   let lastHash = '';
   let lastAt = 0;
-  let registry = new Map<number, OutlineTarget>();
-  /** What the user has already done here, so the same chip is not offered twice on one page load. */
-  const done = new Set<string>();
-  /** Esc on a control keeps it quiet for the rest of this page load. */
-  const dismissed = new Set<string>();
-  let pending = false;
+  let lastEvents = -1;
+  /** Everything that puts a line in the timeline: the user acting, and carat acting. */
+  let events = 0;
+  let asked = false;
+
+  // The gate in front of the background: one request at a time, one per gap.
+  let inFlight = false;
+  let nextTrigger: Trigger | null = null;
+  let gapTimer: number | null = null;
+  let lastSentAt = 0;
+  /** Esc means wait: the next question goes out when the user does something, not before. */
+  let awaitingUser = false;
+  /** Carat is in the middle of an action; the next question waits for the accept to be reported. */
+  let performing = false;
 
   const hub: FrameHub =
     opts.hub ??
     createFrameHub(ctx, doc, {
-      onReport: () => snapshotSoon(),
+      onReport: () => afterMutation.soon(),
       onKey: (key) => chip.relay(key),
     });
 
-  const settle = (): void => {
-    if (!pending) return;
+  /** A debounce that can be called off, so a context clear takes its pending asks with it. */
+  function settleTimer(ms: number, fn: () => void): { soon(): void; cancel(): void } {
+    let id: number | null = null;
+    return {
+      soon() {
+        if (id !== null) clearTimeout(id);
+        id = ctx.setTimeout(() => {
+          id = null;
+          fn();
+        }, ms);
+      },
+      cancel() {
+        if (id !== null) clearTimeout(id);
+        id = null;
+      },
+    };
+  }
+
+  const afterUser = settleTimer(SNAPSHOT_TIMING.settleMs, () => ask('user'));
+  const afterCapture = settleTimer(SNAPSHOT_TIMING.mutationQuietMs, () => ask('evidence'));
+  const afterPerform = settleTimer(SNAPSHOT_TIMING.settleMs, () => ask('performed'));
+  const afterMutation = settleTimer(SNAPSHOT_TIMING.mutationQuietMs, () => ask('quiet'));
+
+  /** A request the model may still improve on has closed; the chip is final. */
+  const settle = (mine: number): void => {
+    if (mine !== seq || !pending) return;
     pending = false;
     chip.settle();
     observer.onAnswer?.();
   };
 
-  const snapshot = async (force = false): Promise<void> => {
-    if (!ctx.isValid || doc.visibilityState === 'hidden') return;
-    if (chip.visible && !force) return;
-    const g = ++gen;
-    await hub.refresh();
-    if (g !== gen || !ctx.isValid) return;
-
-    const { request, registry: targets, hash } = assembleEvidence(doc, win, { frames: hub.outlines() });
-    if (request.controls.length === 0 && request.outline.trim() === '') {
-      chip.hide();
+  /**
+   * Put a request in. Force beats everything; otherwise one goes out at a
+   * time, no closer together than the gap, and the last trigger to arrive
+   * while waiting is the one that goes.
+   */
+  function ask(trigger: Trigger): void {
+    if (!ctx.isValid) return;
+    // The focus moving because carat filled a field is not the user moving it.
+    if (performing && trigger !== 'force') return;
+    // After Esc, only the user gets carat talking again.
+    if (awaitingUser && trigger !== 'force' && trigger !== 'user' && trigger !== 'focus') return;
+    const force = nextTrigger === 'force' || trigger === 'force';
+    nextTrigger = force ? 'force' : trigger;
+    // The shortcut waits for nothing, not even the gap a queued trigger is sitting out.
+    if (force && gapTimer !== null) {
+      clearTimeout(gapTimer);
+      gapTimer = null;
+    }
+    if (gapTimer !== null || inFlight) return;
+    const wait = force ? 0 : SNAPSHOT_TIMING.minGapMs - (Date.now() - lastSentAt);
+    if (wait > 0) {
+      gapTimer = ctx.setTimeout(() => {
+        gapTimer = null;
+        run();
+      }, wait);
       return;
     }
-    const now = Date.now();
-    if (!force && hash === lastHash && now - lastAt < SNAPSHOT_TIMING.identicalMs) return;
-    lastHash = hash;
-    lastAt = now;
-    registry = targets;
+    run();
+  }
 
-    const mine = ++seq;
-    observer.onRequest?.();
-    const res = await send('nextAction', { ...request, ...(force ? { force: true } : {}) });
-    if (mine !== seq || !ctx.isValid) return;
-    pending = res?.ticket !== undefined;
-    if (!pending) observer.onAnswer?.();
-    present(res?.action ?? null);
-    if (res?.ticket !== undefined) void follow(res.ticket, mine);
-  };
+  function run(): void {
+    const trigger = nextTrigger;
+    nextTrigger = null;
+    if (trigger !== null) void snapshot(trigger);
+  }
+
+  /** The flight is over; anything that asked while it was up gets its turn now. */
+  function drain(): void {
+    const trigger = nextTrigger;
+    if (trigger === null) return;
+    nextTrigger = null;
+    ask(trigger);
+  }
+
+  async function snapshot(trigger: Trigger): Promise<void> {
+    const force = trigger === 'force';
+    if (!ctx.isValid || doc.visibilityState === 'hidden') return;
+    if (chip.visible && !force) return;
+    inFlight = true;
+    try {
+      const g = ++gen;
+      await hub.refresh();
+      if (g !== gen || !ctx.isValid) return;
+
+      const { request, registry: targets, hash } = assembleEvidence(doc, win, {
+        frames: hub.outlines(),
+        // The first look is a cheaper one, so the chip is up while the page is still arriving.
+        ...(asked ? {} : { budget: SNAPSHOT_TIMING.firstBudget }),
+      });
+      if (request.controls.length === 0 && request.outline.trim() === '') {
+        chip.hide();
+        return;
+      }
+      const now = Date.now();
+      const fresh = hash !== lastHash;
+      if (!force) {
+        // A page that settled without changing has nothing new to say.
+        if (trigger === 'quiet' && !fresh) return;
+        if (!fresh && events === lastEvents && now - lastAt < SNAPSHOT_TIMING.identicalMs) return;
+      }
+      lastHash = hash;
+      lastAt = now;
+      lastEvents = events;
+      lastSentAt = now;
+      asked = true;
+      registry = targets;
+
+      const mine = ++seq;
+      observer.onRequest?.();
+      const res = await send('nextAction', { ...request, ...(force ? { force: true } : {}) });
+      if (mine !== seq || !ctx.isValid) return;
+      pending = res?.ticket !== undefined;
+      if (!pending) observer.onAnswer?.();
+      present(res?.action ?? null);
+      if (res?.ticket !== undefined) void follow(res.ticket, mine);
+    } finally {
+      inFlight = false;
+      drain();
+    }
+  }
 
   /** The ticket: the ring first, then the action the model settled on. */
   async function follow(ticket: string, mine: number): Promise<void> {
     for (;;) {
       const update = await send('nextActionRefine', { ticket });
       if (!update || mine !== seq || !ctx.isValid) break;
+      // The number lands long before the words do; the ring goes up on it now.
       if (update.target !== undefined) {
         const target = registry.get(update.target)?.el;
-        if (target?.isConnected && !chip.visible) chip.ring(target);
+        if (target?.isConnected) chip.ring(target);
       }
       if (update.action !== undefined) present(update.action);
       if (!update.more) break;
     }
-    settle();
+    settle(mine);
   }
 
   function present(action: NextAction | null): void {
@@ -133,19 +257,18 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     if (['fill', 'click', 'select'].includes(action.kind) && !target?.el.isConnected) return;
     if (opts.page) opts.page.filling = true;
 
+    const el = target?.el;
     const shared = {
       label: action.label,
       reason: action.reason,
       pending,
       irreversible: action.irreversible,
+      // The field carat just filled still holds the focus; Tab there is for this chip.
+      interceptFrom: lastActed && lastActed !== el ? lastActed : null,
       onAccept: () => void accept(action, target),
-      onDismiss: (why: string) => {
-        if (why === 'escape') dismissed.add(key);
-        void send('feedback', { kind: action.kind, name: nameOf(action, target), label: action.label, host: doc.location.host, accepted: false });
-      },
+      onDismiss: (why: string) => onDismiss(why, action, target),
     };
     // A control the user can see gets the chip on it; everything else is the banner.
-    const el = target?.el;
     if (el && inViewport(el, win)) {
       const frame = knownFrame(target);
       chip.show({ ...shared, target: el, ...(frame ? { anchor: () => hub.anchor(frame, String(target!.frame!.remoteId)) } : {}) });
@@ -154,20 +277,54 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     }
   }
 
+  /**
+   * The chip went away. The user getting on with the page says nothing about
+   * the offer, so nothing is reported and nothing is suppressed; Esc and
+   * typing over the value do say something, and stop carat until the user
+   * moves again.
+   */
+  function onDismiss(why: string, action: NextAction, target: OutlineTarget | undefined): void {
+    if (why === 'acted' || why === 'scrolled') {
+      // Scrolling by hand is the step the scroll banner offered: count it done.
+      if (why === 'scrolled' && action.kind === 'scroll') done.add(actionKey(action));
+      userActed();
+      afterUser.soon();
+      return;
+    }
+    if (why !== 'escape' && why !== 'typed') return;
+    dismissed.add(actionKey(action));
+    awaitingUser = true;
+    void send('feedback', { kind: action.kind, name: nameOf(action, target), label: action.label, host: doc.location.host, accepted: false });
+  }
+
   async function accept(action: NextAction, target: OutlineTarget | undefined): Promise<void> {
     done.add(actionKey(action));
-    const outcome = await perform(action, target);
-    void send('feedback', {
-      kind: action.kind,
-      name: nameOf(action, target),
-      label: action.label,
-      host: doc.location.host,
-      accepted: true,
-      ...(outcome === 'partial' ? { outcome: 'partial' as const } : {}),
-      ...(action.irreversible ? { irreversible: true } : {}),
-    });
-    // Whatever just happened is the newest thing in the timeline, so ask again.
-    snapshotSoon();
+    lastActed = target?.el ?? null;
+    performing = true;
+    try {
+      const outcome = await perform(action, target);
+      // The timeline has to carry this before the next question goes out, so the accept is awaited.
+      await send('feedback', {
+        kind: action.kind,
+        name: nameOf(action, target),
+        label: action.label,
+        host: doc.location.host,
+        accepted: true,
+        ...(outcome === 'partial' ? { outcome: 'partial' as const } : {}),
+        ...(action.irreversible ? { irreversible: true } : {}),
+      });
+    } finally {
+      performing = false;
+    }
+    userActed();
+    // Whatever just happened is the newest thing in the timeline; ask once the page has taken it in.
+    afterPerform.soon();
+  }
+
+  /** Something new for the timeline, and carat is free to talk again. */
+  function userActed(): void {
+    events++;
+    awaitingUser = false;
   }
 
   /** Carry the action out. Returns 'partial' when a fill went in but the pick after it did not. */
@@ -213,30 +370,73 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     return doc.documentElement.lang || (typeof navigator !== 'undefined' ? navigator.language : undefined) || undefined;
   }
 
-  const snapshotSoon = debounce(ctx, () => void snapshot(), SNAPSHOT_TIMING.debounceMs);
-
-  for (const type of ['focusin', 'input', 'click'] as const) {
-    ctx.addEventListener(doc, type, snapshotSoon);
+  /** Everything this page load knew goes: the chip, the memo, what was accepted and what was refused. */
+  function clear(): void {
+    gen++;
+    seq++;
+    inFlight = false;
+    nextTrigger = null;
+    if (gapTimer !== null) clearTimeout(gapTimer);
+    gapTimer = null;
+    afterUser.cancel();
+    afterPerform.cancel();
+    afterMutation.cancel();
+    afterCapture.cancel();
+    pending = false;
+    chip.hide();
+    done.clear();
+    dismissed.clear();
+    registry = new Map();
+    lastActed = null;
+    lastHash = '';
+    lastAt = 0;
+    lastEvents = -1;
+    events = 0;
+    awaitingUser = false;
+    performing = false;
+    // Nothing is asked for on the spot; the next ordinary trigger does that.
   }
-  ctx.addEventListener(win, 'scroll', snapshotSoon, { passive: true } as AddEventListenerOptions);
-  ctx.addEventListener(doc, 'visibilitychange', () => {
-    if (doc.visibilityState === 'visible') snapshotSoon();
+
+  const onUser = (): void => {
+    userActed();
+    afterUser.soon();
+  };
+  // A click, a keystroke or a scroll of the user's own: ask again once they pause.
+  for (const type of ['click', 'input'] as const) ctx.addEventListener(doc, type, onUser);
+  ctx.addEventListener(win, 'scroll', onUser, { passive: true } as AddEventListenerOptions);
+  // The focus moving is the strongest signal there is; that one does not wait.
+  ctx.addEventListener(doc, 'focusin', () => {
+    userActed();
+    ask('focus');
   });
-  const mutations = typeof MutationObserver === 'function' ? new MutationObserver(snapshotSoon) : null;
+  ctx.addEventListener(doc, 'visibilitychange', () => {
+    if (doc.visibilityState === 'visible') afterUser.soon();
+  });
+  const mutations = typeof MutationObserver === 'function' ? new MutationObserver(() => afterMutation.soon()) : null;
   mutations?.observe(doc.documentElement, { childList: true, subtree: true });
-  ctx.setTimeout(() => void snapshot(), SNAPSHOT_TIMING.initialMs);
+
+  // The first ask is early: the outline the page has at DOMContentLoaded is usually the one that matters.
+  if (doc.readyState === 'loading') ctx.addEventListener(doc, 'DOMContentLoaded', () => ask('first'));
+  else ctx.setTimeout(() => ask('first'), 0);
+
   ctx.onInvalidated(() => {
     mutations?.disconnect();
     chip.destroy();
   });
 
   return {
-    refresh: () => snapshotSoon(),
+    refresh: () => {
+      // Text captured from this page is new evidence even when the outline has not moved.
+      events++;
+      afterCapture.soon();
+    },
     force: () => {
       lastHash = '';
       dismissed.clear();
-      void snapshot(true);
+      awaitingUser = false;
+      ask('force');
     },
+    clear,
   };
 }
 

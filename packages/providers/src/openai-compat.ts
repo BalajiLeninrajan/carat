@@ -5,6 +5,7 @@ import {
   NEXT_ACTION_RESPONSE_FORMAT,
   TRANSCRIBE_PROMPT,
   buildNextActionMessages,
+  buildWarmupMessages,
   distillMessages,
   fnv1a,
   normalizeWhitespace,
@@ -61,6 +62,8 @@ export interface OpenAICompatOptions {
 /** Parameters the request cannot do without, whatever the server says about them. */
 const NEVER_DROP = new Set(['model', 'messages', 'stream']);
 const NOTES_MAX_TOKENS = 300;
+/** A warm-up wants the prompt read, not answered. */
+const WARMUP_MAX_TOKENS = 1;
 
 interface ChatCompletion {
   choices?: Array<{ message?: { content?: unknown } }>;
@@ -120,6 +123,36 @@ export class OpenAICompatProvider implements VisionProvider {
     if (text === null) return null;
     const parsed = parseNextAction(text);
     return parsed.ok ? parsed.action : null;
+  }
+
+  /**
+   * The same prompt the next real request will send, minus the outline, with
+   * a one-token cap: the server reads the prefix, caches it under the page's
+   * key, and the call that follows pays for the outline alone. The answer is
+   * discarded and every failure is swallowed — a warm-up that does not happen
+   * costs latency, never correctness. A 400 here does not teach the relax
+   * store either, since the one-token cap is as likely a cause as the
+   * parameter the server named.
+   */
+  async warm(req: NextActionRequest, opts: { signal: AbortSignal }): Promise<void> {
+    if (opts.signal.aborted) return;
+    const body: Record<string, unknown> = {
+      model: this.options.model,
+      messages: buildWarmupMessages(req),
+      max_completion_tokens: WARMUP_MAX_TOKENS,
+      // The same key the real request will use, or the prefix lands in a cache entry nothing reads.
+      prompt_cache_key: cacheKey(req.page.host, req.page.path),
+      ...responseFormat(this.options.mode),
+      ...this.reasoning(),
+    };
+    for (const param of await this.relaxStore.dropped(this.options.model)) delete body[param];
+    try {
+      const res = await this.send(body, opts.signal);
+      // Nothing here is read; release the connection rather than buffer a body we throw away.
+      await res.body?.cancel();
+    } catch {
+      // Fire and forget.
+    }
   }
 
   /**

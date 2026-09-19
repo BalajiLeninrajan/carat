@@ -87,6 +87,20 @@ export class RaceProvider implements Provider {
     return this.run?.attempts ?? [];
   }
 
+  /** Whether anything in here has a prefix to warm at all: the regex placeholder and Jev have none. */
+  get warms(): boolean {
+    return this.providers.some((p) => p.warm !== undefined);
+  }
+
+  /**
+   * Warm every provider that has a prefix to warm; the placeholder and Jev
+   * have none, so in practice this is the chat model alone. Never rejects,
+   * and never disturbs a run in flight: a warm-up carries its own signal.
+   */
+  async warm(req: NextActionRequest, opts: { signal: AbortSignal }): Promise<void> {
+    await Promise.all(this.providers.map(async (p) => p.warm?.(req, opts).catch(() => undefined)));
+  }
+
   /** The one-call shape: the best answer anything managed inside the signal. */
   async next(req: NextActionRequest, opts: NextOptions): Promise<NextAction | null> {
     await this.first(req, opts);

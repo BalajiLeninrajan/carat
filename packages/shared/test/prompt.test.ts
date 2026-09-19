@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { FEW_SHOTS, actionInstructions, buildNextActionMessages, renderRequest } from '../src/prompt';
+import type { ChatMessage } from '../src/prompt';
+import { FEW_SHOTS, WARMUP_OUTLINE, actionInstructions, buildNextActionMessages, buildWarmupMessages, renderPrefix, renderRequest } from '../src/prompt';
 import { EAGERNESS_LEVELS } from '../src/eagerness';
 import type { NextActionRequest } from '../src/next-action';
 
@@ -63,5 +64,42 @@ describe('buildNextActionMessages', () => {
     const turn = renderRequest({ ...req, page: { ...req.page, scroll: { y: 1.4, pages: 3.2, more: true } } });
     expect(turn).toContain('scroll="1.4 of 3.2 viewports, more below"');
     expect(turn).toContain('- [tab 8] discord.com — Discord');
+  });
+
+  it('keeps the clock out of the prefix, so a second on the clock cannot miss the cache', () => {
+    const turn = renderRequest(req);
+    expect(turn.indexOf('</tabs>')).toBeLessThan(turn.indexOf('<now>'));
+    expect(renderPrefix(req)).not.toContain('<now>');
+  });
+});
+
+describe('the warm-up request', () => {
+  it('sends the prefix byte for byte, so the real request hits the cache', () => {
+    const warm = buildWarmupMessages(req);
+    const real = buildNextActionMessages(req);
+    // Everything before the page turn is one string, identical in both.
+    expect(JSON.stringify(warm.slice(0, -1))).toBe(JSON.stringify(real.slice(0, -1)));
+
+    const prefix = renderPrefix(req);
+    const warmTurn = warm.at(-1)!.content;
+    const realTurn = real.at(-1)!.content;
+    expect(warmTurn.slice(0, prefix.length)).toBe(prefix);
+    expect(realTurn.slice(0, prefix.length)).toBe(prefix);
+
+    // And byte for byte across the whole prompt up to where the page begins.
+    const head = (msgs: ChatMessage[]): string => msgs.map((m) => `${m.role}\n${m.content}`).join('\n').split('<now>')[0]!;
+    expect(head(warm)).toBe(head(real));
+  });
+
+  it('is the same bytes whatever the outline and the clock were', () => {
+    const a = buildWarmupMessages(req);
+    const b = buildWarmupMessages({ ...req, outline: 'something else entirely', controls: [], now: req.now });
+    expect(JSON.stringify(a)).toBe(JSON.stringify(b));
+    expect(a.at(-1)!.content).toContain(WARMUP_OUTLINE);
+  });
+
+  it('moves with the notes, the history and the tabs, because the real request will too', () => {
+    const other = buildWarmupMessages({ ...req, notes: ['Something else was read.'] });
+    expect(other.at(-1)!.content).not.toBe(buildWarmupMessages(req).at(-1)!.content);
   });
 });

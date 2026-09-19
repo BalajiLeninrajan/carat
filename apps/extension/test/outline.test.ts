@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { OutlineControl } from '@carat/shared';
-import { OUTLINE_LIMITS, assembleRequest, buildOutline, snapshotHash } from '../src/outline';
+import { OUTLINE_LIMITS, assembleEvidence, assembleRequest, buildOutline, snapshotHash } from '../src/outline';
 
 /** A Reddit post with its own reply form: landmarks, prose, an in-body link and a focused field. */
 const POST = `
@@ -28,8 +28,37 @@ const POST = `
 const lines = (outline: string): string[] => outline.split('\n');
 const named = (controls: OutlineControl[], name: string): OutlineControl | undefined => controls.find((c) => c.name === name);
 
+/**
+ * jsdom lays nothing out: every box is zero and the page never scrolls. These
+ * three give the elements a test cares about a place in a document that is
+ * taller than one screen, and move the viewport over it.
+ */
+const VH = window.innerHeight;
+const placed = new Map<Element, { top: number; height: number }>();
+let scrolled = 0;
+
+function place(el: Element, top: number, height = 40): void {
+  placed.set(el, { top, height });
+  el.getBoundingClientRect = (): DOMRect => {
+    const box = placed.get(el)!;
+    return new DOMRect(0, box.top - scrolled, 300, box.height);
+  };
+}
+
+function pageOf(height: number): void {
+  Object.defineProperty(document.documentElement, 'scrollHeight', { value: height, configurable: true });
+}
+
+function scrollTo(y: number): void {
+  scrolled = y;
+  Object.defineProperty(window, 'scrollY', { value: y, configurable: true });
+}
+
 beforeEach(() => {
   document.body.innerHTML = '';
+  placed.clear();
+  scrollTo(0);
+  pageOf(VH);
 });
 
 describe('buildOutline', () => {
@@ -192,6 +221,102 @@ describe('buildOutline', () => {
   });
 });
 
+describe('the viewport', () => {
+  /** A post whose body runs four screens: a link on screen, another two screens down. */
+  const LONG = `
+    <main>
+      <article>
+        <h1>The Great Grand River Walk</h1>
+        <p id="near">Walked the Grand from Bridgeport down to the dam.</p>
+        <p id="far">Has anyone done <a id="deep" href="https://www.mcmaster.ca/tour">Waterloo to McMaster</a> on foot?</p>
+      </article>
+    </main>
+  `;
+
+  const long = (): void => {
+    document.body.innerHTML = LONG;
+    pageOf(VH * 4);
+    place(document.getElementById('near')!, 100);
+    place(document.getElementById('far')!, VH * 2 + 100);
+    place(document.getElementById('deep')!, VH * 2 + 100);
+  };
+
+  it('leaves out a link two screens down, and describes it once the page has scrolled to it', () => {
+    long();
+    const before = buildOutline(document);
+    expect(named(before.controls, 'Waterloo to McMaster')).toBeUndefined();
+    expect(before.outline).not.toContain('Waterloo to McMaster');
+    expect(before.outline).toContain('Walked the Grand');
+
+    scrollTo(VH * 2);
+    const after = buildOutline(document);
+    const link = named(after.controls, 'Waterloo to McMaster')!;
+    expect(after.outline).toContain(`[${link.n}] link "Waterloo to McMaster" -> mcmaster.ca`);
+    // What was on screen before is above the fold now.
+    expect(after.outline).not.toContain('Walked the Grand');
+  });
+
+  it('says how far the page is scrolled, what is still below and how many controls went with it', () => {
+    long();
+    const before = buildOutline(document).outline;
+    expect(lines(before).at(0)).not.toMatch(/screens above/);
+    expect(lines(before).at(-1)).toBe('(3.0 more screens below; 1 control not shown)');
+
+    scrollTo(VH * 1.5);
+    const after = buildOutline(document).outline;
+    expect(lines(after).at(0)).toBe('(1.5 screens above)');
+    expect(lines(after).at(-1)).toBe('(1.5 more screens below)');
+  });
+
+  it('hashes to something else once the visible set has changed', () => {
+    long();
+    const first = snapshotHash(buildOutline(document).outline);
+    expect(snapshotHash(buildOutline(document).outline)).toBe(first);
+    scrollTo(VH * 2);
+    expect(snapshotHash(buildOutline(document).outline)).not.toBe(first);
+  });
+
+  it('keeps a control a quarter of a screen past the fold and drops the one below that', () => {
+    document.body.innerHTML = `<main><button id="soon">Load more</button><button id="late">Back to top</button></main>`;
+    pageOf(VH * 3);
+    place(document.getElementById('soon')!, VH + VH * 0.1);
+    place(document.getElementById('late')!, VH + VH * 0.4);
+    const { controls } = buildOutline(document);
+
+    expect(named(controls, 'Load more')).toBeDefined();
+    expect(named(controls, 'Back to top')).toBeUndefined();
+  });
+
+  it('describes the focused control\'s region whole, even the part below the fold', () => {
+    document.body.innerHTML = `
+      <main>
+        <p id="body">Reading this.</p>
+        <form aria-label="Reply">
+          <label for="reply">Reply body</label><textarea id="reply"></textarea>
+          <button id="send">Send it</button>
+        </form>
+        <footer><a id="away" href="https://example.com/tos">Terms</a></footer>
+      </main>
+    `;
+    pageOf(VH * 3);
+    place(document.getElementById('body')!, 100);
+    place(document.getElementById('reply')!, VH - 60);
+    place(document.getElementById('send')!, VH * 2);
+    place(document.getElementById('away')!, VH * 2 + 200);
+
+    // Unfocused, the button is as far past the fold as the footer link, and goes the same way.
+    const cold = buildOutline(document);
+    expect(named(cold.controls, 'Send it')).toBeUndefined();
+
+    document.getElementById('reply')!.focus();
+    const warm = buildOutline(document);
+    expect(named(warm.controls, 'Reply body')).toBeDefined();
+    expect(named(warm.controls, 'Send it')).toBeDefined();
+    // The exemption is the form's alone; the rest of the page still stops at the fold.
+    expect(named(warm.controls, 'Terms')).toBeUndefined();
+  });
+});
+
 describe('assembleRequest', () => {
   it('describes where the page is, how far down it goes and what it holds', () => {
     document.body.innerHTML = POST;
@@ -202,5 +327,19 @@ describe('assembleRequest', () => {
     expect(request.page.scroll).toEqual({ y: 0, pages: expect.any(Number), more: expect.any(Boolean) });
     expect(request.outline.length).toBeLessThanOrEqual(OUTLINE_LIMITS.budget);
     expect(request.controls.length).toBeGreaterThan(0);
+  });
+
+  it('holds the outline to the budget it is given, and to 9000 characters otherwise', () => {
+    document.body.innerHTML = `<main>${Array.from({ length: 400 }, (_, i) => `<p>Paragraph ${i} ${'padding words '.repeat(20)}</p>`).join('')}</main>`;
+
+    expect(OUTLINE_LIMITS.budget).toBe(9000);
+    const full = assembleEvidence(document, window);
+    expect(full.request.outline.length).toBeGreaterThan(4000);
+    expect(full.request.outline.length).toBeLessThanOrEqual(9000);
+
+    // The fast first ask passes a smaller one.
+    const fast = assembleEvidence(document, window, { budget: 4000 });
+    expect(fast.request.outline.length).toBeLessThanOrEqual(4000);
+    expect(fast.hash).not.toBe(full.hash);
   });
 });

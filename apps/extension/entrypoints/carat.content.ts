@@ -33,11 +33,18 @@ export default defineContentScript({
     startCapture(ctx, document, { page, onCaptured: () => suggestions.refresh() });
     // What the user clicked and typed here, for the timeline the next request carries.
     startHistoryRecorder(ctx, document, { emit: (entry) => void send('history', { entries: [entry] }) });
-    // The keyboard shortcut lands here from the background; the only message a content script receives.
-    const stop = onMessage('forceSuggest', () => {
+    // The keyboard shortcut lands here from the background.
+    const stopForce = onMessage('forceSuggest', () => {
       if (ctx.isValid) suggestions.force();
     });
-    ctx.onInvalidated(stop);
+    // Carat was told to forget: the chip, the memo and this page load's answers go with it.
+    const stopCleared = onMessage('contextCleared', () => {
+      if (ctx.isValid) suggestions.clear();
+    });
+    ctx.onInvalidated(() => {
+      stopForce();
+      stopCleared();
+    });
   },
 });
 

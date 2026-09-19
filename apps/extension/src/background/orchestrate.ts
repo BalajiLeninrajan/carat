@@ -30,6 +30,8 @@ export interface NextActionDeps {
   tabs?: () => Promise<OpenTab[]>;
   /** Where the model's later answer goes. Without it the reply waits for the model. */
   refine?: RefineQueue;
+  /** Whether this tab's prefix was already sent to the provider on navigation; for the diag line only. */
+  warmed?: (tabId: number | undefined, req: NextActionRequest) => boolean;
   now?: () => number;
   timeoutMs?: number;
   onDiag?: (diag: SuggestDiag) => void;
@@ -98,11 +100,22 @@ export async function nextAction(input: PageSnapshot, requester: Requester, deps
     return { action: hit.action };
   }
 
+  diag.warmed = deps.warmed?.(requester.tabId, req) ?? false;
+  // No network behind it, so this is the first tick: the chip is up while the model is still reading.
   const placeholder = validate(await answer(deps.localProvider ?? new LocalProvider(), req, deps), req, settings, diag);
+  diag.placeholderMs = now() - started;
   const provider = (deps.createProvider ?? ((s: Settings) => createProvider(s)))(settings);
   // With no ticket there is nowhere to put a later answer, so the reply waits for the model itself.
   if (!deps.refine) {
-    const model = validate(await answer(provider, req, deps), req, settings, diag);
+    const model = validate(
+      await answer(provider, req, deps, () => {
+        diag.partialMs ??= now() - started;
+      }),
+      req,
+      settings,
+      diag,
+    );
+    diag.finalMs = now() - started;
     const chosen = pick(placeholder, model);
     diag.source = chosen === placeholder && placeholder !== null ? 'placeholder' : 'model';
     diag.ms = now() - started;
@@ -125,12 +138,14 @@ export async function nextAction(input: PageSnapshot, requester: Requester, deps
       const model = validate(
         await answer(provider, req, deps, (target) => {
           // The ring moves to the control the model named before it has finished naming what to do there.
+          diag.partialMs ??= now() - started;
           if (req.controls.some((c) => c.n === target)) ticket.push({ target });
         }),
         req,
         settings,
         diag,
       );
+      diag.finalMs = now() - started;
       const chosen = pick(placeholder, model);
       cache.set(key, { at: now(), action: chosen });
       if (provider instanceof RaceProvider) diag.attempts = [...provider.attempts];

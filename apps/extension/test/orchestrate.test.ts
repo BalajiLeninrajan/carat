@@ -3,6 +3,7 @@ import type { Eagerness, NextAction, NextActionRequest, OpenTab, OutlineControl,
 import { DEFAULT_SETTINGS } from '@carat/shared';
 import type { NextOptions, Provider } from '@carat/providers';
 import { RefineQueue } from '../src/background/refine';
+import type { SuggestDiag } from '../src/background/diag';
 import { clearActionCache, nextAction, pick, validate } from '../src/background/orchestrate';
 import type { PageSnapshot } from '../src/messaging';
 
@@ -233,6 +234,42 @@ describe('validation is safety only', () => {
     expect(seen?.tabs).toEqual([{ id: 8, host: 'discord.com', title: 'Discord' }]);
     expect(seen?.history).toEqual(['40s ago: clicked button "Add to cart"']);
     expect(seen?.notes).toEqual(['Dinner at Seven Shores Cafe on Friday at 6.']);
+  });
+});
+
+describe('how fast the chip goes up', () => {
+  it('answers inside 50 ms with a two-second model, and lands the model through the ticket', async () => {
+    // Only the timers the fake model and the ticket use; the clock stays real so the 50 ms means something.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const refine = new RefineQueue(() => undefined);
+      const placeholder = action({ kind: 'fill', target: 1, value: 'Seven Shores Cafe', confidence: 0.5, label: 'Fill Search with "Seven Shores Cafe"' });
+      const diags: SuggestDiag[] = [];
+      const started = Date.now();
+      const res = await nextAction(snapshot(), { tabId: 1, origin: 'x' }, {
+        settings: async () => settings(),
+        localProvider: new Fixed(placeholder),
+        createProvider: () => new Fixed(action({ confidence: 0.9 }), 2000, 2),
+        refine,
+        warmed: () => true,
+        onDiag: (d) => diags.push(d),
+      });
+      expect(Date.now() - started).toBeLessThan(50);
+      expect(res.action?.value).toBe('Seven Shores Cafe');
+      expect(res.ticket).toBeDefined();
+      expect(diags[0]?.placeholderMs).toBeLessThan(50);
+      expect(diags[0]?.warmed).toBe(true);
+
+      // The ring is already queued; the model itself is still two seconds out.
+      expect(await refine.claim(res.ticket!, 1)).toMatchObject({ target: 2, more: true });
+      const later = refine.claim(res.ticket!, 1);
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(await later).toMatchObject({ action: { label: 'Click "Directions"', confidence: 0.9 } });
+      expect(diags.at(-1)?.finalMs).toBeGreaterThanOrEqual(0);
+      expect(diags.at(-1)?.partialMs).toBeGreaterThanOrEqual(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

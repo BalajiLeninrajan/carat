@@ -35,5 +35,7 @@ export { HistoryStore, HISTORY_KEY } from './history';
 export type { CommittedDetails, NavigationEvents, TabEvents } from './history';
 export { createNotes, fallbackFacts, NOTES_KEY, NOTES_LIMITS } from './notes';
 export type { Distill, Note, Notes, NotesDeps } from './notes';
+export { KEEP_WARM_ALARM, KEEP_WARM_PERIOD_MINUTES, WARM_LIMITS, createKeepWarm, createWarmer, newestMark } from './warm';
+export type { AlarmsApi, KeepWarm, KeepWarmDeps, WarmDeps, Warmer } from './warm';
 export { describeTabs, describedTabs } from './tabs';
 export type { RawTab } from './tabs';
