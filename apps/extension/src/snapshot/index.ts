@@ -5,3 +5,4 @@ export { fingerprintOf } from './fingerprint';
 export { labelOf, nearbyText, textExcluding } from './labels';
 export { childDocuments, CHILD_DEPTH } from './frames';
 export type { ChildDocument } from './frames';
+export { pageQuery } from './query';

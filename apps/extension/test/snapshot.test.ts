@@ -1,7 +1,43 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { FieldDescriptor } from '@carat/shared';
 import { fingerprintMatchesDescriptor } from '../src/background';
-import { enumerateFields, fingerprintOf, serializeFields } from '../src/snapshot';
+import { pageMeta } from '../src/content';
+import { enumerateFields, fingerprintOf, pageQuery, serializeFields } from '../src/snapshot';
+
+describe('pageQuery', () => {
+  afterEach(() => window.history.pushState({}, '', '/'));
+
+  it('reads q, query or search off the URL, else a search field, clipped and whitespace-folded', () => {
+    document.body.innerHTML = '';
+    window.history.pushState({}, '', '/search?hl=en&q=door%20%20dash');
+    expect(pageQuery(document)).toBe('door dash');
+    window.history.pushState({}, '', '/?query=weather');
+    expect(pageQuery(document)).toBe('weather');
+    window.history.pushState({}, '', `/?search=${'x'.repeat(100)}`);
+    expect(pageQuery(document)).toHaveLength(80);
+    window.history.pushState({}, '', '/?q=&page=2');
+    expect(pageQuery(document)).toBe('');
+    document.body.innerHTML = '<input type="text" name="q" value="doordash">';
+    expect(pageQuery(document)).toBe('doordash');
+    document.body.innerHTML = '<textarea name="q"> pesto  recipe </textarea>';
+    expect(pageQuery(document)).toBe('pesto recipe');
+    document.body.innerHTML = '<input type="text" aria-label="Search recipes" value="basil">';
+    expect(pageQuery(document)).toBe('basil');
+    document.body.innerHTML = '<input type="text" name="title" value="doordash">';
+    expect(pageQuery(document)).toBe('');
+  });
+
+  it('is empty on a page with a visible password field, and lands in the page meta', () => {
+    window.history.pushState({}, '', '/search?q=doordash');
+    document.body.innerHTML = '';
+    expect(pageMeta(document).query).toBe('doordash');
+    document.body.innerHTML = '<input type="password">';
+    expect(pageQuery(document)).toBe('');
+    expect(pageMeta(document).query).toBeUndefined();
+    document.body.innerHTML = '<input type="password" hidden>';
+    expect(pageQuery(document)).toBe('doordash');
+  });
+});
 
 function lay(el: Element, width: number, top = 100, height = 32): void {
   el.getBoundingClientRect = () => new DOMRect(0, top, width, height);

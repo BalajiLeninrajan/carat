@@ -7,6 +7,8 @@ import { inViewport, viewportRect } from '../scroll';
 import { childDocuments } from '../snapshot/frames';
 import { nearbyText, textExcluding } from '../snapshot/labels';
 import { serializeDescriptors } from '../snapshot/serialize';
+import type { Site } from './links';
+import { MAX_LINKS, enumerateLinks } from './links';
 import { accessibleName } from './name';
 
 export const MAX_ELEMENTS = 16;
@@ -25,7 +27,7 @@ const OPTION_CHARS = 20;
 const CARD_MIN_TEXT = 8;
 const CARD_MAX_CLIMB = 6;
 
-// Links only when they act as buttons: a real href is navigation, which is not carat's to click.
+// Anchors here only when they act as buttons; real links come from `enumerateLinks`, with their destination.
 const SELECTOR = [
   'button',
   'input[type="button" i],input[type="submit" i],input[type="image" i]',
@@ -55,6 +57,10 @@ export interface ElementEntry {
   money?: true;
   /** Set when the element lives in a cross-origin frame: `el` is the frame element and the child performs. */
   frame?: FrameRef;
+  /** A real link's destination, as a registrable domain; the chip says `Open "…" on <site>`. */
+  site?: string;
+  /** Where the chip sits when that is not the element itself: a result's title inside its anchor. */
+  at?: Element;
 }
 
 export interface ElementSnapshot {
@@ -67,6 +73,8 @@ export interface EnumerateOptions {
   allowPayments?: boolean;
   /** This document is a child frame whose agent reports to the top frame; enumerate it anyway. */
   frame?: boolean;
+  /** The page the results-page adapter is picked for; defaults to the document's own location. */
+  site?: Site;
 }
 
 interface Candidate {
@@ -81,17 +89,28 @@ interface Candidate {
   selected: boolean;
   /** The frame number when the element sits in a same-origin child frame. */
   fr?: number;
+  site?: string;
+  at?: Element;
+}
+
+// Value-bearing controls first, then real links, then plain buttons and the rest.
+function tier(c: Candidate): number {
+  if (CONTROL_ROLES.has(c.role)) return 0;
+  return c.site ? 1 : 2;
 }
 
 /**
  * Interactive elements carat could act on, from two viewport heights above
  * to four below, ranked primary first, then those in the viewport, then
- * value-bearing controls before plain buttons, then by size and DOM order;
- * capped at MAX_ELEMENTS and the byte budget, so off-screen ones go first.
- * An off-screen element is flagged `o: 1`. Anything with a destructive name
- * is left out here, before the model ever sees it; a money name is left out
- * too unless payments are allowed, and then flagged `m: 1`. A card with a
- * Select button, or a `role=option`, is one `option` element: the card.
+ * value-bearing controls, then real links (in page order), then plain
+ * buttons by size and DOM order; capped at MAX_ELEMENTS in all, MAX_LINKS of
+ * them links, and the byte budget, so off-screen ones go first. An
+ * off-screen element is flagged `o: 1`. Anything with a destructive name is
+ * left out here, before the model ever sees it; a money name is left out too
+ * unless payments are allowed, and then flagged `m: 1`. A card with a Select
+ * button, or a `role=option`, is one `option` element: the card. `opts.site`
+ * names the page for the host adapter; it defaults to the document's own
+ * location.
  */
 export function enumerateElements(doc: Document, win: Window | null = doc.defaultView, opts: EnumerateOptions = {}): ElementSnapshot {
   const registry = new Map<string, ElementEntry>();
@@ -143,32 +162,72 @@ export function enumerateElements(doc: Document, win: Window | null = doc.defaul
       });
     }
   }
+  // Real links come last: they are ranked after the controls and capped on their own.
+  for (const link of enumerateLinks(doc, win, opts.site ?? siteOf(doc))) {
+    candidates.push({
+      el: link.el,
+      role: 'link',
+      name: link.name,
+      rect: link.rect,
+      primary: false,
+      inViewport: link.inViewport,
+      order: link.order,
+      money: false,
+      selected: false,
+      site: link.site,
+      at: link.at,
+    });
+  }
   markProminent(candidates);
 
-  const ranked = candidates
-    .sort(
-      (a, b) =>
-        Number(b.primary) - Number(a.primary) ||
-        Number(b.inViewport) - Number(a.inViewport) ||
-        Number(CONTROL_ROLES.has(b.role)) - Number(CONTROL_ROLES.has(a.role)) ||
-        b.rect.width * b.rect.height - a.rect.width * a.rect.height ||
-        a.order - b.order,
-    )
-    .slice(0, MAX_ELEMENTS);
+  const sorted = candidates.sort(
+    (a, b) =>
+      Number(b.primary) - Number(a.primary) ||
+      Number(b.inViewport) - Number(a.inViewport) ||
+      tier(a) - tier(b) ||
+      (a.site && b.site ? 0 : b.rect.width * b.rect.height - a.rect.width * a.rect.height) ||
+      a.order - b.order,
+  );
+  const ranked: Candidate[] = [];
+  let links = 0;
+  for (const c of sorted) {
+    if (ranked.length >= MAX_ELEMENTS) break;
+    if (c.site && links >= MAX_LINKS) continue;
+    if (c.site) links++;
+    ranked.push(c);
+  }
 
   const descriptors = ranked.map((c, idx) => describe(c, `e${idx}`));
   const kept = serializeDescriptors(descriptors, MAX_ELEMENTS_BYTES).descriptors;
   kept.forEach((d, idx) => {
-    const { el, role, name, money } = ranked[idx]!;
+    const { el, role, name, money, site: dest, at } = ranked[idx]!;
     el.setAttribute(ELEMENT_ID_ATTR, d.i);
-    registry.set(d.i, { el, role, name, key: elementKey(role, name), ...(money ? { money: true } : {}) });
+    registry.set(d.i, {
+      el,
+      role,
+      name,
+      key: elementKey(role, name),
+      ...(money ? { money: true } : {}),
+      ...(dest ? { site: dest } : {}),
+      ...(at && at !== el ? { at } : {}),
+    });
   });
   return { descriptors: kept, registry };
+}
+
+function siteOf(doc: Document): Site {
+  return { host: doc.location.host, path: doc.location.pathname };
 }
 
 function describe(c: Candidate, id: string): ElementDescriptor {
   const { el, role } = c;
   const d: ElementDescriptor = { i: id, r: role, nm: c.name };
+  if (c.site) {
+    // A link is its title and its site; nearby text would only repeat the result around it.
+    d.h = c.site;
+    if (!c.inViewport) d.o = 1;
+    return d;
+  }
   if (role === 'checkbox' || role === 'switch' || role === 'radio') d.st = toggleState(el) ?? 'off';
   else if (role === 'disclosure') d.st = isExpanded(el) ? 'open' : 'closed';
   else if (role === 'tab' && el.getAttribute('aria-selected') === 'true') d.st = 'selected';

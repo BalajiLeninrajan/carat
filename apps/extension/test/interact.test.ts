@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ElementDescriptor } from '@carat/shared';
-import { ELEMENT_WINDOW_ABOVE, ELEMENT_WINDOW_BELOW, MAX_ELEMENTS, MAX_ELEMENTS_BYTES, accessibleName, enumerateElements, performInteraction, roleOf, snap, stillFits } from '../src/interact';
+import { ELEMENT_WINDOW_ABOVE, ELEMENT_WINDOW_BELOW, MAX_ELEMENTS, MAX_ELEMENTS_BYTES, MAX_LINKS, accessibleName, enumerateElements, performInteraction, roleOf, snap, stillFits } from '../src/interact';
 
 function lay(el: Element, width = 120, top = 100, height = 32, left = 0): void {
   el.getBoundingClientRect = () => new DOMRect(left, top, width, height);
@@ -303,6 +303,155 @@ describe('performInteraction', () => {
     expect(performInteraction(select, 'choose', 'Tentative')).toBe(false);
     expect(performInteraction(document.querySelector('button')!, 'set', '3')).toBe(false);
     expect(performInteraction(document.querySelector('button')!, 'choose', 'x')).toBe(false);
+  });
+});
+
+describe('enumerateLinks', () => {
+  const withQuery = (q = 'doordash') => window.history.pushState({}, '', `/search?q=${encodeURIComponent(q)}`);
+  const noQuery = () => window.history.pushState({}, '', '/');
+  const links = (descriptors: ElementDescriptor[]) => descriptors.filter((d) => d.r === 'link' && d.h);
+
+  afterEach(noQuery);
+
+  it('describes real links with their title and destination site only while the page has a query', () => {
+    document.body.innerHTML = `
+      <button>Tools</button>
+      <a href="https://www.doordash.com/en-CA/">DoorDash Food Delivery</a>
+      <a href="/local/page">Same site</a>
+      <a href="https://news.bbc.co.uk/story"><h3>A story</h3><p>with a blurb under it</p></a>
+      <a href="https://example.org/" aria-label="Example site"><img src="x.png"></a>
+    `;
+    layAll();
+    expect(links(enumerateElements(document).descriptors)).toEqual([]);
+
+    withQuery();
+    const { descriptors, registry } = enumerateElements(document);
+    expect(links(descriptors)).toEqual([
+      { i: 'e0', r: 'link', nm: 'DoorDash Food Delivery', h: 'doordash.com' },
+      { i: 'e1', r: 'link', nm: 'Same site', h: 'localhost' },
+      { i: 'e2', r: 'link', nm: 'A story', h: 'bbc.co.uk' },
+      { i: 'e3', r: 'link', nm: 'Example site', h: 'example.org' },
+    ]);
+    // Links rank before plain buttons, and the registry carries the site for the chip.
+    expect(named(descriptors)).toEqual(['DoorDash Food Delivery', 'Same site', 'A story', 'Example site', 'Tools']);
+    expect(registry.get('e0')).toMatchObject({ role: 'link', site: 'doordash.com', key: 'link|doordash food delivery' });
+    expect(registry.get('e0')!.el).toBe(document.querySelector('a'));
+    expect(registry.get('e0')!.at).toBeUndefined();
+  });
+
+  it('reads the query off a filled search field too, but never next to a visible password field', () => {
+    document.body.innerHTML = '<input type="search" value="doordash"><a href="https://www.doordash.com/">DoorDash</a>';
+    layAll();
+    expect(links(enumerateElements(document).descriptors)).toHaveLength(1);
+    document.body.insertAdjacentHTML('beforeend', '<input type="password">');
+    expect(links(enumerateElements(document).descriptors)).toEqual([]);
+  });
+
+  it('never lists mailto, tel or javascript links, downloads, nav, header, footer or cookie-banner links, denylisted hosts, action paths, or short destructive names', () => {
+    withQuery();
+    document.body.innerHTML = `
+      <nav><a href="https://www.doordash.com/nav">In nav</a></nav>
+      <header><a href="https://www.doordash.com/header">In header</a></header>
+      <div role="navigation"><a href="https://www.doordash.com/tabs">Images</a></div>
+      <div id="cookie-banner"><a href="https://www.doordash.com/cookies">Cookie policy</a></div>
+      <div class="consent-wall"><a href="https://www.doordash.com/consent">Accept all</a></div>
+      <a href="mailto:hi@doordash.com">Email us</a>
+      <a href="tel:+15195550142">Call us</a>
+      <a href="javascript:void(0)">Do a thing</a>
+      <a href="#top">Top of page</a>
+      <a href="https://www.doordash.com/menu.pdf" download>Menu</a>
+      <a href="https://www.paypal.com/">Pay with PayPal</a>
+      <a href="https://app.chase.com/">Chase</a>
+      <a href="https://www.doordash.com/logout">Sign out</a>
+      <a href="https://www.doordash.com/account/unsubscribe">Manage emails</a>
+      <a href="https://www.doordash.com/cart/checkout">Continue</a>
+      <a href="https://www.doordash.com/help">Delete account</a>
+      <a href="https://www.doordash.com/">Order Now | Quick and Easy Food Delivery</a>
+      <a href="https://www.doordash.com/x" aria-disabled="true">Disabled</a>
+      <div aria-hidden="true"><a href="https://www.doordash.com/y">Hidden</a></div>
+      <a href="https://www.doordash.com/z"></a>
+      <footer><a href="https://www.doordash.com/footer">In footer</a></footer>
+    `;
+    layAll();
+    const { descriptors } = enumerateElements(document);
+    expect(links(descriptors).map((d) => d.nm)).toEqual(['Order Now | Quick and Easy Food Delivery']);
+    // The javascript: anchor is still a button-like element, as before.
+    expect(descriptors.find((d) => d.nm === 'Do a thing')).toMatchObject({ r: 'link' });
+    expect(descriptors.find((d) => d.nm === 'Do a thing')!.h).toBeUndefined();
+  });
+
+  it('caps links at eight in page order, keeps controls ahead of them, and stays inside the element cap and byte budget', () => {
+    withQuery();
+    document.body.innerHTML =
+      Array.from({ length: 12 }, (_, i) => `<a href="https://site${i}.example.com/">Result number ${i} ${'x'.repeat(30)}</a>`).join('') +
+      Array.from({ length: 12 }, (_, i) => `<button>Button ${i}</button>`).join('') +
+      '<label><input type="checkbox" id="veg"> Vegetarian</label>';
+    layAll();
+    const { descriptors, registry } = enumerateElements(document);
+    const ls = links(descriptors);
+    expect(ls).toHaveLength(MAX_LINKS);
+    expect(ls.map((d) => d.nm.slice(0, 15))).toEqual(Array.from({ length: 8 }, (_, i) => `Result number ${i}`));
+    expect(descriptors.length).toBeLessThanOrEqual(MAX_ELEMENTS);
+    expect(descriptors[0]!.nm).toBe('Vegetarian');
+    expect(descriptors.findIndex((d) => d.r === 'button')).toBeGreaterThan(descriptors.findIndex((d) => d.r === 'link'));
+    expect(new TextEncoder().encode(JSON.stringify(descriptors)).byteLength).toBeLessThanOrEqual(MAX_ELEMENTS_BYTES);
+    expect(registry.size).toBe(descriptors.length);
+  });
+
+  it('describes links from the viewport down to one screen below, flagging the off-screen ones', () => {
+    withQuery();
+    const vh = window.innerHeight;
+    document.body.innerHTML = '<a id="a" href="https://a.example.com/">Above</a><a id="b" href="https://b.example.com/">In view</a><a id="c" href="https://c.example.com/">One below</a><a id="d" href="https://d.example.com/">Two below</a>';
+    lay(document.getElementById('a')!, 100, -200);
+    lay(document.getElementById('b')!, 100, 100);
+    lay(document.getElementById('c')!, 100, vh + 10);
+    lay(document.getElementById('d')!, 100, 2 * vh);
+    const { descriptors } = enumerateElements(document);
+    expect(descriptors.map((d) => [d.nm, d.o])).toEqual([
+      ['In view', undefined],
+      ['One below', 1],
+    ]);
+  });
+
+  it("on a results page, takes each result title's anchor, names it by the title, skips links that stay on the search site, and sits the chip on the title", () => {
+    withQuery();
+    document.body.innerHTML = `
+      <div role="navigation"><a href="/search?q=doordash&tbm=isch">Images</a></div>
+      <div data-attrid="kc:/x"><a href="https://www.doordash.com/kp"><h3>Knowledge panel title</h3></a></div>
+      <div id="paa"><div role="button"><span>What is DoorDash?</span></div></div>
+      <div><a href="/imgres?imgurl=x"><h3>Image pack</h3></a></div>
+      <div>
+        <a href="https://www.doordash.com/en-CA/"><h3>Order Now | Quick and Easy Food Delivery</h3><div>DoorDash https://www.doordash.com</div></a>
+        <div>Get food delivered from your favourite restaurants...</div>
+      </div>
+      <div><a href="https://en.wikipedia.org/wiki/DoorDash"><h3>DoorDash - Wikipedia</h3></a></div>
+      <div id="rhs"><a href="https://www.doordash.com/about"><h3>About DoorDash</h3></a></div>
+      <div><h2><a href="https://www.ubereats.com/">Uber Eats</a></h2></div>
+      <a href="https://translate.google.com/">Translate</a>
+    `;
+    for (const el of document.querySelectorAll('a,h2,h3,[role]')) lay(el);
+    const { descriptors, registry } = enumerateElements(document, window, { host: 'www.google.com', path: '/search' });
+    expect(links(descriptors)).toEqual([
+      { i: 'e0', r: 'link', nm: 'Order Now | Quick and Easy Food Delivery', h: 'doordash.com' },
+      { i: 'e1', r: 'link', nm: 'DoorDash - Wikipedia', h: 'wikipedia.org' },
+      { i: 'e2', r: 'link', nm: 'Uber Eats', h: 'ubereats.com' },
+    ]);
+    // The "People also ask" question is a button, never a link.
+    expect(descriptors.find((d) => d.nm === 'What is DoorDash?')).toMatchObject({ r: 'button' });
+    const first = registry.get('e0')!;
+    expect(first.el).toBe(document.querySelector('a[href="https://www.doordash.com/en-CA/"]'));
+    expect(first.at).toBe(first.el.querySelector('h3'));
+    expect(first.site).toBe('doordash.com');
+    // An anchor inside its heading (DuckDuckGo, Bing) is clicked itself; the chip sits on the heading.
+    expect(registry.get('e2')!.el).toBe(document.querySelector('a[href="https://www.ubereats.com/"]'));
+    expect(registry.get('e2')!.at).toBe(document.querySelector('h2'));
+  });
+
+  it('never describes a link without a query, whatever the adapter finds', () => {
+    document.body.innerHTML = '<a href="https://www.doordash.com/"><h3>Order Now</h3></a>';
+    layAll();
+    lay(document.querySelector('h3')!);
+    expect(enumerateElements(document, window, { host: 'www.google.com', path: '/search' }).descriptors).toEqual([]);
   });
 });
 
