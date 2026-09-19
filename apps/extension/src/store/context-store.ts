@@ -18,6 +18,11 @@ interface CacheEntry {
 /** key -> expiresAt */
 type ExpiringSet = Record<string, number>;
 
+interface FilledEntry {
+  contextId: string;
+  at: number;
+}
+
 interface State {
   ctx: ContextItem[];
   consumed: ExpiringSet;
@@ -25,6 +30,8 @@ interface State {
   cache: Record<string, CacheEntry>;
   /** When the store was pinned, or 0. While pinned its clock stands still. */
   pinned: number;
+  /** tabId -> fills carat performed there, newest last. Tells a provider a Save click is due. */
+  filled: Record<string, FilledEntry[]>;
 }
 
 export interface ContextStoreOptions {
@@ -61,6 +68,7 @@ export class ContextStore {
           dismissed: asRecord<number>(raw.dismissed),
           cache: asRecord<CacheEntry>(raw.cache),
           pinned: typeof raw.pinned === 'number' ? raw.pinned : 0,
+          filled: asRecord<FilledEntry[]>(raw.filled),
         };
       })
       .catch((err: unknown) => {
@@ -198,6 +206,22 @@ export class ContextStore {
     return (this.state.consumed[key] ?? 0) > now || (this.state.dismissed[key] ?? 0) > now;
   }
 
+  /** Remember that carat filled a field on `tabId` from `contextId`; forgotten after a minute. */
+  async markFilled(tabId: number, contextId: string): Promise<void> {
+    await this.load();
+    const list = (this.state.filled[String(tabId)] ??= []);
+    list.push({ contextId, at: this.now() });
+    this.commit(['filled']);
+  }
+
+  /** Context ids behind fills on `tabId` in the last minute, newest first, deduped. */
+  async recentFillSources(tabId: number): Promise<string[]> {
+    await this.load();
+    const cutoff = this.now() - STORE_LIMITS.filledTtlMs;
+    const live = (this.state.filled[String(tabId)] ?? []).filter((f) => f.at > cutoff).reverse();
+    return [...new Set(live.map((f) => f.contextId))];
+  }
+
   async getCached(key: string): Promise<Suggestion[] | undefined> {
     await this.load();
     const entry = this.state.cache[key];
@@ -250,6 +274,16 @@ export class ContextStore {
       }
     }
     if (cacheChanged) changed.push('cache');
+    const cutoff = now - STORE_LIMITS.filledTtlMs;
+    let filledChanged = false;
+    for (const [tab, list] of Object.entries(this.state.filled)) {
+      const live = list.filter((f) => f.at > cutoff);
+      if (live.length === list.length) continue;
+      filledChanged = true;
+      if (live.length) this.state.filled[tab] = live;
+      else delete this.state.filled[tab];
+    }
+    if (filledChanged) changed.push('filled');
     return changed;
   }
 
@@ -291,7 +325,7 @@ export class ContextStore {
 }
 
 function emptyState(): State {
-  return { ctx: [], consumed: {}, dismissed: {}, cache: {}, pinned: 0 };
+  return { ctx: [], consumed: {}, dismissed: {}, cache: {}, pinned: 0, filled: {} };
 }
 
 function asRecord<T>(v: unknown): Record<string, T> {

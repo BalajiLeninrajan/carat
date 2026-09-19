@@ -1,4 +1,4 @@
-export { gate, explainGate } from './gate';
+export { gate, explainGate, hasWork } from './gate';
 export type { GateInput } from './gate';
 export { DiagLog } from './diag';
 export type { CaptureDiag, CaptureVerdict, GateVerdict, ProviderAttempt, SuggestDiag, TabDiag } from './diag';
@@ -7,7 +7,7 @@ export { scoreAndPickContext, scoreItem, ownContext, CONTEXT_LIMITS, OWN_LIMITS 
 export { orchestrate } from './orchestrate';
 export type { OrchestrateDeps, SuggestInput } from './orchestrate';
 export { handleFeedback } from './feedback';
-export type { FeedbackInput, FillFeedback, NavFeedback } from './feedback';
+export type { FeedbackInput, FillFeedback, InteractFeedback, NavFeedback } from './feedback';
 export { chromeTabsApi, openTabs, performNavigation, resolveNavigation } from './navigation';
 export type { OpenTab, TabsApi } from './navigation';
 export { getKnown, clearKnown, setPinned } from './known';

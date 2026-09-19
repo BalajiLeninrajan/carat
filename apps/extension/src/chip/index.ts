@@ -21,6 +21,10 @@ interface ChipText extends ChipCallbacks {
 
 export interface ChipShowOptions extends ChipText {
   target: Element;
+  /** The word before the quoted value: "Fill" (default), "Click", "Check", "Set"... */
+  verb?: string;
+  /** Text after the quoted value and before the question mark: " to 40". */
+  tail?: string;
   /**
    * An element Tab is also taken from, besides the target: the field carat
    * just filled, which still holds focus while the next chip is up.
@@ -39,6 +43,8 @@ export interface Chip {
   hide(): void;
   destroy(): void;
   readonly visible: boolean;
+  /** The words on the chip, e.g. `Click "Save"?`; the shadow root is closed, so tests read it here. */
+  readonly text: string;
 }
 
 export const AUTO_DISMISS_MS = 20_000;
@@ -134,9 +140,9 @@ export function createChip(doc: Document = document): Chip {
     host.style.left = `${Math.round(left)}px`;
   };
 
-  function mount(verb: string, opts: ChipText): SessionBase {
+  function mount(verb: string, tail: string, opts: ChipText): SessionBase {
     hide();
-    label.replaceChildren(`${verb} `, valueNode(opts.value), '?');
+    label.replaceChildren(`${verb} `, valueNode(opts.value), `${tail}?`);
     sub.textContent = opts.detail ?? '';
     sub.hidden = !opts.detail;
     if (opts.reason) pill.setAttribute('title', opts.reason);
@@ -150,7 +156,7 @@ export function createChip(doc: Document = document): Chip {
   }
 
   function show(opts: ChipShowOptions): void {
-    const base = mount('Fill', opts);
+    const base = mount(opts.verb ?? 'Fill', opts.tail ?? '', opts);
     const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(() => reposition()) : null;
     observer?.observe(opts.target);
     session = { ...base, mode: 'field', target: opts.target, interceptFrom: opts.interceptFrom ?? null, observer };
@@ -161,11 +167,13 @@ export function createChip(doc: Document = document): Chip {
     win.addEventListener('scroll', reposition, { capture: true, passive: true });
     win.addEventListener('resize', reposition, { passive: true });
     opts.target.addEventListener('input', onTyped);
+    // Typing on in the field carat just filled means the user is busy there, not ready for the next chip.
+    opts.interceptFrom?.addEventListener('input', onTyped);
     reposition();
   }
 
   function showCorner(opts: CornerShowOptions): void {
-    const base = mount(`${opts.label}:`, opts);
+    const base = mount(`${opts.label}:`, '', opts);
     session = { ...base, mode: 'corner', onScreen: true };
     pill.classList.add('is-banner');
     host.style.top = 'auto';
@@ -191,6 +199,7 @@ export function createChip(doc: Document = document): Chip {
       win.removeEventListener('scroll', reposition, true);
       win.removeEventListener('resize', reposition);
       s.target.removeEventListener('input', onTyped);
+      s.interceptFrom?.removeEventListener('input', onTyped);
     } else {
       doc.removeEventListener('input', onTyped, true);
     }
@@ -231,6 +240,9 @@ export function createChip(doc: Document = document): Chip {
     destroy,
     get visible() {
       return session !== null;
+    },
+    get text() {
+      return label.textContent ?? '';
     },
   };
 }

@@ -309,3 +309,34 @@ describe('per-site switch', () => {
     expect(siteHost('not a url')).toBeUndefined();
   });
 });
+
+describe('ContextStore recent fills', () => {
+  it('remembers fill sources per tab for a minute, newest first and deduped', async () => {
+    const { store, tick } = setup();
+    await store.markFilled(1, 'c1');
+    await store.markFilled(1, 'c2');
+    await store.markFilled(1, 'c1');
+    await store.markFilled(2, 'c9');
+    expect(await store.recentFillSources(1)).toEqual(['c1', 'c2']);
+    expect(await store.recentFillSources(2)).toEqual(['c9']);
+    expect(await store.recentFillSources(3)).toEqual([]);
+    tick(10 * 1000);
+    await store.markFilled(1, 'c3');
+    tick(STORE_LIMITS.filledTtlMs - 5 * 1000);
+    expect(await store.recentFillSources(1)).toEqual(['c3']);
+    tick(10 * 1000);
+    expect(await store.recentFillSources(1)).toEqual([]);
+  });
+
+  it('survives a reload of the mirror and is swept with everything else', async () => {
+    const { area, store, tick } = setup();
+    await store.markFilled(1, 'c1');
+    await store.flush();
+    const again = new ContextStore(area, { now: () => 1_000_000 + 1000 });
+    expect(await again.recentFillSources(1)).toEqual(['c1']);
+    tick(2 * STORE_LIMITS.filledTtlMs);
+    await store.sweep();
+    await store.flush();
+    expect(area.data.filled).toEqual({});
+  });
+});

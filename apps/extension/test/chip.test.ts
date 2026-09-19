@@ -113,6 +113,37 @@ describe('chip', () => {
     expect(onDismiss).toHaveBeenCalledWith('timeout');
   });
 
+  it('reads `Fill "value"?` by default and takes a verb and a tail for interactions', () => {
+    expect(chip.text).toBe('Fill "Seven Shores Cafe"?');
+    const save = document.createElement('button');
+    onScreen(save);
+    document.body.append(save);
+    chip.show({ target: save, verb: 'Click', value: 'Save', onAccept, onDismiss });
+    expect(chip.text).toBe('Click "Save"?');
+    chip.show({ target: save, verb: 'Set', value: 'Volume', tail: ' to 40', onAccept, onDismiss });
+    expect(chip.text).toBe('Set "Volume" to 40?');
+    chip.show({ target: save, verb: 'Check', value: 'Vegetarian', onAccept, onDismiss });
+    expect(chip.text).toBe('Check "Vegetarian"?');
+    chip.showCorner({ label: 'Open in Google Maps', value: 'Seven Shores Cafe', onAccept, onDismiss });
+    expect(chip.text).toBe('Open in Google Maps: "Seven Shores Cafe"?');
+  });
+
+  it('accepts Tab from the field carat just filled and dismisses when the user types on in it', () => {
+    const save = document.createElement('button');
+    onScreen(save);
+    document.body.append(save);
+    chip.show({ target: save, verb: 'Click', value: 'Save', interceptFrom: other, onAccept, onDismiss });
+    other.focus();
+    other.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(onDismiss).toHaveBeenCalledWith('typed');
+    expect(chip.visible).toBe(false);
+
+    chip.show({ target: save, verb: 'Click', value: 'Save', interceptFrom: other, onAccept, onDismiss });
+    const e = key(other, 'Tab');
+    expect(e.defaultPrevented).toBe(true);
+    expect(onAccept).toHaveBeenCalledTimes(1);
+  });
+
   it('shows the truncated value with a Tab keycap', () => {
     const long = 'x'.repeat(60);
     chip.show({ target, value: long, onAccept, onDismiss });

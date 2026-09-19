@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { ActionSuggestion, ContextItem, FillSuggestion, NavSuggestion, Settings, Suggestion, SuggestRequest } from '@carat/shared';
+import type { ActionSuggestion, ContextItem, ElementDescriptor, FillSuggestion, InteractSuggestion, NavSuggestion, Settings, Suggestion, SuggestRequest } from '@carat/shared';
 import { DEFAULT_SETTINGS } from '@carat/shared';
 import type { Provider } from '@carat/providers';
 import { createProvider } from '@carat/providers';
@@ -12,6 +12,7 @@ import {
   fingerprintMatchesDescriptor,
   gate,
   handleFeedback,
+  hasWork,
   isExtensionPage,
   orchestrate,
   ownContext,
@@ -723,3 +724,134 @@ describe('orchestrate navigation', () => {
 });
 
 vi.stubGlobal('navigator', { language: 'en-CA' });
+
+const interact = (over: Partial<InteractSuggestion> = {}): InteractSuggestion => ({
+  kind: 'interact',
+  elementId: 'e0',
+  verb: 'click',
+  value: 'Save',
+  confidence: 0.85,
+  reason: 'r',
+  sourceContextId: 'c1',
+  ...over,
+});
+const calendarPage = { host: 'calendar.google.com', title: 'Calendar', path: '/calendar/u/0/r/eventedit' };
+const onCalendar = { tabId: 2, origin: 'https://calendar.google.com' };
+const elements: ElementDescriptor[] = [
+  { i: 'e0', r: 'button', nm: 'Save', p: 1 },
+  { i: 'e1', r: 'checkbox', nm: 'All day', st: 'off' },
+  { i: 'e2', r: 'slider', nm: 'Volume', v: '80', min: 0, max: 100, step: 1 },
+  { i: 'e3', r: 'button', nm: 'Delete event' },
+];
+
+describe('hasWork and gate for elements', () => {
+  const page = calendarPage;
+  it('counts a field, a control, or buttons after a fill; never buttons alone', () => {
+    expect(hasWork({ page, fields: [] })).toBe(false);
+    expect(hasWork({ page, fields: [], elements: [elements[0]!] })).toBe(false);
+    expect(hasWork({ page, fields: [], elements: [elements[0]!], filled: ['c1'] })).toBe(true);
+    expect(hasWork({ page, fields: [], elements: [elements[1]!] })).toBe(true);
+    expect(hasWork({ page, fields: [], elements: [elements[2]!] })).toBe(true);
+    expect(hasWork({ page, fields: [{ i: 'f0', t: 'input:text' }] })).toBe(true);
+  });
+
+  it('still needs fresh text from somewhere', () => {
+    const input = { page, fields: [], elements: [elements[1]!] };
+    expect(gate(input, [item()], enabled, onCalendar, NOW)).toBe(true);
+    expect(gate(input, [item({ lastSeenAt: NOW - 31 * MIN })], enabled, onCalendar, NOW)).toBe(false);
+  });
+});
+
+describe('orchestrate interactions', () => {
+  const input = { page: calendarPage, fields: [], elements };
+  const local: Settings = { ...DEFAULT_SETTINGS, provider: 'local', apiKey: '' };
+
+  it('offers the Save button only once carat filled a field on that tab, and remembers that for a minute', async () => {
+    const { store, ctxId, now, tick } = await seeded();
+    const deps = { store, settings: async () => local, now };
+    expect((await orchestrate(input, onCalendar, deps)).interactions).toEqual([]);
+
+    await handleFeedback({ fieldId: 'f0', fingerprint: 'input|text|||Add title|', contextId: ctxId, accepted: true, host: 'calendar.google.com' }, store, 2);
+    const res = await orchestrate(input, onCalendar, deps);
+    expect(res.interactions).toEqual([
+      {
+        kind: 'interact',
+        elementId: 'e0',
+        verb: 'click',
+        value: 'Save',
+        confidence: 0.75,
+        reason: expect.any(String),
+        sourceContextId: ctxId,
+        source: { host: 'discord.com', capturedAt: expect.any(Number) },
+      },
+    ]);
+    // Another tab's fill says nothing about this one.
+    expect((await orchestrate(input, { ...onCalendar, tabId: 5 }, deps)).interactions).toEqual([]);
+    tick(61 * 1000);
+    expect((await orchestrate(input, onCalendar, deps)).interactions).toEqual([]);
+  });
+
+  it('keeps only interactions that name a described element, fit its state and range, cite a real source, and are not destructive', async () => {
+    const { store, ctxId, now } = await seeded();
+    await handleFeedback({ fieldId: 'f0', fingerprint: 'input|text|||Add title|', contextId: ctxId, accepted: true, host: 'calendar.google.com' }, store, 2);
+    const remote = fakeProvider('openai', async () => [
+      interact({ sourceContextId: ctxId }),
+      interact({ sourceContextId: ctxId, elementId: 'e0', confidence: 0.9, reason: 'better' }),
+      interact({ sourceContextId: ctxId, elementId: 'e1', verb: 'uncheck', value: 'All day' }), // already off
+      interact({ sourceContextId: ctxId, elementId: 'e1', verb: 'check', value: 'All day', confidence: 0.5 }), // too weak
+      interact({ sourceContextId: ctxId, elementId: 'e2', verb: 'set', value: '140' }), // out of range
+      interact({ sourceContextId: ctxId, elementId: 'e2', verb: 'set', value: '40' }),
+      interact({ sourceContextId: 'nope', elementId: 'e2', verb: 'set', value: '30' }), // unknown source
+      interact({ sourceContextId: ctxId, elementId: 'e3', value: 'Delete event' }), // destructive
+      interact({ sourceContextId: ctxId, elementId: 'e9', value: 'Ghost' }), // not described
+      interact({ sourceContextId: ctxId, elementId: 'e0', verb: 'set', value: '1' }), // wrong verb for a button
+    ]);
+    const res = await orchestrate(input, onCalendar, { store, settings: async () => enabled, createProvider: () => remote, now });
+    expect(res.interactions.map((s) => [s.elementId, s.verb, s.value, s.reason])).toEqual([
+      ['e0', 'click', 'Save', 'better'],
+      ['e2', 'set', '40', 'r'],
+    ]);
+  });
+
+  it('never lets the model click a button on a page carat filled nothing on', async () => {
+    const { store, ctxId, now } = await seeded();
+    const remote = fakeProvider('openai', async () => [interact({ sourceContextId: ctxId }), interact({ sourceContextId: ctxId, elementId: 'e2', verb: 'set', value: '40' })]);
+    const res = await orchestrate(input, onCalendar, { store, settings: async () => enabled, createProvider: () => remote, now });
+    expect(res.interactions.map((s) => s.elementId)).toEqual(['e2']);
+  });
+
+  it('suppresses an element for 10 minutes after Esc and not at all after an accept', async () => {
+    const { store, ctxId, now, tick } = await seeded();
+    const remote = fakeProvider('openai', async () => [interact({ sourceContextId: ctxId, elementId: 'e2', verb: 'set', value: '40' })]);
+    const deps = { store, settings: async () => enabled, createProvider: () => remote, now };
+    expect((await orchestrate(input, onCalendar, deps)).interactions).toHaveLength(1);
+
+    await handleFeedback({ kind: 'interact', host: 'calendar.google.com', role: 'slider', name: 'VOLUME ', accepted: false }, store, 2);
+    expect((await orchestrate(input, onCalendar, deps)).interactions).toEqual([]);
+    tick(10 * MIN + 1);
+    // The Discord tab is still open and fresh; only the dismissal has aged out.
+    await store.upsertPage({ tabId: 1, url: 'https://discord.com/channels/1', title: 'Discord', text: 'alex: dinner at Seven Shores Cafe, Friday at 6?' });
+    expect((await orchestrate(input, onCalendar, deps)).interactions).toHaveLength(1);
+
+    await handleFeedback({ kind: 'interact', host: 'calendar.google.com', role: 'slider', name: 'Volume', accepted: true }, store, 2);
+    expect((await orchestrate(input, onCalendar, deps)).interactions).toHaveLength(1);
+    expect(await store.suppressedKeys()).toEqual([]);
+  });
+
+  it('caps interactions at two, one per element, best first', async () => {
+    const { store, ctxId, now } = await seeded();
+    await handleFeedback({ fieldId: 'f0', fingerprint: 'input|text|||Add title|', contextId: ctxId, accepted: true, host: 'calendar.google.com' }, store, 2);
+    const many = { ...input, elements: [...elements, { i: 'e4', r: 'checkbox' as const, nm: 'Vegetarian', st: 'off' as const }] };
+    const remote = fakeProvider('openai', async () => [
+      interact({ sourceContextId: ctxId, confidence: 0.8 }),
+      interact({ sourceContextId: ctxId, elementId: 'e1', verb: 'check', value: 'All day', confidence: 0.9 }),
+      interact({ sourceContextId: ctxId, elementId: 'e4', verb: 'check', value: 'Vegetarian', confidence: 0.95 }),
+      interact({ sourceContextId: ctxId, elementId: 'e4', verb: 'check', value: 'Vegetarian', confidence: 0.75 }),
+    ]);
+    const res = await orchestrate(many, onCalendar, { store, settings: async () => enabled, createProvider: () => remote, now });
+    expect(res.interactions.map((s) => [s.elementId, s.confidence])).toEqual([
+      ['e4', 0.95],
+      ['e1', 0.9],
+    ]);
+  });
+});

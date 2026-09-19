@@ -59,11 +59,11 @@ export default defineBackground(() => {
         ...(tabId !== undefined ? { onDiag: (d) => void diag.recordSuggest(tabId, d) } : {}),
       });
     } catch {
-      return { suggestions: [], navigation: [] };
+      return { suggestions: [], navigation: [], interactions: [] };
     }
   });
 
-  onMessage('feedback', ({ data }) => handleFeedback(data, store));
+  onMessage('feedback', ({ data, sender }) => handleFeedback(data, store, sender.tab?.id));
 
   // The only place carat ever opens or focuses a tab, and only in answer to a Tab press on a visible chip.
   onMessage('navigate', async ({ data, sender }) => {

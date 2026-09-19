@@ -34,7 +34,8 @@ export function describeSuggest(d: SuggestDiag, now: number = Date.now()): strin
     ? 'answer from cache'
     : (d.attempts ?? []).map(describeAttempt).join('; ') || 'no provider ran';
   const tabs = d.navigation ? `, ${d.navigation} tab ${d.navigation === 1 ? 'offer' : 'offers'}` : '';
-  return `${when}: ${outcome}, offered ${d.offered ?? 0}${tabs}`;
+  const controls = d.interactions ? `, ${d.interactions} ${d.interactions === 1 ? 'control' : 'controls'}` : '';
+  return `${when}: ${outcome}, offered ${d.offered ?? 0}${tabs}${controls}`;
 }
 
 function describeAttempt(a: ProviderAttempt): string {

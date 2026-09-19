@@ -32,6 +32,8 @@ export interface SuggestDiag {
   at: number;
   host: string;
   fields: number;
+  /** Interactive elements the page described alongside its fields. */
+  elements?: number;
   gate: GateVerdict;
   /** Set once the gate passed. */
   cached?: boolean;
@@ -40,6 +42,8 @@ export interface SuggestDiag {
   offered?: number;
   /** Tab offers (open or switch) handed over alongside them. */
   navigation?: number;
+  /** Element interactions (click, check, set, choose) handed over alongside them. */
+  interactions?: number;
 }
 
 export interface TabDiag {

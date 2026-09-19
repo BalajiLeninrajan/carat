@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { NavSuggestion, Suggestion } from '@carat/shared';
+import type { InteractSuggestion, NavSuggestion, Suggestion } from '@carat/shared';
 import { createChip, type Chip, type ChipShowOptions, type CornerShowOptions } from '../src/chip';
 import { CAPTURE_TIMING, SNAPSHOT_TIMING, startCapture, startSuggestions } from '../src/content';
 import type { ScriptContext } from '../src/content';
@@ -250,6 +250,7 @@ describe('content wiring', () => {
       hide: () => undefined,
       destroy: () => undefined,
       visible: false,
+      text: '',
     };
     startSuggestions(ctx, chip, document);
     await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
@@ -348,6 +349,7 @@ describe('navigation chip', () => {
       hide: () => undefined,
       destroy: () => undefined,
       visible: false,
+      text: '',
     };
     startSuggestions(ctx, chip, document);
     await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
@@ -417,5 +419,177 @@ describe('navigation chip', () => {
     await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.debounceMs);
     await flush();
     expect(calls('suggestRequest')).toHaveLength(2);
+  });
+});
+
+describe('interaction chip', () => {
+  let ctx: ReturnType<typeof fakeCtx>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    sent.mockReset();
+    sent.mockResolvedValue(undefined);
+    ctx = fakeCtx();
+    document.body.innerHTML = '';
+  });
+
+  afterEach(() => {
+    ctx.invalidate();
+    document.body.innerHTML = '';
+    vi.useRealTimers();
+  });
+
+  type Fields = Array<{ i: string; al?: string; v?: string }>;
+  type Elements = Array<{ i: string; nm: string; r: string }>;
+
+  function button(name: string, top: number): HTMLButtonElement {
+    const el = document.createElement('button');
+    el.textContent = name;
+    onScreen(el, top);
+    document.body.append(el);
+    return el;
+  }
+
+  function answer(fn: (fields: Fields, elements: Elements, filledBefore: boolean) => Partial<{ suggestions: Suggestion[]; interactions: InteractSuggestion[] }>) {
+    let filled = false;
+    sent.mockImplementation(async (type, data) => {
+      if (type === 'feedback' && (data as { accepted: boolean; kind?: string }).accepted && !(data as { kind?: string }).kind) filled = true;
+      if (type !== 'suggestRequest') return undefined;
+      const { fields, elements } = data as { fields: Fields; elements?: Elements };
+      return { suggestions: [], navigation: [], interactions: [], ...fn(fields, elements ?? [], filled) };
+    });
+  }
+
+  it('after the fills, offers the Save button on a fresh answer, takes Tab from the filled field, clicks once and reports it', async () => {
+    const title = field('Title', 100);
+    const save = button('Save', 200);
+    const clicks = vi.fn();
+    save.addEventListener('click', clicks);
+    answer((fields, elements, filled) => {
+      const f = fields.find((x) => x.al === 'Title' && !x.v);
+      const e = elements.find((x) => x.nm === 'Save');
+      if (f) return { suggestions: [{ kind: 'fill', fieldId: f.i, value: 'Dinner', confidence: 0.9, reason: '', sourceContextId: 'c1' }] };
+      if (filled && e) return { interactions: [{ kind: 'interact', elementId: e.i, verb: 'click', value: 'Save', confidence: 0.85, reason: '', sourceContextId: 'c1' }] };
+      return {};
+    });
+    const chip = createChip(document);
+    startSuggestions(ctx, chip, document);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
+    await flush();
+    expect(chip.text).toBe('Fill "Dinner"?');
+    expect(calls('suggestRequest')[0]?.elements).toEqual([expect.objectContaining({ i: 'e0', r: 'button', nm: 'Save' })]);
+
+    title.focus();
+    tab();
+    expect(title.value).toBe('Dinner');
+    expect(chip.visible).toBe(false);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.debounceMs);
+    await flush();
+    expect(calls('suggestRequest')).toHaveLength(2);
+    expect(chip.text).toBe('Click "Save"?');
+    expect(document.activeElement).toBe(title);
+
+    const e = tab();
+    expect(e.defaultPrevented).toBe(true);
+    expect(clicks).toHaveBeenCalledTimes(1);
+    expect(calls('feedback').at(-1)).toEqual({ kind: 'interact', host: location.host, role: 'button', name: 'Save', accepted: true });
+    expect(chip.visible).toBe(false);
+
+    // The same answer comes back from the cache; the button is done for this page load.
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.debounceMs);
+    await flush();
+    expect(chip.visible).toBe(false);
+    expect(clicks).toHaveBeenCalledTimes(1);
+  });
+
+  it('checks a box on Tab, sets a slider with the value in the label, and never re-offers a box already on', async () => {
+    document.body.innerHTML = `
+      <label><input type="checkbox" id="veg"> Vegetarian</label>
+      <label for="vol">Volume</label><input type="range" id="vol" min="0" max="100" value="80">
+    `;
+    const veg = document.getElementById('veg') as HTMLInputElement;
+    const vol = document.getElementById('vol') as HTMLInputElement;
+    onScreen(veg, 100);
+    onScreen(vol, 200);
+    answer((_fields, elements) => ({
+      interactions: elements.flatMap((e): InteractSuggestion[] => {
+        const base = { kind: 'interact' as const, elementId: e.i, confidence: 0.8, reason: '', sourceContextId: 'c1' };
+        if (e.nm === 'Vegetarian') return [{ ...base, verb: 'check', value: 'Vegetarian' }];
+        if (e.nm === 'Volume') return [{ ...base, verb: 'set', value: '40' }];
+        return [];
+      }),
+    }));
+    const chip = createChip(document);
+    startSuggestions(ctx, chip, document);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
+    await flush();
+    expect(chip.text).toBe('Check "Vegetarian"?');
+    tab();
+    expect(veg.checked).toBe(true);
+    expect(chip.visible).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.debounceMs);
+    await flush();
+    expect(chip.text).toBe('Set "Volume" to 40?');
+    tab();
+    expect(vol.value).toBe('40');
+    expect(calls('feedback').map((f) => [f.name, f.accepted])).toEqual([
+      ['Vegetarian', true],
+      ['Volume', true],
+    ]);
+  });
+
+  it('reports Esc as a dismissal, performs nothing, and drops the offer from the cached answer', async () => {
+    const notes = field('Notes', 300);
+    const save = button('Save', 100);
+    const clicks = vi.fn();
+    save.addEventListener('click', clicks);
+    answer((_f, elements) => ({
+      interactions: elements.map((e) => ({ kind: 'interact' as const, elementId: e.i, verb: 'click' as const, value: 'Save', confidence: 0.85, reason: '', sourceContextId: 'c1' })),
+    }));
+    const chip = createChip(document);
+    startSuggestions(ctx, chip, document);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
+    await flush();
+    expect(chip.visible).toBe(true);
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    expect(clicks).not.toHaveBeenCalled();
+    expect(calls('feedback')).toEqual([{ kind: 'interact', host: location.host, role: 'button', name: 'Save', accepted: false }]);
+
+    // Focusing a field re-presents the cached answer, minus the dismissed offer, without asking again.
+    notes.focus();
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.debounceMs);
+    await flush();
+    expect(chip.visible).toBe(false);
+    expect(calls('suggestRequest')).toHaveLength(1);
+  });
+
+  it('prefers a fill over an interaction and an interaction over the corner chip', async () => {
+    const title = field('Title', 100);
+    button('Save', 200);
+    answer((fields, elements) => ({
+      suggestions: fields.filter((f) => !f.v).map((f) => ({ kind: 'fill' as const, fieldId: f.i, value: 'Dinner', confidence: 0.9, reason: '', sourceContextId: 'c1' })),
+      interactions: elements.map((e) => ({ kind: 'interact' as const, elementId: e.i, verb: 'click' as const, value: 'Save', confidence: 0.85, reason: '', sourceContextId: 'c1' })),
+    }));
+    sent.mockImplementation(async (type, data) => {
+      if (type !== 'suggestRequest') return undefined;
+      const { fields, elements } = data as { fields: Fields; elements?: Elements };
+      return {
+        suggestions: fields.filter((f) => !f.v).map((f) => ({ kind: 'fill', fieldId: f.i, value: 'Dinner', confidence: 0.9, reason: '', sourceContextId: 'c1' })),
+        interactions: (elements ?? []).map((e) => ({ kind: 'interact', elementId: e.i, verb: 'click', value: 'Save', confidence: 0.85, reason: '', sourceContextId: 'c1' })),
+        navigation: [nav],
+      };
+    });
+    const chip = createChip(document);
+    startSuggestions(ctx, chip, document);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
+    await flush();
+    expect(chip.text).toBe('Fill "Dinner"?');
+    title.focus();
+    tab();
+    // The fill exhausted; the same answer's interaction takes the chip, not the corner.
+    expect(chip.text).toBe('Click "Save"?');
+    expect((document.querySelector('[data-carat-chip]') as HTMLElement).style.bottom).toBe('');
+    expect(calls('navigate')).toEqual([]);
   });
 });
