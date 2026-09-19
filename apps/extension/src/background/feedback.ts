@@ -25,7 +25,7 @@ export interface FeedbackInput {
 }
 
 export interface FeedbackSinks {
-  /** A money control accepted, or a fill left half done: the popup and the later goal layer read these. */
+  /** An armed control acted on, or a fill left half done: the popup and the later goal layer read these. */
   onPerform?: (tabId: number, entry: PerformDiag) => void;
   /** The per-tab timeline, so the next request knows what just happened here. */
   onHistory?: (tabId: number | undefined, line: string) => void;
@@ -47,7 +47,7 @@ export async function handleFeedback(data: FeedbackInput, store: ContextStore, t
   }
   sinks.onHistory?.(tabId, clause);
   if (tabId === undefined) return;
-  if (data.irreversible) sinks.onPerform?.(tabId, { at: Date.now(), host: data.host, kind: 'money', name: data.name || data.label, outcome: 'done' });
+  if (data.irreversible) sinks.onPerform?.(tabId, { at: Date.now(), host: data.host, kind: 'armed', name: data.name || data.label, outcome: 'done' });
   else if (data.outcome === 'partial') sinks.onPerform?.(tabId, { at: Date.now(), host: data.host, kind: 'fill', name: data.name, outcome: 'partial' });
 }
 

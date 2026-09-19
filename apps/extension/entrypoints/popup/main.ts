@@ -53,7 +53,7 @@ function renderDiag(diag: TabDiag | null): void {
   // Only says anything once a screenshot cue has come from this tab; most tabs never send one.
   diagVision.hidden = !diag?.vision;
   diagVision.textContent = diag?.vision ? describeVision(diag.vision, now) : '';
-  // The last money control pressed, or fill left half done, on this tab.
+  // The last armed control pressed, or fill left half done, on this tab.
   const perform = diag?.performs?.at(-1);
   diagPerform.hidden = !perform;
   diagPerform.textContent = perform ? describePerform(perform, now) : '';

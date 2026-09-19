@@ -78,8 +78,8 @@ describe('describeSuggest', () => {
   });
 
   it('says a chip was refused, and when one asks for a second Tab', () => {
-    expect(describeSuggest({ ...base, gate: 'ok', source: 'model', ms: 9, refused: 'money control, payments are off' }, 1000)).toContain(
-      'refused: money control, payments are off',
+    expect(describeSuggest({ ...base, gate: 'ok', source: 'model', ms: 9, refused: 'the control is disabled' }, 1000)).toContain(
+      'refused: the control is disabled',
     );
     expect(describeSuggest({ ...base, gate: 'ok', source: 'model', ms: 9, kind: 'click', label: 'Send reply', irreversible: true }, 1000)).toContain(
       'asks for a second Tab',
@@ -108,9 +108,9 @@ describe('describeSuggest', () => {
 });
 
 describe('describePerform', () => {
-  it('names the money control that was pressed, and the fill that stopped short', () => {
-    expect(describePerform({ at: NOW - 12_000, host: 'aircanada.com', kind: 'money', name: 'Pay $312.40', outcome: 'done' }, NOW)).toBe(
-      'pressed "Pay $312.40" on aircanada.com 12s ago (Enter)',
+  it('names the armed control that was pressed, and the fill that stopped short', () => {
+    expect(describePerform({ at: NOW - 12_000, host: 'aircanada.com', kind: 'armed', name: 'Pay $312.40', outcome: 'done' }, NOW)).toBe(
+      'pressed "Pay $312.40" on aircanada.com 12s ago (armed, second Tab)',
     );
     expect(describePerform({ at: NOW, host: 'aircanada.com', kind: 'fill', name: 'f2', outcome: 'partial' }, NOW)).toBe(
       'filled f2 on aircanada.com just now, pick left undone',

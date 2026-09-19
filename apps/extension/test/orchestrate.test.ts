@@ -157,7 +157,7 @@ describe('validation is safety only', () => {
     expect(validate(action({ target: 4 }), request({ controls: disabled }), s)).toBeNull();
   });
 
-  it('flags a money control instead of refusing it', () => {
+  it('flags a control that takes money like any other irreversible one, and refuses nothing', () => {
     const pay = action({ target: 3, label: 'Click "Pay $312.40"' });
     const checked = validate(pay, request(), s);
     expect(checked).not.toBeNull();
