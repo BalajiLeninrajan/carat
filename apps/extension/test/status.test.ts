@@ -71,6 +71,10 @@ describe('status line element', () => {
     expect(host).not.toBeNull();
     expect(host!.style.display).toBe('block');
     expect(host!.style.pointerEvents).toBe('none');
+    // Bottom-left: the tab-offer banner owns the bottom centre and the chip may sit anywhere else.
+    expect(host!.style.left).toBe('12px');
+    expect(host!.style.right).toBe('');
+    expect(host!.style.bottom).toBe('12px');
     expect(line.visible).toBe(true);
     line.update({ show: false, running: true, provider: 'openai', model: 'm' });
     expect(host!.style.display).toBe('none');

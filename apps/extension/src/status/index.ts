@@ -19,14 +19,15 @@ const REASON_TEXT: Record<NonNullable<StatusInfo['reason']>, string> = {
 };
 
 /**
- * A small pill in the bottom-right corner. It never takes pointer events, so
+ * A small pill in the bottom-left corner, clear of the tab-offer banner at the bottom centre.
+ * It never takes pointer events, so
  * it cannot get between the user and the page; it only reports.
  */
 export function createStatusLine(doc: Document = document): StatusLine {
   const host = doc.createElement('div');
   host.setAttribute(HOST_ATTR, '');
   host.style.cssText =
-    'all:initial;position:fixed;right:12px;bottom:12px;z-index:2147483646;display:none;pointer-events:none;';
+    'all:initial;position:fixed;left:12px;bottom:12px;z-index:2147483646;display:none;pointer-events:none;';
   const root = host.attachShadow({ mode: 'closed' });
   const style = doc.createElement('style');
   style.textContent = STATUS_CSS;
