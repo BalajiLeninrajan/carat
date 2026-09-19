@@ -91,4 +91,4 @@ pnpm test
 pnpm eval --provider local
 ```
 
-`pnpm eval` runs the twenty-three fixtures in `packages/providers/eval/fixtures` against a provider and prints pass/fail with latency. Pass `--provider openai` with `OPENAI_API_KEY` set in the environment to run them against the model instead of the regex fallback. `--eagerness conservative|balanced|eager` picks the level (default eager); a few fixtures expect a chip at eager only, and two negatives are allowed a weak chip there, printed as WEAK. See the fixtures README for the two keys that express this.
+`pnpm eval` runs the twenty-five fixtures in `packages/providers/eval/fixtures` against a provider and prints pass/fail with latency. Pass `--provider openai` with `OPENAI_API_KEY` set in the environment to run them against the model instead of the regex fallback. `--eagerness conservative|balanced|eager` picks the level (default eager); a few fixtures expect a chip at eager only, and two negatives are allowed a weak chip there, printed as WEAK. See the fixtures README for the two keys that express this.

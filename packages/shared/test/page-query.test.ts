@@ -13,7 +13,7 @@ import {
   registrableDomain,
 } from '../src/page-query';
 import { EAGERNESS } from '../src/eagerness';
-import { isDestructiveElement } from '../src/destructive';
+import { isDestructiveElement, isMoneyName } from '../src/destructive';
 
 const serp = { host: 'www.google.com', title: 'doordash - Google Search', path: '/search' };
 const doordash: ElementDescriptor = { i: 'e1', r: 'link', nm: 'Order Now | Quick and Easy Food Delivery', h: 'doordash.com' };
@@ -124,8 +124,12 @@ describe('firstMatchingLink and isSiteLink', () => {
     expect(isDestructiveElement({ r: 'link', nm: 'Order Now', h: 'doordash.com' })).toBe(true);
     expect(isDestructiveElement({ r: 'link', nm: 'Sign out', h: 'doordash.com' })).toBe(true);
     expect(isDestructiveElement({ r: 'link', nm: 'Delete my account now', h: 'doordash.com' })).toBe(true);
-    expect(isDestructiveElement({ r: 'link', nm: 'Order Now | Quick and Easy Food Delivery' })).toBe(true); // no site: it acts as a button
-    expect(isDestructiveElement({ r: 'button', nm: 'Order Now | Quick and Easy Food Delivery' })).toBe(true);
+    // Without a destination it is a control, and "order now" moves money rather than destroying anything:
+    // the payments setting and the Enter chip have it, not this list.
+    expect(isDestructiveElement({ r: 'link', nm: 'Order Now | Quick and Easy Food Delivery' })).toBe(false);
+    expect(isMoneyName('Order Now | Quick and Easy Food Delivery')).toBe(true);
+    expect(isDestructiveElement({ r: 'button', nm: 'Order Now' })).toBe(false);
+    expect(isMoneyName('Order Now')).toBe(true);
     expect(isDestructiveElement({ r: 'button', nm: 'Save' })).toBe(false);
   });
 

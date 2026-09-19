@@ -432,7 +432,7 @@ describe('enumerateLinks', () => {
       <a href="https://translate.google.com/">Translate</a>
     `;
     for (const el of document.querySelectorAll('a,h2,h3,[role]')) lay(el);
-    const { descriptors, registry } = enumerateElements(document, window, { host: 'www.google.com', path: '/search' });
+    const { descriptors, registry } = enumerateElements(document, window, { site: { host: 'www.google.com', path: '/search' } });
     expect(links(descriptors)).toEqual([
       { i: 'e0', r: 'link', nm: 'Order Now | Quick and Easy Food Delivery', h: 'doordash.com' },
       { i: 'e1', r: 'link', nm: 'DoorDash - Wikipedia', h: 'wikipedia.org' },
@@ -453,7 +453,7 @@ describe('enumerateLinks', () => {
     document.body.innerHTML = '<a href="https://www.doordash.com/"><h3>Order Now</h3></a>';
     layAll();
     lay(document.querySelector('h3')!);
-    expect(enumerateElements(document, window, { host: 'www.google.com', path: '/search' }).descriptors).toEqual([]);
+    expect(enumerateElements(document, window, { site: { host: 'www.google.com', path: '/search' } }).descriptors).toEqual([]);
   });
 });
 

@@ -1492,13 +1492,21 @@ describe('orchestrate page query', () => {
     interact({ elementId: 'e1', value: 'Order Now | Quick and Easy Food Delivery', sourceContextId: 'page', confidence: 0.7, ...over });
 
   it('counts a real link on a page with a query as work, and lets the request through with nothing read', () => {
+    // The results without the page's own Search button, which the eager click rule counts on its own.
+    const results = { ...serp, elements: [links[1]!, links[2]!, links[3]!, links[4]!] };
+    const noQuery = { ...results, page: { ...serpPage, query: undefined } };
     expect(hasWork(serp)).toBe(true);
-    expect(hasWork({ ...serp, page: { ...serpPage, query: undefined } })).toBe(false);
-    expect(hasWork({ ...serp, elements: [links[0]!, links[4]!] })).toBe(false);
+    expect(hasWork(results)).toBe(true);
+    expect(hasWork(noQuery)).toBe(false);
+    expect(hasWork({ ...results, elements: [links[4]!] })).toBe(false);
     expect(hasWork({ page: serpPage, fields: [{ i: 'f0', t: 'textarea', nm: 'q', v: 'doordash', f: 1 }], elements: [links[1]!] })).toBe(true);
+    // A primary Search button is work at eager whether or not a link answers the query, and not below it.
+    const buttons = { ...serp, page: { ...serpPage, query: undefined }, elements: [links[0]!, links[4]!] };
+    expect(hasWork(buttons)).toBe(true);
+    expect(hasWork(buttons, 'balanced')).toBe(false);
     expect(explainGate(serp, [], enabled, onSerp, NOW)).toBe('ok');
-    expect(explainGate({ ...serp, page: { ...serpPage, query: undefined } }, [], enabled, onSerp, NOW)).toBe('no-fields');
-    expect(explainGate({ ...serp, page: { ...serpPage, query: undefined } }, [item()], enabled, onSerp, NOW)).toBe('no-fields');
+    expect(explainGate(noQuery, [], enabled, onSerp, NOW)).toBe('no-fields');
+    expect(explainGate(noQuery, [item()], enabled, onSerp, NOW)).toBe('no-fields');
     expect(explainGate(serp, [], { ...enabled, disabledHosts: ['www.google.com'] }, onSerp, NOW)).toBe('site-off');
   });
 

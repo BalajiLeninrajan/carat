@@ -59,13 +59,15 @@ const ACTION_LINK_WORDS = 4;
 
 /**
  * Whether a described element must never get a chip. A control is judged by
- * its name alone. A real link (role `link` with a destination site) is a
- * page title as often as an action label, and following "Order Now | Quick
- * and Easy Food Delivery" orders nothing, so only a short link with a
- * destructive name is refused.
+ * its name alone, and a money name is not refused here: the payments setting
+ * and the Enter chip have it. A real link (role `link` with a destination
+ * site) is a page title as often as an action label, and following "Order Now
+ * | Quick and Easy Food Delivery" orders nothing, so only a short link is
+ * refused. A short one is refused off either list, since no link carries the
+ * `m: 1` flag that puts a control behind Enter.
  */
 export function isDestructiveElement(e: { r: string; nm: string; h?: string }): boolean {
-  if (!isDestructiveName(e.nm)) return false;
-  if (e.r !== 'link' || !e.h) return true;
-  return e.nm.trim().split(/\s+/).length <= ACTION_LINK_WORDS;
+  if (e.r !== 'link' || !e.h) return isDestructiveName(e.nm);
+  if (e.nm.trim().split(/\s+/).length > ACTION_LINK_WORDS) return false;
+  return isDestructiveName(e.nm) || isMoneyName(e.nm);
 }
