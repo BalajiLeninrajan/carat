@@ -19,7 +19,17 @@ pnpm install
 pnpm build
 ```
 
-Then in Chrome open `chrome://extensions`, turn on developer mode, choose "Load unpacked", and pick `apps/extension/.output/chrome-mv3`. Open the extension's options page and paste an OpenAI key (or pick the `local` provider to run with no key and no network). The popup shows what Carat currently knows and has a Clear button.
+Then in Chrome open `chrome://extensions`, turn on developer mode, choose "Load unpacked", and pick `apps/extension/.output/chrome-mv3`. Open the extension's options page and paste an OpenAI key (or pick the `local` provider to run with no key and no network).
+
+The chip's second line says where the value came from ("from discord.com · 2m ago"); hovering shows the provider's reason.
+
+The popup shows what Carat currently knows and a few controls:
+
+- An "On for <host>" switch for the tab it was opened over. Off means Carat neither reads that site nor offers chips on it. Hosts match exactly, so switching off `www.google.com` leaves `calendar.google.com` alone.
+- Pin. While pinned nothing new is read and nothing expires, so a stray tab cannot change what Carat knows mid-demo. Clear also unpins.
+- Two debug lines for the current tab: what happened to its last capture, and how its last suggestion request went (which check stopped it, or each provider attempt with latency and error, or a cache hit).
+
+`Alt+Shift+C` asks for a suggestion on the current page right now, past the answer cache and past anything you dismissed with Esc. Change the key at `chrome://extensions/shortcuts`.
 
 ## Tests and eval
 
