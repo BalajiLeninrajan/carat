@@ -6,12 +6,15 @@ import { ContextStore, ShotStore, createSettingsStore, isSiteOff, parseLocation 
 import {
   DiagLog,
   HistoryStore,
+  KEEP_WARM_ALARM,
   RefineQueue,
   chromeTabsApi,
   clearActionCache,
   clearKnown,
+  createKeepWarm,
   createNotes,
   createVisionPipeline,
+  createWarmer,
   describeStatus,
   describedTabs,
   getKnown,
@@ -49,6 +52,22 @@ export default defineBackground(() => {
       return provider ? provider.distill(text, host, signal) : [];
     },
     pinned: () => store.isPinned(),
+  });
+  // Chrome commits a navigation seconds before the content script has an outline;
+  // everything in front of the outline is already known, so it goes to the model now.
+  const warmer = createWarmer({
+    settings: () => settings.get(),
+    notes: (tabId) => notes.top({ tabId }),
+    history: (tabId, at) => history.lines(tabId, at),
+    tabs: (tabId) => describedTabs(tabId),
+  });
+  warmer.attach(chrome.webNavigation);
+  chrome.tabs.onRemoved.addListener((tabId) => warmer.forget(tabId));
+  // While there is anything recent to answer with, a tick keeps the worker on its feet.
+  const keepWarm = createKeepWarm({ alarms: chrome.alarms, area: chrome.storage.session });
+  // A navigation is where fresh material comes from, so it is also where the tick starts.
+  chrome.webNavigation.onCommitted.addListener((d) => {
+    if (d.frameId === 0) void keepWarm.check();
   });
   const vision = createVisionPipeline({
     store,
@@ -101,6 +120,7 @@ export default defineBackground(() => {
         notes: { lines: async () => notes.top({ tabId }) },
         tabs: () => describedTabs(tabId),
         refine,
+        warmed: (id, req) => warmer.warmed(id, req),
         ...(tabId !== undefined ? { onDiag: (d) => void diag.recordSuggest(tabId, d) } : {}),
       });
     } catch {
@@ -178,12 +198,21 @@ export default defineBackground(() => {
   // Every minute rather than five: a screenshot must not outlive its three-minute TTL by much.
   void chrome.alarms.create(SWEEP_ALARM, { periodInMinutes: 1 });
   chrome.alarms.onAlarm.addListener((alarm) => {
+    // Waking for this is the keep-warm tick's whole purpose; it also decides whether to keep ticking.
+    if (alarm.name === KEEP_WARM_ALARM) {
+      void keepWarm.onTick();
+      return;
+    }
     if (alarm.name !== SWEEP_ALARM) return;
     void store.sweep();
     void shots.sweep();
     void history.sweep();
     void notes.sweep();
+    // What the sweep just aged out may have been the last reason to stay up.
+    void keepWarm.check();
   });
+
+  void keepWarm.check();
 });
 
 function screenApi(): ScreenApi {
