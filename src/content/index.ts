@@ -252,11 +252,25 @@ function remaining(g: GhostState): string {
   return g.text.slice(g.consumed);
 }
 
+/**
+ * Is the caret collapsed at the end of the field? email and number inputs do
+ * not expose the selection API at all (selectionStart is null); for those,
+ * assume it is, since typing there appends.
+ */
+function caretAtEnd(f: TextField): boolean {
+  try {
+    if (f.selectionStart == null) return true;
+    return f.selectionStart === f.value.length && f.selectionEnd === f.value.length;
+  } catch {
+    return true;
+  }
+}
+
 function renderGhost(): void {
   const g = ghostState;
   if (!g) return ghost.hide();
   const f = g.el;
-  const atEnd = f.selectionStart === f.value.length && f.selectionEnd === f.value.length;
+  const atEnd = caretAtEnd(f);
   const intact = f.value === g.base + g.text.slice(0, g.consumed);
   if (asTextField(deepActiveElement()) !== f || !atEnd || !intact || !remaining(g)) return ghost.hide();
   ghost.show(f, remaining(g));
@@ -399,13 +413,88 @@ function acceptCurrent(): boolean {
 }
 
 /**
+ * Rich-text editors (contenteditable) cannot show ghost text, so the value,
+ * already visible on the chip, goes straight in at the end of the editor.
+ */
+function fillEditable(s: Suggestion): boolean {
+  const el = s.el as HTMLElement;
+  const editable = el.isContentEditable ? el : (el.querySelector?.("[contenteditable]:not([contenteditable=false])") as HTMLElement | null);
+  if (!editable?.isContentEditable) return false;
+  clearSuggestion();
+  editable.focus();
+  const sel = getSelection();
+  if (sel) {
+    const range = document.createRange();
+    range.selectNodeContents(editable);
+    range.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+  if (s.value) document.execCommand("insertText", false, s.value);
+  log(`filled ${describe(editable)}`);
+  schedule("accept");
+  return true;
+}
+
+/**
  * "fill": jump to the field and offer the value as ghost text, so accepting
  * it is one more tap (and the user sees it before it goes in). Returns false
  * for targets that are not plain text fields; the worker focuses those.
  */
+const DATE_INPUT_TYPES = new Set(["date", "datetime-local", "month", "time", "week"]);
+
+/**
+ * The model writes dates the way people do ("March 3", "3/14/2027 5pm").
+ * Convert to what <input type=date|datetime-local|month|time> wants. A date
+ * with no year means its next occurrence.
+ */
+function toInputValue(type: string, text: string): string | null {
+  if (type === "time") {
+    const m = /(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i.exec(text);
+    if (!m) return null;
+    let h = Number(m[1]) % 24;
+    if (m[3]?.toLowerCase() === "pm" && h < 12) h += 12;
+    if (m[3]?.toLowerCase() === "am" && h === 12) h = 0;
+    return `${String(h).padStart(2, "0")}:${m[2] ?? "00"}`;
+  }
+  if (/^\d{4}-\d{2}(-\d{2})?(T\d{2}:\d{2})?$/.test(text)) return text;
+  const d = new Date(text);
+  if (isNaN(d.getTime())) return null;
+  if (!/\b\d{4}\b/.test(text)) {
+    const today = new Date();
+    d.setFullYear(today.getFullYear());
+    if (d < new Date(today.getFullYear(), today.getMonth(), today.getDate())) d.setFullYear(today.getFullYear() + 1);
+  }
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const ymd = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  if (type === "date") return ymd;
+  if (type === "month") return ymd.slice(0, 7);
+  if (type === "datetime-local") return `${ymd}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return null; // week: rare enough to leave to the user
+}
+
+/** Date/time inputs cannot show ghost text either: set the value directly. */
+function fillDateInput(s: Suggestion): boolean {
+  const el = s.el;
+  if (!(el instanceof HTMLInputElement) || !DATE_INPUT_TYPES.has(el.type)) return false;
+  clearSuggestion();
+  el.focus();
+  const value = toInputValue(el.type, s.value);
+  if (value) {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(el, value);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+    log(`set ${describe(el)} to ${value}`);
+  } else {
+    log(`jumped to ${describe(el)}`);
+  }
+  schedule("accept");
+  return true;
+}
+
 function fillLocally(s: Suggestion): boolean {
   const f = asTextField(s.el);
-  if (!f) return false;
+  if (!f) return fillDateInput(s) || fillEditable(s);
   clearSuggestion();
   f.focus(); // fires focusin, which counts as activity: set the ghost up after it
   try {

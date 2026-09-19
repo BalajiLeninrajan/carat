@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8" /><title>Fill test</title>
+<style>body{font:15px system-ui;margin:40px} label{display:block;margin:14px 0 4px;font-weight:600} input,textarea{width:420px;padding:8px;font:inherit}</style>
+</head>
+<body>
+  <h1>Fill test</h1>
+  <label for="title">Title</label><input id="title" type="text" />
+  <label for="email">Email</label><input id="email" type="email" />
+  <label for="desc">Description</label><textarea id="desc" rows="4"></textarea>
+  <label for="prefilled">Prefilled</label><input id="prefilled" type="text" value="Hel" />
+  <label id="notes-label">Notes (rich editor)</label>
+  <div id="notes" role="textbox" aria-multiline="true" aria-labelledby="notes-label" contenteditable="true" style="width:420px;min-height:60px;border:1px solid #999;padding:8px"></div>
+  <label for="when">Date</label><input id="when" type="date" />
+  <label for="at">Time</label><input id="at" type="time" />
+  <button id="other">Other button</button>
+</body>
+</html>
