@@ -701,6 +701,70 @@ describe('orchestrate smart path', () => {
   });
 });
 
+describe('orchestrate smart path over the whole answer', () => {
+  it('merges interactions per element, leaves tab offers as the fast pass made them, and never counts a tab offer as sure', async () => {
+    const { store, ctxId, now } = await seeded();
+    await store.upsertPage({ tabId: 2, url: 'https://calendar.google.com/calendar/u/0/r/eventedit', title: 'Calendar', text: 'dinner at Seven Shores Cafe, Friday at 6? add it to the calendar' });
+    await handleFeedback({ fieldId: 'f0', fingerprint: 'input|text|||Add title|', contextId: ctxId, accepted: true, host: 'calendar.google.com' }, store, 2);
+    const ownId = (await store.items()).find((i) => i.tabId === 2)!.id;
+    const fast = fakeProvider('openai', async () => [
+      interact({ sourceContextId: ctxId, confidence: 0.75 }),
+      action({ sourceContextId: ownId, confidence: 0.95 }),
+    ]);
+    const smart = fakeProvider('openai', async () => [
+      interact({ sourceContextId: ctxId, confidence: 0.9, reason: 'surer' }),
+      interact({ sourceContextId: ctxId, elementId: 'e1', verb: 'check', value: 'All day', confidence: 0.8 }),
+      action({ sourceContextId: ownId, intent: 'calendar', value: 'Something else', confidence: 0.99 }),
+    ]);
+    const refine = new RefineQueue(() => undefined);
+    const input = { page: calendarPage, fields: [], elements };
+    const res = await orchestrate(input, onCalendar, {
+      store,
+      settings: async () => smartOn,
+      createProvider: () => fast,
+      createSmartProvider: () => smart,
+      refine,
+      vision: idle,
+      now,
+      tabs: async () => [],
+    });
+    expect(res.interactions.map((i) => [i.elementId, i.confidence])).toEqual([['e0', 0.75]]);
+    expect(res.navigation.map((n) => n.intent)).toEqual(['maps']);
+    expect(typeof res.ticket).toBe('string');
+
+    const out = await refine.claim(res.ticket!, onCalendar.tabId);
+    expect(out.suggestions).toEqual([]);
+    expect(out.interactions.map((i) => [i.elementId, i.verb, i.confidence, i.reason])).toEqual([
+      ['e0', 'click', 0.9, 'surer'],
+      ['e1', 'check', 0.8, 'r'],
+    ]);
+    // The merged answer is what the cache now holds, tab offer included and unchanged.
+    const again = await orchestrate(input, onCalendar, { store, settings: async () => smartOn, createProvider: () => fast, now, tabs: async () => [] });
+    expect(again.interactions.map((i) => [i.elementId, i.confidence])).toEqual([['e0', 0.9], ['e1', 0.8]]);
+    expect(again.navigation.map((n) => [n.intent, n.value])).toEqual([['maps', 'Seven Shores Cafe']]);
+    expect(fast.calls).toBe(1);
+  });
+
+  it('feeds a vision item to the fast path like page text, and counts it as the tab\'s own text for actions', async () => {
+    const { store, now } = await seeded();
+    await store.upsertVision({ tabId: 1, url: 'https://discord.com/channels/1', title: 'Discord', text: 'Discord · discord.com alex: dinner at Seven Shores Cafe, Friday at 6?' });
+    const items = await store.items();
+    const vision = items.find((i) => i.kind === 'vision')!;
+    expect(gate(maps, [vision], enabled, requester, NOW)).toBe(true);
+    expect(scoreAndPickContext([vision], requester, NOW).map((c) => c.kind)).toEqual(['vision']);
+    expect(ownContext([vision], { tabId: 1, origin: 'https://discord.com' }, NOW).map((c) => c.id)).toEqual([vision.id]);
+
+    const seen: SuggestRequest[] = [];
+    const fast = fakeProvider('openai', async (req) => {
+      seen.push(req);
+      return [suggestion({ sourceContextId: vision.id })];
+    });
+    const res = await orchestrate(maps, requester, { store, settings: async () => enabled, createProvider: () => fast, now });
+    expect(res.suggestions.map((s) => [s.value, s.source?.host])).toEqual([['Seven Shores Cafe', 'discord.com']]);
+    expect(seen[0]!.context.map((c) => c.kind).sort()).toEqual(['page', 'vision']);
+  });
+});
+
 describe('trusted senders', () => {
   const ext = 'chrome-extension://abcdefgh';
 

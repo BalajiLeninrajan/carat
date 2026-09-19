@@ -102,6 +102,53 @@ describe('vision pipeline', () => {
     }
   });
 
+  it('takes no picture of a site the user switched off, or while the store is pinned', async () => {
+    const off = pipeline({ settings: async () => ({ ...on, disabledHosts: ['discord.com'] }) });
+    await off.vision.handle(cue(), 1);
+    expect(off.tabs.captures).toBe(0);
+
+    const pinned = pipeline();
+    await pinned.store.pin();
+    await pinned.vision.handle(cue(), 1);
+    expect(pinned.tabs.captures).toBe(0);
+    expect(await pinned.shots.live()).toEqual([]);
+    // A picture taken before the pin is not read into the store either.
+    await pinned.store.unpin();
+    await pinned.vision.handle(cue(), 1);
+    await pinned.store.pin();
+    await pinned.vision.handle(cue({ action: 'leaving' }), 1);
+    await pinned.vision.settled();
+    expect(pinned.transcribe).not.toHaveBeenCalled();
+    expect(await pinned.store.items()).toEqual([]);
+  });
+
+  it('reports what became of each cue, per tab, for the popup', async () => {
+    const seen: Array<[number, string]> = [];
+    const { vision } = pipeline({ onDiag: (tabId, d) => seen.push([tabId, d.verdict]) });
+    await vision.handle(cue(), 1);
+    await vision.handle(cue(), 9);
+    await vision.handle(cue({ url: 'https://app.chase.com/x' }), 1);
+    await vision.handle(cue({ action: 'leaving' }), 1);
+    await vision.settled();
+    await vision.handle(cue({ action: 'leaving' }), 1);
+    await vision.settled();
+    await vision.handle(cue({ action: 'filling' }), 1);
+    expect(seen).toEqual([
+      [1, 'shot'],
+      [9, 'not-in-front'],
+      [1, 'denylisted'],
+      [1, 'reading'],
+      [1, 'transcribed'],
+      [1, 'no-shot'],
+      [1, 'dropped'],
+    ]);
+    const short = pipeline({ onDiag: (_t, d) => seen.push([0, d.verdict]), createSmartProvider: () => ({ transcribe: async () => 'x' }) });
+    await short.vision.handle(cue(), 1);
+    await short.vision.handle(cue({ action: 'leaving' }), 1);
+    await short.vision.settled();
+    expect(seen.slice(-2)).toEqual([[0, 'reading'], [0, 'short']]);
+  });
+
   it('drops the picture when the tab changed while it was being taken, and swallows capture errors', async () => {
     const { vision, shots, tabs } = pipeline();
     const originalCapture = tabs.captureVisible.bind(tabs);

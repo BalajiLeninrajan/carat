@@ -248,6 +248,22 @@ describe('content wiring', () => {
     expect(title.value).toBe('Lunch');
   });
 
+  it('tells the status observer about the fast answer, not the smart one', async () => {
+    field('Title', 100);
+    const smart = fastThenSmart((ids) => ({ suggestions: [s(ids.Title!, 'Dinner', 0.8)], ticket: 't1' }));
+    const onRequest = vi.fn();
+    const onAnswer = vi.fn();
+    startSuggestions(ctx, createChip(document), document, { onRequest, onAnswer });
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
+    await flush();
+    expect(onRequest).toHaveBeenCalledTimes(1);
+    expect(onAnswer).toHaveBeenCalledTimes(1);
+    smart.release({ suggestions: [s(smart.ids().Title!, 'Dinner at Seven Shores Cafe', 0.95)] });
+    await flush();
+    expect(onRequest).toHaveBeenCalledTimes(1);
+    expect(onAnswer).toHaveBeenCalledTimes(1);
+  });
+
   it("tells the background this is the page being filled the first time a chip shows here", async () => {
     field('Title', 100);
     const page = createPageState();
@@ -508,6 +524,16 @@ describe('navigation chip', () => {
       return { suggestions: fills(fields), navigation };
     });
   }
+
+  it('does not make the page the one being filled: a source page may still be photographed', async () => {
+    const page = createPageState();
+    answer(() => [], [nav]);
+    startSuggestions(ctx, createChip(document), document, { page });
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
+    await flush();
+    expect(page.filling).toBe(false);
+    expect(calls('vision')).toEqual([]);
+  });
 
   it('shows the corner chip when there is no field to fill; Tab asks the background to navigate and reports acceptance', async () => {
     const composer = field('Message #general', 100);
