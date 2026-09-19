@@ -1,5 +1,6 @@
 import { relativeAge } from '@/src/format/age';
 import { sendMessage, type KnownItem } from '@/src/messaging';
+import { isSiteOff, siteHost, withSite } from '@/src/store/sites';
 
 const app = document.getElementById('app') as HTMLElement;
 const list = document.getElementById('list') as HTMLUListElement;
@@ -7,6 +8,29 @@ const enabled = document.getElementById('enabled') as HTMLInputElement;
 const clearButton = document.getElementById('clear') as HTMLButtonElement;
 const pinButton = document.getElementById('pin') as HTMLButtonElement;
 const pinnedNote = document.getElementById('pinned-note') as HTMLElement;
+const siteRow = document.getElementById('site-row') as HTMLElement;
+const siteEnabled = document.getElementById('site-enabled') as HTMLInputElement;
+const siteHostLabel = document.getElementById('site-host') as HTMLElement;
+
+// The host of the tab the popup was opened over; undefined on chrome:// and friends.
+let activeHost: string | undefined;
+
+async function findActiveHost(): Promise<string | undefined> {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    return siteHost(tab?.url);
+  } catch {
+    return undefined;
+  }
+}
+
+function renderSite(settings: { disabledHosts?: string[] }): void {
+  siteRow.hidden = activeHost === undefined;
+  if (activeHost === undefined) return;
+  siteHostLabel.textContent = activeHost;
+  // An older background answers without the list; nothing is off then.
+  siteEnabled.checked = !isSiteOff({ disabledHosts: settings.disabledHosts ?? [] }, activeHost);
+}
 const retryButton = document.getElementById('retry') as HTMLButtonElement;
 const optionsLink = document.getElementById('options') as HTMLAnchorElement;
 
@@ -61,10 +85,12 @@ async function load(): Promise<void> {
   // Locked while loading so a click cannot be overwritten by the stale reply.
   enabled.disabled = true;
   try {
-    const [settings, known] = await withTimeout(
-      Promise.all([sendMessage('getSettings', undefined), sendMessage('getKnown', undefined)]),
+    const [settings, known, host] = await withTimeout(
+      Promise.all([sendMessage('getSettings', undefined), sendMessage('getKnown', undefined), findActiveHost()]),
     );
+    activeHost = host;
     enabled.checked = settings.enabled;
+    renderSite(settings);
     renderList(known.items);
     renderPinned(known.pinned === true);
   } catch {
@@ -96,6 +122,23 @@ clearButton.addEventListener('click', async () => {
     app.dataset.state = 'offline';
   } finally {
     clearButton.disabled = false;
+  }
+});
+
+siteEnabled.addEventListener('change', async () => {
+  if (activeHost === undefined) return;
+  const next = siteEnabled.checked;
+  siteEnabled.disabled = true;
+  try {
+    // Read-modify-write against the latest list so two popups cannot clobber each other's hosts.
+    const current = await withTimeout(sendMessage('getSettings', undefined));
+    const saved = await withTimeout(sendMessage('setSettings', withSite(current, activeHost, next)));
+    renderSite(saved);
+  } catch {
+    siteEnabled.checked = !next;
+    app.dataset.state = 'offline';
+  } finally {
+    siteEnabled.disabled = false;
   }
 });
 

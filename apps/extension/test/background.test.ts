@@ -77,6 +77,13 @@ describe('gate', () => {
     expect(gate(maps, [item()], { ...enabled, enabled: false }, requester, NOW)).toBe(false);
     expect(gate({ ...maps, fields: [] }, [item()], enabled, requester, NOW)).toBe(false);
   });
+
+  it('refuses a host the user switched off, and only that host', () => {
+    const off = { ...enabled, disabledHosts: ['www.google.com'] };
+    expect(gate(maps, [item()], off, requester, NOW)).toBe(false);
+    const calendar = { ...maps, page: { ...maps.page, host: 'calendar.google.com' } };
+    expect(gate(calendar, [item()], off, requester, NOW)).toBe(true);
+  });
 });
 
 describe('scoreAndPickContext', () => {

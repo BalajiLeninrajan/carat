@@ -26,7 +26,10 @@ describe('popup', () => {
     document.body.innerHTML = body;
     sendMessage.mockReset();
     vi.resetModules();
-    vi.stubGlobal('chrome', { runtime: { openOptionsPage: vi.fn(async () => undefined) } });
+    vi.stubGlobal('chrome', {
+      runtime: { openOptionsPage: vi.fn(async () => undefined) },
+      tabs: { query: vi.fn(async () => [{ url: 'https://calendar.google.com/calendar/u/0/r' }]) },
+    });
   });
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -117,6 +120,46 @@ describe('popup', () => {
     await flush();
     expect(toggle.checked).toBe(true);
     expect(sendMessage).toHaveBeenCalledWith('setSettings', { enabled: false });
+  });
+
+  it('switches carat off and on for the active tab host', async () => {
+    let settings = { enabled: true, disabledHosts: ['discord.com'] };
+    sendMessage.mockImplementation(async (type: string, data?: Partial<typeof settings>) => {
+      if (type === 'getSettings') return settings;
+      if (type === 'getKnown') return { items: [], pinned: false };
+      if (type === 'setSettings') {
+        settings = { ...settings, ...data };
+        return settings;
+      }
+      return undefined;
+    });
+    await import('./main');
+    await flush();
+    const row = document.getElementById('site-row') as HTMLElement;
+    const box = document.getElementById('site-enabled') as HTMLInputElement;
+    expect(row.hidden).toBe(false);
+    expect(document.getElementById('site-host')?.textContent).toBe('calendar.google.com');
+    expect(box.checked).toBe(true);
+
+    box.click();
+    await flush();
+    expect(sendMessage).toHaveBeenCalledWith('setSettings', { disabledHosts: ['discord.com', 'calendar.google.com'] });
+    expect(box.checked).toBe(false);
+
+    box.click();
+    await flush();
+    expect(sendMessage).toHaveBeenLastCalledWith('setSettings', { disabledHosts: ['discord.com'] });
+    expect(box.checked).toBe(true);
+  });
+
+  it('hides the site switch over a page carat cannot run on', async () => {
+    (chrome.tabs.query as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([{ url: 'chrome://extensions' }]);
+    sendMessage.mockImplementation(async (type: string) =>
+      type === 'getSettings' ? { enabled: true, disabledHosts: [] } : { items: [], pinned: false },
+    );
+    await import('./main');
+    await flush();
+    expect((document.getElementById('site-row') as HTMLElement).hidden).toBe(true);
   });
 
   it('pins and unpins the store from the footer, and Clear unpins', async () => {

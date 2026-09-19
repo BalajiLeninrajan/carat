@@ -37,6 +37,9 @@
       header h1 { font-size: 14px; font-weight: 600; margin: 0; flex: 1; }
       .toggle { display: flex; align-items: center; gap: 6px; color: var(--subtext0); cursor: pointer; }
       .toggle input { width: 14px; height: 14px; margin: 0; accent-color: var(--blue); }
+      .site { padding: 6px 12px; border-bottom: 1px solid var(--surface0); font-size: 12px; }
+      .site[hidden] { display: none; }
+      #site-host { color: var(--text); }
       #list { list-style: none; margin: 0; padding: 4px 0; max-height: 420px; overflow-y: auto; }
       #list li { padding: 8px 12px; border-bottom: 1px solid var(--surface0); }
       #list li:last-child { border-bottom: 0; }
@@ -108,6 +111,11 @@
         <p>Carat's background worker is not answering.</p>
         <button type="button" id="retry">Retry</button>
       </div>
+
+      <label class="toggle site" id="site-row" hidden>
+        <input type="checkbox" id="site-enabled" />
+        <span>On for <span id="site-host"></span></span>
+      </label>
 
       <p id="pinned-note" hidden>Pinned: nothing new is read and nothing expires until you unpin.</p>
 

@@ -54,6 +54,7 @@ export interface Settings {
   baseURL: string; // default https://api.openai.com/v1
   apiKey: string; // may be ''
   model: string; // default gpt-5.6-luna
+  disabledHosts: string[]; // exact hosts (with port) where carat neither reads nor suggests
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -62,6 +63,7 @@ export const DEFAULT_SETTINGS: Settings = {
   baseURL: 'https://api.openai.com/v1',
   apiKey: '',
   model: 'gpt-5.6-luna',
+  disabledHosts: [],
 };
 
 export const LIMITS = {

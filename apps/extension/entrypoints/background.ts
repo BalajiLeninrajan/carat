@@ -1,7 +1,7 @@
 import { defineBackground } from 'wxt/utils/define-background';
 import { isDenylisted } from '@carat/shared';
 import { onMessage } from '../src/messaging';
-import { ContextStore, createSettingsStore, parseLocation } from '../src/store';
+import { ContextStore, createSettingsStore, isSiteOff, parseLocation } from '../src/store';
 import {
   clearKnown,
   getKnown,
@@ -26,8 +26,10 @@ export default defineBackground(() => {
     const tabId = sender.tab?.id;
     const location = parseLocation(data.url);
     if (tabId === undefined || !location) return;
-    if (isDenylisted(new URL(location.origin).hostname)) return;
-    if (!(await settings.get()).enabled) return;
+    const url = new URL(location.origin);
+    if (isDenylisted(url.hostname)) return;
+    const current = await settings.get();
+    if (!current.enabled || isSiteOff(current, url.host)) return;
     const input = { tabId, url: data.url, title: data.title, text: data.text };
     if (data.kind === 'selection') await store.upsertSelection(input);
     else await store.upsertPage(input);

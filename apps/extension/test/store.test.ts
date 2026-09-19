@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ContextStore, STORE_LIMITS, createSettingsStore } from '../src/store';
+import { ContextStore, STORE_LIMITS, createSettingsStore, isSiteOff, siteHost, withSite } from '../src/store';
 import type { StorageArea } from '../src/store';
 
 class FakeArea implements StorageArea {
@@ -262,6 +262,7 @@ describe('settings store', () => {
       baseURL: 'https://api.openai.com/v1',
       apiKey: '',
       model: 'gpt-5.6-luna',
+      disabledHosts: [],
     });
   });
 
@@ -273,5 +274,38 @@ describe('settings store', () => {
     expect(next.provider).toBe('openai');
     expect(next.baseURL).toBe('https://x.test/v1');
     expect(await settings.get()).toEqual(next);
+  });
+
+  it('keeps disabled hosts lowercased, deduped and free of junk', async () => {
+    const settings = createSettingsStore(new FakeArea());
+    const next = await settings.set({ disabledHosts: [' Discord.com ', 'discord.com', '', 3, 'maps.google.com:8443'] as never });
+    expect(next.disabledHosts).toEqual(['discord.com', 'maps.google.com:8443']);
+    expect((await settings.set({ disabledHosts: 'nope' as never })).disabledHosts).toEqual([]);
+  });
+});
+
+describe('per-site switch', () => {
+  it('matches hosts exactly, so one google host does not switch off another', () => {
+    const s = { disabledHosts: ['www.google.com'] };
+    expect(isSiteOff(s, 'www.google.com')).toBe(true);
+    expect(isSiteOff(s, 'WWW.google.com')).toBe(true);
+    expect(isSiteOff(s, 'calendar.google.com')).toBe(false);
+    expect(isSiteOff(s, 'google.com')).toBe(false);
+  });
+
+  it('toggles one host without touching the rest', () => {
+    const s = { disabledHosts: ['a.test'] };
+    expect(withSite(s, 'B.test', false)).toEqual({ disabledHosts: ['a.test', 'b.test'] });
+    expect(withSite(s, 'a.test', true)).toEqual({ disabledHosts: [] });
+    expect(withSite(s, 'a.test', false)).toEqual({ disabledHosts: ['a.test'] });
+  });
+
+  it('only names hosts carat could run on', () => {
+    expect(siteHost('https://calendar.google.com/calendar/u/0/r?x=1')).toBe('calendar.google.com');
+    expect(siteHost('http://localhost:5173/')).toBe('localhost:5173');
+    expect(siteHost('chrome://extensions')).toBeUndefined();
+    expect(siteHost('file:///tmp/a.html')).toBeUndefined();
+    expect(siteHost(undefined)).toBeUndefined();
+    expect(siteHost('not a url')).toBeUndefined();
   });
 });
