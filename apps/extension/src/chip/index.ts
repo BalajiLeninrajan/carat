@@ -1,8 +1,14 @@
+import { SCROLL_SETTLE_MS } from '../scroll';
 import { deepActiveElement, shouldInterceptTab } from './keys';
 import { placeChip } from './position';
 import { CHIP_CSS } from './styles';
 
-export type DismissReason = 'escape' | 'timeout' | 'typed' | 'detached';
+/**
+ * Why the chip went away. `escape` and `typed` are the user saying no to the
+ * offer and are reported as such; `acted` and `scrolled` are the user getting
+ * on with the page, which says nothing about it.
+ */
+export type DismissReason = 'escape' | 'timeout' | 'typed' | 'detached' | 'acted' | 'scrolled';
 
 /** Tab accepts everything now; an irreversible action simply wants it twice. */
 export type AcceptKey = 'Tab';
@@ -79,11 +85,21 @@ export const CORNER_INSET_PX = 24;
 export const ARM_MS = 4000;
 /** Appended to the chip's reason while a better answer may still land. */
 export const PENDING_HINT = 'checking with the model…';
+/**
+ * A chip ignores scrolling for this long after it goes up: that tail belongs
+ * to the scroll carat itself did to bring the target into view. Per chip, not
+ * a flag shared with the scroller, which would leak between pages.
+ */
+export const CHIP_SETTLE_MS = SCROLL_SETTLE_MS;
+/** Held down on their own these say nothing; the key that follows does. */
+const MODIFIER_KEYS = new Set(['Shift', 'Control', 'Alt', 'Meta', 'AltGraph', 'CapsLock', 'NumLock', 'ScrollLock', 'OS', 'Dead', 'Unidentified']);
 const HOST_ATTR = 'data-carat-chip';
 const RING_ATTR = 'data-carat-ring';
 
 interface SessionBase extends ChipCallbacks {
   timer: ReturnType<typeof setTimeout>;
+  /** When the chip went up, so a scroll right after it can be read as carat's own. */
+  shownAt: number;
   onScreen: boolean;
   /** When set, the key defers to a text field that has focus unless it is this or `interceptFrom`. */
   target: Element | null;
@@ -156,16 +172,69 @@ export function createChip(doc: Document = document): Chip {
       dismiss('escape');
       return;
     }
-    if (e.key !== 'Tab' || e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) {
-      // Any other key means the user moved on: an armed chip stands down rather than acting on the next Tab.
-      if (armed) disarm();
+    const bare = !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey;
+    // A banner has no control of its own to defer to; Tab is its whole interface.
+    const deferred = session.target !== null && !shouldInterceptTab(deepActiveElement(doc), session.target, session.interceptFrom);
+    if (e.key === 'Tab' && bare && !deferred) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      accept();
       return;
     }
-    // A banner has no control of its own to defer to; Tab is its whole interface.
-    if (session.target && !shouldInterceptTab(deepActiveElement(doc), session.target, session.interceptFrom)) return;
-    e.preventDefault();
-    e.stopImmediatePropagation();
-    accept();
+    // Any other key means the user moved on: an armed chip stands down rather than acting on the next Tab.
+    if (armed) disarm();
+    if (actedOn(e)) dismiss('acted');
+  };
+
+  /**
+   * Whether a key press means the user has moved on. Tab never does: it is
+   * carat's key, and one the chip may have let through on purpose. Nor does a
+   * modifier held on its own, nor typing into the field the chip is about,
+   * which the `input` listener reports as `typed` instead.
+   */
+  function actedOn(e: KeyboardEvent): boolean {
+    if (e.key === 'Tab' || MODIFIER_KEYS.has(e.key)) return false;
+    return !aboutTheChipsField(e.target);
+  }
+
+  /** The field the chip is about, or the one carat just filled: keys there belong to the `typed` path. */
+  function aboutTheChipsField(node: EventTarget | null): boolean {
+    if (!session || !(node instanceof Node)) return false;
+    const { target, interceptFrom } = session;
+    if (target && (target === node || target.contains(node))) return true;
+    return !!interceptFrom && (interceptFrom === node || interceptFrom.contains(node));
+  }
+
+  /** The chip lives in a closed root, so its host is as deep as a path from outside goes. */
+  function onTheChip(e: Event): boolean {
+    const path = typeof e.composedPath === 'function' ? e.composedPath() : [];
+    if (path.includes(host)) return true;
+    return e.target instanceof Node && host.contains(e.target);
+  }
+
+  /** A press, a tap or a click anywhere but the chip itself. */
+  const onPointerDown = (e: Event): void => {
+    if (!session || onTheChip(e)) return;
+    dismiss('acted');
+  };
+
+  /**
+   * A wheel, a drag or a scroll: the user is reading on, not answering. The
+   * first settle window of the chip's life is the exception, because that is
+   * the tail of the scroll carat did to bring this very target into view.
+   */
+  const onUserScroll = (): void => {
+    if (!session || Date.now() - session.shownAt < CHIP_SETTLE_MS) return;
+    dismiss('scrolled');
+  };
+
+  /** Focus landing on another control means the user picked their own next step. */
+  const onFocusIn = (e: FocusEvent): void => {
+    if (!session || !(e.target instanceof Element)) return;
+    if (aboutTheChipsField(e.target) || onTheChip(e)) return;
+    const el = e.target;
+    if (el === doc.body || el === doc.documentElement) return;
+    dismiss('acted');
   };
 
   const onTyped = (): void => dismiss('typed');
@@ -238,6 +307,12 @@ export function createChip(doc: Document = document): Chip {
     if (!host.isConnected) doc.documentElement.appendChild(host);
     // Capture phase so the page's own Tab handlers never see an accepted Tab.
     win.addEventListener('keydown', onKeydown, true);
+    // The user acting on the page for themselves takes the chip with them, whatever shape it is.
+    win.addEventListener('pointerdown', onPointerDown, true);
+    win.addEventListener('wheel', onUserScroll, { capture: true, passive: true });
+    win.addEventListener('touchmove', onUserScroll, { capture: true, passive: true });
+    win.addEventListener('scroll', onUserScroll, { capture: true, passive: true });
+    win.addEventListener('focusin', onFocusIn, true);
     pill.addEventListener('click', onClick);
     pill.addEventListener('mousedown', onMousedown);
     return {
@@ -250,6 +325,7 @@ export function createChip(doc: Document = document): Chip {
       irreversible: opts.irreversible === true,
       label: opts.label,
       targetWin: null,
+      shownAt: Date.now(),
       timer: setTimeout(() => dismiss('timeout'), AUTO_DISMISS_MS),
     };
   }
@@ -345,6 +421,11 @@ export function createChip(doc: Document = document): Chip {
     clearTimeout(armTimer);
     armed = false;
     win.removeEventListener('keydown', onKeydown, true);
+    win.removeEventListener('pointerdown', onPointerDown, true);
+    win.removeEventListener('wheel', onUserScroll, true);
+    win.removeEventListener('touchmove', onUserScroll, true);
+    win.removeEventListener('scroll', onUserScroll, true);
+    win.removeEventListener('focusin', onFocusIn, true);
     pill.removeEventListener('click', onClick);
     pill.removeEventListener('mousedown', onMousedown);
     if (s.mode === 'control') {

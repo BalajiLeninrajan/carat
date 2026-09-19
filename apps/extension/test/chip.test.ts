@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
-import { ARM_MS, AUTO_DISMISS_MS, CORNER_INSET_PX, PENDING_HINT, createChip, type Chip, type DismissReason } from '../src/chip';
+import { ARM_MS, AUTO_DISMISS_MS, CHIP_SETTLE_MS, CORNER_INSET_PX, PENDING_HINT, createChip, type Chip, type DismissReason } from '../src/chip';
 
 function key(target: EventTarget, k: string, init: KeyboardEventInit = {}): KeyboardEvent {
   const e = new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, ...init });
@@ -149,10 +149,63 @@ describe('chip', () => {
     expect(host.style.bottom).toBe(`${CORNER_INSET_PX}px`);
     expect(host.style.left).toBe('50%');
     expect(chip.text).toBe('Scroll down');
-    other.focus();
-    const e = key(other, 'Tab');
+    const e = key(document.body, 'Tab');
     expect(e.defaultPrevented).toBe(true);
     expect(onAccept).toHaveBeenCalledTimes(1);
+  });
+
+  describe('the user getting on with the page', () => {
+    /** Past the window that belongs to the scroll carat did to place this chip. */
+    const past = (): void => {
+      vi.advanceTimersByTime(CHIP_SETTLE_MS);
+    };
+
+    it('goes on a pointerdown anywhere but the chip', () => {
+      show();
+      past();
+      document.body.dispatchEvent(new Event('pointerdown', { bubbles: true, composed: true }));
+      expect(onDismiss).toHaveBeenCalledWith('acted');
+      expect(chip.visible).toBe(false);
+    });
+
+    it('stays for a bare modifier and goes for a key with something to say', () => {
+      show();
+      key(document.body, 'Shift');
+      expect(chip.visible).toBe(true);
+      key(document.body, 'j');
+      expect(onDismiss).toHaveBeenCalledWith('acted');
+    });
+
+    it('goes on a wheel, a touchmove or a scroll, but not inside its settle window', () => {
+      for (const type of ['wheel', 'touchmove', 'scroll']) {
+        show();
+        window.dispatchEvent(new Event(type));
+        expect([type, chip.visible]).toEqual([type, true]);
+        past();
+        window.dispatchEvent(new Event(type));
+        expect([type, chip.visible]).toEqual([type, false]);
+        expect(onDismiss).toHaveBeenLastCalledWith('scrolled');
+      }
+    });
+
+    it('goes when the focus lands on another control, and stays for the field it was filling', () => {
+      chip.show({ target, label: 'Click "Save"', interceptFrom: other, onAccept, onDismiss });
+      other.focus();
+      expect(chip.visible).toBe(true);
+      const third = document.createElement('input');
+      document.body.append(third);
+      third.focus();
+      expect(onDismiss).toHaveBeenCalledWith('acted');
+    });
+
+    it('lets Esc and typing say their piece, and never reports the rest', () => {
+      show();
+      key(target, 'Escape');
+      expect(onDismiss).toHaveBeenLastCalledWith('escape');
+      show();
+      target.dispatchEvent(new Event('input', { bubbles: true }));
+      expect(onDismiss).toHaveBeenLastCalledWith('typed');
+    });
   });
 
   it('carries the waiting dot until it settles, and puts the reason on the tooltip', () => {
