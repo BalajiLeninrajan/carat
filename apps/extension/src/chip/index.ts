@@ -7,6 +7,10 @@ export type DismissReason = 'escape' | 'timeout' | 'typed' | 'detached';
 export interface ChipShowOptions {
   target: Element;
   value: string;
+  /** Second line under the offer: where the value came from, e.g. "discord.com · 2m ago". */
+  detail?: string;
+  /** Why it was offered; shown as the native tooltip on hover. */
+  reason?: string;
   /**
    * An element Tab is also taken from, besides the target: the field carat
    * just filled, which still holds focus while the next chip is up.
@@ -45,11 +49,16 @@ export function createChip(doc: Document = document): Chip {
   const pill = doc.createElement('div');
   pill.className = 'chip';
   pill.setAttribute('role', 'button');
+  const text = doc.createElement('span');
+  text.className = 'text';
   const label = doc.createElement('span');
   label.className = 'label';
+  const sub = doc.createElement('span');
+  sub.className = 'sub';
+  text.append(label, sub);
   const key = doc.createElement('kbd');
   key.textContent = 'Tab';
-  pill.append(label, key);
+  pill.append(text, key);
   root.append(style, pill);
 
   let session: Session | null = null;
@@ -104,6 +113,10 @@ export function createChip(doc: Document = document): Chip {
   function show(opts: ChipShowOptions): void {
     hide();
     label.replaceChildren('Fill ', valueNode(opts.value), '?');
+    sub.textContent = opts.detail ?? '';
+    sub.hidden = !opts.detail;
+    if (opts.reason) pill.setAttribute('title', opts.reason);
+    else pill.removeAttribute('title');
     const observer =
       typeof ResizeObserver === 'function' ? new ResizeObserver(() => reposition()) : null;
     observer?.observe(opts.target);

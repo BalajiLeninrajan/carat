@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Suggestion } from '@carat/shared';
-import { createChip } from '../src/chip';
+import { createChip, type Chip, type ChipShowOptions } from '../src/chip';
 import { CAPTURE_TIMING, SNAPSHOT_TIMING, startCapture, startSuggestions } from '../src/content';
 import type { ScriptContext } from '../src/content';
 
@@ -200,6 +200,42 @@ describe('content wiring', () => {
     tab();
     expect(search.value).toBe('pizza near me');
     expect(calls('feedback')).toHaveLength(0);
+  });
+
+  it('tells the chip where the value came from and why', async () => {
+    field('Title', 100);
+    const twoMinutesAgo = Date.now() - 2 * 60_000;
+    sent.mockImplementation(async (type, data) => {
+      if (type !== 'suggestRequest') return undefined;
+      const { fields } = data as { fields: Array<{ i: string }> };
+      return {
+        suggestions: [
+          {
+            fieldId: fields[0]!.i,
+            value: 'Dinner',
+            confidence: 0.9,
+            reason: 'Discord message names a plan',
+            sourceContextId: 'c1',
+            source: { host: 'discord.com', capturedAt: twoMinutesAgo },
+          },
+        ],
+      };
+    });
+    const shows: ChipShowOptions[] = [];
+    const chip: Chip = {
+      show: (opts) => void shows.push(opts),
+      hide: () => undefined,
+      destroy: () => undefined,
+      visible: false,
+    };
+    startSuggestions(ctx, chip, document);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
+    await flush();
+    expect(shows[0]).toMatchObject({
+      value: 'Dinner',
+      detail: 'from discord.com · 2m ago',
+      reason: 'Discord message names a plan',
+    });
   });
 
   it('lets Tab through when an unrelated text field has focus', async () => {

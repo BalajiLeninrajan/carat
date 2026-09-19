@@ -1,7 +1,9 @@
-import type { FieldDescriptor, Suggestion } from '@carat/shared';
+import type { FieldDescriptor } from '@carat/shared';
 import type { Chip } from '../chip';
 import { isTextEntry } from '../chip/keys';
 import { fillElement, resolveTarget } from '../fill';
+import { relativeAge } from '../format/age';
+import type { SuggestionView as Suggestion } from '../messaging';
 import type { FieldEntry } from '../snapshot';
 import { enumerateFields, valueOf } from '../snapshot';
 import type { ScriptContext } from './context';
@@ -92,6 +94,8 @@ export function startSuggestions(ctx: ScriptContext, chip: Chip, doc: Document =
     chip.show({
       target,
       value: suggestion.value,
+      ...(suggestion.source ? { detail: describeSource(suggestion.source) } : {}),
+      ...(suggestion.reason ? { reason: suggestion.reason } : {}),
       interceptFrom: justFilled,
       onAccept() {
         justFilled = null;
@@ -131,6 +135,10 @@ export function startSuggestions(ctx: ScriptContext, chip: Chip, doc: Document =
     snapshotSoon();
   });
   ctx.onInvalidated(() => chip.destroy());
+}
+
+function describeSource(source: NonNullable<Suggestion['source']>): string {
+  return `from ${source.host} · ${relativeAge(source.capturedAt)}`;
 }
 
 function isField(target: EventTarget | null): boolean {

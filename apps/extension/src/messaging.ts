@@ -6,10 +6,18 @@ export type KnownItem = Pick<ContextItem, 'id' | 'origin' | 'title' | 'kind' | '
   preview: string;
 };
 
+/** Where a suggestion came from, as much as a content script may know: the host and when it was read. */
+export interface SuggestionSource {
+  host: string;
+  capturedAt: number;
+}
+
+export type SuggestionView = Suggestion & { source?: SuggestionSource };
+
 // Background handles every message; content scripts and extension pages only send.
 export interface Protocol {
   capture(data: { url: string; title: string; text: string; kind: 'page' | 'selection' }): void;
-  suggestRequest(data: { page: PageMeta; fields: FieldDescriptor[] }): { suggestions: Suggestion[] };
+  suggestRequest(data: { page: PageMeta; fields: FieldDescriptor[] }): { suggestions: SuggestionView[] };
   feedback(data: {
     fieldId: string;
     fingerprint: string;

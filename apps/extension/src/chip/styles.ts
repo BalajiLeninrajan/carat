@@ -26,7 +26,10 @@ export const CHIP_CSS = `
   -webkit-user-select: none;
 }
 .chip:hover { background: #181825; }
+.text { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
 .label { overflow: hidden; text-overflow: ellipsis; }
+.sub { font-size: 11px; line-height: 1.2; color: #a6adc8; overflow: hidden; text-overflow: ellipsis; }
+.sub[hidden] { display: none; }
 .value { font-weight: 600; color: #f5e0dc; }
 kbd {
   all: initial;

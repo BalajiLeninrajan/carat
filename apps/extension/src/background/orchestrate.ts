@@ -2,6 +2,7 @@ import type { FieldDescriptor, PageMeta, Settings, SuggestRequest, Suggestion } 
 import { LIMITS, fnv1a } from '@carat/shared';
 import type { Provider } from '@carat/providers';
 import { LocalProvider, createProvider } from '@carat/providers';
+import type { SuggestionSource, SuggestionView } from '../messaging';
 import type { ContextStore } from '../store';
 import { suppressionPrefix } from '../store';
 import { fingerprintMatchesDescriptor } from './fingerprint';
@@ -23,13 +24,13 @@ export interface OrchestrateDeps {
   timeoutMs?: number;
 }
 
-const NONE: { suggestions: Suggestion[] } = { suggestions: [] };
+const NONE: { suggestions: SuggestionView[] } = { suggestions: [] };
 
 export async function orchestrate(
   input: SuggestInput,
   requester: Requester,
   deps: OrchestrateDeps,
-): Promise<{ suggestions: Suggestion[] }> {
+): Promise<{ suggestions: SuggestionView[] }> {
   const now = deps.now ?? (() => Date.now());
   const timeoutMs = deps.timeoutMs ?? LIMITS.providerTimeoutMs;
   const { store } = deps;
@@ -60,7 +61,23 @@ export async function orchestrate(
 
   const suppressed = await store.suppressedKeys();
   const visible = suggestions.filter((s) => !isSuppressed(s, input, suppressed));
-  return { suggestions: topPerField(visible).slice(0, LIMITS.maxSuggestions) };
+  const sources = new Map(context.map((c) => [c.id, sourceOf(c)] as const));
+  return {
+    suggestions: topPerField(visible)
+      .slice(0, LIMITS.maxSuggestions)
+      .map((s) => ({ ...s, ...(sources.has(s.sourceContextId) ? { source: sources.get(s.sourceContextId) } : {}) })),
+  };
+}
+
+// The chip may say where a value came from; the text it came from stays here.
+function sourceOf(c: SuggestRequest['context'][number]): SuggestionSource {
+  let host = c.origin;
+  try {
+    host = new URL(c.origin).host;
+  } catch {
+    // origin is already a bare host
+  }
+  return { host, capturedAt: c.capturedAt };
 }
 
 /** One provider call as it went. */

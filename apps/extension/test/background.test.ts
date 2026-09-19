@@ -190,6 +190,9 @@ describe('orchestrate', () => {
       ['f0', 'Better'],
       ['f1', 'Seven Shores Cafe'],
     ]);
+    // The chip can say where it came from, but never gets the text itself.
+    expect(res.suggestions[0]?.source).toEqual({ host: 'discord.com', capturedAt: NOW });
+    expect(Object.keys(res.suggestions[0]!)).not.toContain('text');
   });
 
   it('returns nothing when the gate fails and never calls the provider', async () => {

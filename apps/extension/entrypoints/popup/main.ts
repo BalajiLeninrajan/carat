@@ -1,3 +1,4 @@
+import { relativeAge } from '@/src/format/age';
 import { sendMessage, type KnownItem } from '@/src/messaging';
 
 const app = document.getElementById('app') as HTMLElement;
@@ -14,16 +15,6 @@ function withTimeout<T>(p: Promise<T>, ms = 3000): Promise<T> {
     const t = setTimeout(() => reject(new Error('background timed out')), ms);
     p.then(resolve, reject).finally(() => clearTimeout(t));
   });
-}
-
-function relativeAge(ts: number, now = Date.now()): string {
-  const s = Math.max(0, Math.round((now - ts) / 1000));
-  if (s < 10) return 'just now';
-  if (s < 60) return `${s}s ago`;
-  const m = Math.round(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.round(m / 60);
-  return `${h}h ago`;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(

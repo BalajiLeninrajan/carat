@@ -119,6 +119,37 @@ describe('chip', () => {
     expect(host.style.left).toBe('20px');
   });
 
+  it('shows the source line and reason only when given, and clears them on the next show', () => {
+    // The root is closed, so catch it as it is created.
+    const roots: ShadowRoot[] = [];
+    const attach = Element.prototype.attachShadow;
+    vi.spyOn(Element.prototype, 'attachShadow').mockImplementation(function (this: Element, init) {
+      const root = attach.call(this, init);
+      roots.push(root);
+      return root;
+    });
+    const rich = createChip();
+    const root = roots[0]!;
+    const shown = () => ({
+      label: root.querySelector('.label')?.textContent,
+      sub: root.querySelector('.sub')?.textContent,
+      subHidden: (root.querySelector('.sub') as HTMLElement).hidden,
+      title: root.querySelector('.chip')?.getAttribute('title'),
+    });
+
+    rich.show({ target, value: 'Seven Shores Cafe', detail: 'from discord.com · 2m ago', reason: 'named as a plan', onAccept, onDismiss });
+    expect(shown()).toEqual({
+      label: 'Fill "Seven Shores Cafe"?',
+      sub: 'from discord.com · 2m ago',
+      subHidden: false,
+      title: 'named as a plan',
+    });
+
+    rich.show({ target, value: 'Plain', onAccept, onDismiss });
+    expect(shown()).toEqual({ label: 'Fill "Plain"?', sub: '', subHidden: true, title: null });
+    rich.destroy();
+  });
+
   it('hides visually and ignores Tab and Escape while the target is off screen', () => {
     target.getBoundingClientRect = () =>
       ({ top: -500, left: 20, bottom: -470, right: 220, width: 200, height: 30 }) as DOMRect;
