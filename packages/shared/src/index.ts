@@ -4,6 +4,7 @@ export type {
   ContextKind,
   ElementDescriptor,
   ElementRole,
+  ImageCue,
   ImageInput,
   FieldDescriptor,
   FillSuggestion,

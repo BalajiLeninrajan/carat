@@ -179,7 +179,7 @@ describe('vision pipeline', () => {
 
     expect(transcribe).toHaveBeenCalledTimes(1);
     const [image, opts] = transcribe.mock.calls[0] as unknown as [ImageInput, { signal: AbortSignal }];
-    expect(image).toEqual({ dataUrl: `${PNG}#small`, title: 'Discord | #general', host: 'discord.com', now: expect.any(String) });
+    expect(image).toEqual({ dataUrl: `${PNG}#small`, title: 'Discord | #general', host: 'discord.com', now: expect.any(String), cue: 'thin-text' });
     // The shot's own capture time, as local ISO with offset, so "3 days ago" in the picture counts from then.
     expect(image.now).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/);
     expect(new Date(image.now).getTime()).toBe(Math.floor(shotAt / 1000) * 1000);
@@ -191,6 +191,21 @@ describe('vision pipeline', () => {
     expect(items[0]!.text).toBe(`Discord | #general · discord.com ${TRANSCRIPT}`);
     expect(items[0]!.text).toContain('Facts: Event 2026-09-18T18:00:00-04:00');
     expect(await shots.live()).toEqual([]);
+  });
+
+  it('tells the model when the page was cued by a big image rather than by thin text', async () => {
+    const { vision, transcribe } = pipeline();
+    // 2000 chars of body text only gets a cue when an image or canvas fills the view.
+    await vision.handle(cue({ bodyChars: 2000 }), 1);
+    await vision.handle(cue({ action: 'leaving', bodyChars: 2000 }), 1);
+    await vision.settled();
+    expect((transcribe.mock.calls[0] as unknown as [ImageInput])[0].cue).toBe('image-heavy');
+
+    const thin = pipeline();
+    await thin.vision.handle(cue({ bodyChars: 399 }), 1);
+    await thin.vision.handle(cue({ action: 'leaving', bodyChars: 399 }), 1);
+    await thin.vision.settled();
+    expect((thin.transcribe.mock.calls[0] as unknown as [ImageInput])[0].cue).toBe('thin-text');
   });
 
   it('keeps nothing when there is no shot, the transcript is short, there is no smart provider, or the model fails', async () => {

@@ -399,6 +399,7 @@ describe('ShotStore', () => {
     url: `https://site${tabId}.test/p?q=1`,
     title: `Tab ${tabId}`,
     dataUrl: `data:image/jpeg;base64,${tabId}`,
+    cue: 'thin-text' as const,
   });
   function shots(start = 1_000_000) {
     let clock = start;

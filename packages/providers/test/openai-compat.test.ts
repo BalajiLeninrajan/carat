@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { SuggestRequest } from '@carat/shared';
+import type { ImageInput, SuggestRequest } from '@carat/shared';
 import { OpenAICompatProvider, type OutputMode } from '../src/openai-compat';
 
 const req: SuggestRequest = {
@@ -273,11 +273,11 @@ describe('OpenAICompatProvider', () => {
   });
 });
 
-const image = { dataUrl: 'data:image/jpeg;base64,/9j/4AAQ', title: 'Discord | #general', host: 'discord.com', now: '2026-09-16T14:04:00-04:00' };
+const image: ImageInput = { dataUrl: 'data:image/jpeg;base64,/9j/4AAQ', title: 'Discord | #general', host: 'discord.com', now: '2026-09-16T14:04:00-04:00', cue: 'thin-text' };
 
 // What the smart model is asked to write for an Instagram post seen three days after it went up.
 const INSTAGRAM_POST = {
-  image: { dataUrl: 'data:image/jpeg;base64,/9j/4BBQ', title: 'Instagram', host: 'www.instagram.com', now: '2026-09-19T10:30:00-04:00' },
+  image: { dataUrl: 'data:image/jpeg;base64,/9j/4BBQ', title: 'Instagram', host: 'www.instagram.com', now: '2026-09-19T10:30:00-04:00', cue: 'image-heavy' } satisfies ImageInput,
   reply: [
     'sevenshorescafe',
     'Night market pop-up this Saturday 6 to 11pm, 10 Regina St N. $8 plates.',
@@ -321,13 +321,25 @@ describe('OpenAICompatProvider.transcribe', () => {
     expect(parts[0]).toEqual({ type: 'text', text: expect.stringContaining('now: 2026-09-19T10:30:00-04:00') });
     expect(parts[0]!.text).toContain('www.instagram.com');
     expect(parts[0]!.text).toContain('"Instagram"');
-    expect(parts[1]).toEqual({ type: 'image_url', image_url: { url: INSTAGRAM_POST.image.dataUrl, detail: 'low' } });
+    // The post was cued by its picture, not by thin text, so the model gets the full rendering.
+    expect(parts[1]).toEqual({ type: 'image_url', image_url: { url: INSTAGRAM_POST.image.dataUrl, detail: 'high' } });
 
     // One line, page-item sized, with the resolved facts still in it: this is what the context store gets.
     expect(out).toContain('3 days ago Facts: Posted 2026-09-16 Event 2026-09-26T18:00:00-04:00');
     expect(out).toContain('Poster: Night Market, Sat 6pm, Seven Shores Cafe');
     expect(out).not.toContain('\n');
     expect(out.length).toBeLessThanOrEqual(4000);
+  });
+
+  it('asks for the small rendering of a thin-text page and the full one of an image-heavy page', async () => {
+    const detail = async (cue: ImageInput['cue']) => {
+      const fetchImpl = vi.fn(async () => completion('some text'));
+      await provider(fetchImpl).transcribe({ ...image, cue }, { signal: new AbortController().signal });
+      const parts = requestBody(fetchImpl.mock.calls[0]!).messages[1]!.content as unknown as Array<{ image_url?: { detail: string } }>;
+      return parts[1]!.image_url!.detail;
+    };
+    expect(await detail('thin-text')).toBe('low');
+    expect(await detail('image-heavy')).toBe('high');
   });
 
   it('clips the transcript to a page item length', async () => {

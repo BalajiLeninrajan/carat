@@ -1,3 +1,4 @@
+import type { ImageCue } from '@carat/shared';
 import { STORE_LIMITS } from './limits';
 import type { StorageArea } from './storage-area';
 
@@ -6,6 +7,7 @@ export interface Shot {
   url: string;
   title: string;
   dataUrl: string; // downscaled JPEG
+  cue: ImageCue;
   capturedAt: number;
 }
 

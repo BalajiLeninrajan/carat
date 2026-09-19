@@ -1,4 +1,4 @@
-import type { Settings } from '@carat/shared';
+import type { ImageCue, Settings } from '@carat/shared';
 import { LIMITS, isDenylisted } from '@carat/shared';
 import type { VisionProvider } from '@carat/providers';
 import { createSmartProvider } from '@carat/providers';
@@ -94,7 +94,7 @@ export function createVisionPipeline(deps: VisionDeps): VisionPipeline {
     // A switch during the capture means the picture shows some other tab.
     const after = await deps.tabs.get(tabId);
     if (!after?.active || after.windowId !== tab.windowId) return 'not-in-front';
-    await deps.shots.put({ tabId, url: cue.url, title: cue.title, dataUrl: await shrink(dataUrl) });
+    await deps.shots.put({ tabId, url: cue.url, title: cue.title, dataUrl: await shrink(dataUrl), cue: cueKind(cue) });
     return 'shot';
   }
 
@@ -115,7 +115,7 @@ export function createVisionPipeline(deps: VisionDeps): VisionPipeline {
     const host = new URL(shot.url).host;
     // The picture's own time, not the leave: "3 days ago" in it counts from when it was taken.
     const text = await provider.transcribe(
-      { dataUrl: shot.dataUrl, title: shot.title, host, now: isoWithOffset(shot.capturedAt) },
+      { dataUrl: shot.dataUrl, title: shot.title, host, now: isoWithOffset(shot.capturedAt), cue: shot.cue },
       { signal: AbortSignal.timeout(timeoutMs) },
     );
     if (text.length < MIN_TRANSCRIPT_CHARS) return note('short');
@@ -129,6 +129,15 @@ export function createVisionPipeline(deps: VisionDeps): VisionPipeline {
     hasPending: (requester) => [...inflight.keys()].some((id) => id !== requester.tabId),
     settled: () => Promise.all(inflight.values()).then(() => undefined),
   };
+}
+
+/**
+ * The content script only cues a shot for a thin page. Under the text floor
+ * it is thin for want of text; at or over it, only a large image or canvas in
+ * view got it here, and that image is what the model needs to look at.
+ */
+function cueKind(cue: VisionCue): ImageCue {
+  return cue.bodyChars < LIMITS.thinTextChars ? 'thin-text' : 'image-heavy';
 }
 
 /** Local time as ISO 8601 with the zone offset, the form the prompts promise the model. */

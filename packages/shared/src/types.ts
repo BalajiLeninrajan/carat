@@ -175,13 +175,22 @@ export interface Settings {
   smartModel: string;
 }
 
-/** A downscaled screenshot handed to the smart model, plus where and when it was taken. */
+/**
+ * Why a tab was worth a picture. `thin-text`: little visible body text, so the
+ * picture mostly stands in for text and a small rendering reads fine.
+ * `image-heavy`: the text was there but an image or canvas filled the view, so
+ * the interesting part is inside that image and needs the full rendering.
+ */
+export type ImageCue = 'thin-text' | 'image-heavy';
+
+/** A downscaled screenshot handed to the smart model, plus where, when and why it was taken. */
 export interface ImageInput {
   dataUrl: string; // data:image/jpeg;base64,...
   title: string;
   host: string;
   /** Time of the capture, ISO 8601 with offset; relative dates in the picture are resolved against it. */
   now: string;
+  cue: ImageCue;
 }
 
 export const DEFAULT_SETTINGS: Settings = {

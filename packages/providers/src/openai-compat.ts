@@ -84,7 +84,9 @@ export class OpenAICompatProvider implements VisionProvider {
         role: 'user',
         content: [
           { type: 'text', text: `Screenshot of the tab "${image.title}" on ${image.host}. now: ${image.now}` },
-          { type: 'image_url', image_url: { url: image.dataUrl, detail: 'low' } },
+          // A thin-text page reads fine at the small rendering; a picture the user was
+          // looking at (a poster, a map, a pasted screenshot) needs the full one.
+          { type: 'image_url', image_url: { url: image.dataUrl, detail: image.cue === 'image-heavy' ? 'high' : 'low' } },
         ],
       },
     ];
