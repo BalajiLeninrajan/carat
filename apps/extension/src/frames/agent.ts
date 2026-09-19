@@ -3,7 +3,9 @@ import type { ScriptContext } from '../content/context';
 import { debounce } from '../content/context';
 import { performFill } from '../fill';
 import type { ElementEntry } from '../interact';
-import { enumerateElements, performInteraction, stillFits } from '../interact';
+import { enumerateElements, performInteraction, roleOf, stillFits } from '../interact';
+import type { OutlineTarget } from '../outline';
+import { buildOutline } from '../outline';
 import type { FieldEntry } from '../snapshot';
 import { enumerateFields, valueOf } from '../snapshot';
 import type { Box, FrameReport, PerformReply, PerformRequest, ToChild, ToTop } from './protocol';
@@ -38,6 +40,7 @@ export function startFrameAgent(ctx: ScriptContext, doc: Document, opts: FrameAg
   const token = Math.random().toString(36).slice(2, 10);
   let fields = new Map<string, FieldEntry>();
   let elements = new Map<string, ElementEntry>();
+  let outline = new Map<number, OutlineTarget>();
   let lastKey = '';
   let armed: AcceptKey | null = null;
   let stopped = false;
@@ -63,7 +66,9 @@ export function startFrameAgent(ctx: ScriptContext, doc: Document, opts: FrameAg
     const e = enumerateElements(doc, win, { frame: true, allowPayments });
     fields = f.registry;
     elements = e.registry;
-    const body: FrameReport = { fields: f.descriptors, elements: e.descriptors, rects: {}, fingerprints: {}, entries: {} };
+    const o = buildOutline(doc, win);
+    outline = o.registry;
+    const body: FrameReport = { fields: f.descriptors, elements: e.descriptors, rects: {}, fingerprints: {}, entries: {}, controls: o.controls };
     for (const [id, entry] of fields) {
       body.rects[id] = box(entry.el);
       body.fingerprints[id] = entry.fingerprint;
@@ -72,7 +77,7 @@ export function startFrameAgent(ctx: ScriptContext, doc: Document, opts: FrameAg
       body.rects[id] = box(entry.el);
       body.entries[id] = { role: entry.role, name: entry.name, ...(entry.money ? { money: true } : {}) };
     }
-    const key = JSON.stringify([body.fields, body.elements]);
+    const key = JSON.stringify([body.fields, body.elements, body.controls]);
     // An unasked-for report only when something changed; a reply always, so the top stops waiting.
     if (!reply && key === lastKey) return;
     lastKey = key;
@@ -81,6 +86,18 @@ export function startFrameAgent(ctx: ScriptContext, doc: Document, opts: FrameAg
   const reportSoon = debounce(ctx, () => void report(), FRAME_TIMING.debounceMs);
 
   async function perform(req: PerformRequest): Promise<PerformReply> {
+    if (req.kind === 'outline') {
+      const target = outline.get(req.n)?.el;
+      if (!target?.isConnected) return { ok: false };
+      if (req.action === 'fill') {
+        const outcome = await performFill(target, req.value, req.host ?? doc.location.host, req.locale ? { locale: req.locale } : {});
+        return outcome ? { ok: true, outcome } : { ok: false };
+      }
+      const role = roleOf(target) ?? 'button';
+      const verb = req.action === 'select' ? 'choose' : 'click';
+      if (!stillFits(target, verb, role)) return { ok: false };
+      return { ok: performInteraction(target, verb, req.value, role) };
+    }
     if (req.kind === 'fill') {
       const entry = fields.get(req.id);
       if (!entry || !entry.el.isConnected || valueOf(entry.el)) return { ok: false };

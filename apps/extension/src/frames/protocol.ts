@@ -1,4 +1,4 @@
-import type { ElementDescriptor, ElementRole, FieldDescriptor, InteractVerb } from '@carat/shared';
+import type { ElementDescriptor, ElementRole, FieldDescriptor, InteractVerb, OutlineControl } from '@carat/shared';
 import type { AcceptKey, RelayedKey } from '../chip';
 import type { FillOutcome } from '../fill';
 
@@ -31,11 +31,15 @@ export interface FrameReport {
   fingerprints: Record<string, string>;
   /** Per element id, what interact feedback and the done-set carry. */
   entries: Record<string, { role: ElementRole; name: string; money?: true }>;
+  /** The frame's own outline controls, numbered in its own space; the top splices them in with `fr` set. */
+  controls?: OutlineControl[];
 }
 
 export type PerformRequest =
   | { kind: 'fill'; id: string; value: string; host: string; locale?: string }
-  | { kind: 'interact'; id: string; verb: InteractVerb; value: string };
+  | { kind: 'interact'; id: string; verb: InteractVerb; value: string }
+  /** One action on one outline control, named by the number the frame itself gave it. */
+  | { kind: 'outline'; n: number; action: 'fill' | 'click' | 'select'; value: string; host?: string; locale?: string };
 
 export interface PerformReply {
   ok: boolean;
