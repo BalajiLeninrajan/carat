@@ -854,4 +854,22 @@ describe('orchestrate interactions', () => {
       ['e1', 0.9],
     ]);
   });
+
+  it('counts elements and interactions for the popup, stops at the site switch, and brings a dismissed one back when forced', async () => {
+    const { store, ctxId, now } = await seeded();
+    const reports: SuggestDiag[] = [];
+    const remote = fakeProvider('openai', async () => [interact({ sourceContextId: ctxId, elementId: 'e2', verb: 'set', value: '40' })]);
+    const deps = { store, settings: async () => enabled, createProvider: () => remote, now, onDiag: (d: SuggestDiag) => void reports.push(d) };
+    expect((await orchestrate(input, onCalendar, deps)).interactions).toHaveLength(1);
+    expect(reports[0]).toMatchObject({ gate: 'ok', fields: 0, elements: 4, offered: 0, navigation: 0, interactions: 1 });
+
+    const off = { ...enabled, disabledHosts: ['calendar.google.com'] };
+    expect((await orchestrate(input, onCalendar, { ...deps, settings: async () => off })).interactions).toEqual([]);
+    expect(reports[1]).toMatchObject({ gate: 'site-off' });
+
+    await handleFeedback({ kind: 'interact', host: 'calendar.google.com', role: 'slider', name: 'Volume', accepted: false }, store, 2);
+    expect((await orchestrate(input, onCalendar, deps)).interactions).toEqual([]);
+    expect((await orchestrate({ ...input, force: true }, onCalendar, deps)).interactions).toHaveLength(1);
+    expect(reports[3]).toMatchObject({ cached: false, interactions: 1 });
+  });
 });

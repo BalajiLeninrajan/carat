@@ -64,6 +64,15 @@ describe('describeSuggest', () => {
     );
   });
 
+  it('counts controls after tab offers', () => {
+    expect(describeSuggest({ ...base, gate: 'ok', cached: true, offered: 1, interactions: 1 }, NOW)).toBe(
+      'checked 15s ago: answer from cache, offered 1, 1 control',
+    );
+    expect(describeSuggest({ ...base, gate: 'ok', cached: true, offered: 0, navigation: 1, interactions: 2 }, NOW)).toBe(
+      'checked 15s ago: answer from cache, offered 0, 1 tab offer, 2 controls',
+    );
+  });
+
   it('says when the answer came from cache', () => {
     expect(describeSuggest({ ...base, gate: 'ok', cached: true, offered: 0 }, NOW)).toBe(
       'checked 15s ago: answer from cache, offered 0',
