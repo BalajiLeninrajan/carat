@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Ghost alignment — awkward text metrics</title>
+    <style>
+      body { font: 15px/1.6 system-ui, sans-serif; max-width: 720px; margin: 0 auto; padding: 40px 20px 100px; }
+      h1 { font-size: 19px; }
+      p.hint { color: #4a5666; }
+      label { display: block; margin: 22px 0 6px; font-weight: 600; font-size: 13px; }
+      input, textarea { width: 100%; box-sizing: border-box; }
+
+      .big { font-size: 26px; padding: 14px 18px; border: 3px solid #1668c4; border-radius: 12px; letter-spacing: 0.06em; }
+      .tiny { font-size: 11px; padding: 2px 4px; border: 1px solid #aaa; }
+      .right { text-align: right; padding: 10px; font-family: Georgia, serif; font-size: 18px; }
+      .rtl { direction: rtl; padding: 10px; font-size: 17px; }
+      .mono { font-family: ui-monospace, Menlo, monospace; font-size: 14px; padding: 12px 10px 12px 28px; line-height: 2.1; }
+      .tall { min-height: 140px; font-size: 16px; line-height: 1.9; padding: 12px; }
+      .scrolly { width: 240px; font-size: 16px; padding: 8px; }
+    </style>
+  </head>
+  <body>
+    <h1>Ghost alignment</h1>
+    <p class="hint">
+      The ghost overlay copies each field's text metrics. Every field below breaks a different
+      assumption — type a few words into each and check the dim continuation sits exactly where
+      the next character would land.
+    </p>
+
+    <label for="a">Large text, thick border, letter-spacing</label>
+    <input id="a" class="big" type="text" placeholder="the quick brown fox" />
+
+    <label for="b">Tiny text, tight padding</label>
+    <input id="b" class="tiny" type="text" />
+
+    <label for="c">Right-aligned serif</label>
+    <input id="c" class="right" type="text" />
+
+    <label for="d">Right-to-left</label>
+    <input id="d" class="rtl" type="text" />
+
+    <label for="e">Monospace, asymmetric padding, loose line-height</label>
+    <input id="e" class="mono" type="text" />
+
+    <label for="f">Narrow field — type past the edge to test horizontal scroll</label>
+    <input id="f" class="scrolly" type="text" />
+
+    <label for="g">Textarea — fill past the bottom to test vertical scroll</label>
+    <textarea id="g" class="tall" placeholder="Write several lines…"></textarea>
+
+    <label for="h">Search field inside a landmark</label>
+    <div role="search" aria-label="Site search">
+      <input id="h" type="search" placeholder="Search the docs" />
+    </div>
+  </body>
+</html>

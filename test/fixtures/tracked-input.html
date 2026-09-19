@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Tracked input — React-style value tracker</title>
+    <style>
+      body { font: 15px/1.6 system-ui, sans-serif; max-width: 640px; margin: 0 auto; padding: 40px 20px; }
+      h1 { font-size: 19px; }
+      p { color: #4a5666; }
+      input, textarea { width: 100%; font: inherit; padding: 8px 10px; border: 1px solid #c8d1de; border-radius: 7px; }
+      .state { margin-top: 10px; padding: 10px 12px; background: #0d1017; color: #7cc4ff; border-radius: 7px; font: 13px ui-monospace, Menlo, monospace; white-space: pre-wrap; }
+      .verdict { margin-top: 14px; font-weight: 700; }
+      .pass { color: #1f8a4c; }
+      .fail { color: #c33; }
+    </style>
+  </head>
+  <body>
+    <h1>React-style value tracker</h1>
+    <p>
+      React remembers the last value it wrote to a DOM node and ignores <code>input</code>
+      events whose value it believes it already knows. This page installs the same trick, so
+      accepting a suggestion here proves Carat writes through the native value setter rather
+      than assigning <code>.value</code> directly.
+    </p>
+
+    <label>
+      <strong>Display name</strong>
+      <input id="name" type="text" placeholder="Type, then press Tab on the ghost text" />
+    </label>
+
+    <div class="state" id="state">framework state: ""</div>
+    <div class="verdict" id="verdict">waiting…</div>
+
+    <script>
+      // A faithful miniature of React's ChangeEventPlugin value tracker.
+      function track(node) {
+        const descriptor = Object.getOwnPropertyDescriptor(
+          node instanceof HTMLTextAreaElement
+            ? HTMLTextAreaElement.prototype
+            : HTMLInputElement.prototype,
+          "value",
+        );
+        let current = "" + node.value;
+        Object.defineProperty(node, "value", {
+          configurable: true,
+          get() {
+            return descriptor.get.call(this);
+          },
+          set(value) {
+            current = "" + value;
+            descriptor.set.call(this, value);
+          },
+        });
+        return {
+          // Returns false when the value has not changed since the framework
+          // last saw it - React then drops the event on the floor.
+          changed() {
+            const next = "" + descriptor.get.call(node);
+            if (next === current) return false;
+            current = next;
+            return true;
+          },
+        };
+      }
+
+      const input = document.getElementById("name");
+      const state = document.getElementById("state");
+      const verdict = document.getElementById("verdict");
+      const tracker = track(input);
+      let frameworkState = "";
+      let sawSyntheticAccept = false;
+
+      input.addEventListener("input", (event) => {
+        if (!tracker.changed()) return; // swallowed, exactly like React
+        frameworkState = input.value;
+        state.textContent = 'framework state: "' + frameworkState + '"';
+        if (event.inputType === "insertText" && (event.data ?? "").length > 3) {
+          sawSyntheticAccept = true;
+        }
+        const synced = frameworkState === input.value;
+        verdict.textContent = sawSyntheticAccept
+          ? synced
+            ? "PASS — accepted text reached framework state"
+            : "FAIL — DOM and framework state diverged"
+          : "waiting…";
+        verdict.className = "verdict " + (sawSyntheticAccept && synced ? "pass" : "fail");
+      });
+    </script>
+  </body>
+</html>

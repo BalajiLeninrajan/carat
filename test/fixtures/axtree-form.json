@@ -1,0 +1,2944 @@
+[
+ {
+  "nodeId": "6",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "RootWebArea"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 144
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Ticket #4821 — Support Desk",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label",
+     "superseded": true
+    },
+    {
+     "type": "relatedElement",
+     "value": {
+      "type": "computedString",
+      "value": "Ticket #4821 — Support Desk"
+     },
+     "nativeSource": "title"
+    }
+   ]
+  },
+  "properties": [
+   {
+    "name": "focusable",
+    "value": {
+     "type": "booleanOrUndefined",
+     "value": true
+    }
+   },
+   {
+    "name": "focused",
+    "value": {
+     "type": "booleanOrUndefined",
+     "value": true
+    }
+   },
+   {
+    "name": "url",
+    "value": {
+     "type": "string",
+     "value": "http://127.0.0.1:8123/fixtures/form.html"
+    }
+   }
+  ],
+  "childIds": [
+   "10"
+  ],
+  "backendDOMNodeId": 6,
+  "frameId": "54C0D048F7425B127C01CCEE71BC9237"
+ },
+ {
+  "nodeId": "10",
+  "ignored": true,
+  "ignoredReasons": [
+   {
+    "name": "uninteresting",
+    "value": {
+     "type": "boolean",
+     "value": true
+    }
+   }
+  ],
+  "role": {
+   "type": "role",
+   "value": "none"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 0
+  },
+  "parentId": "6",
+  "childIds": [
+   "15",
+   "79"
+  ],
+  "backendDOMNodeId": 10
+ },
+ {
+  "nodeId": "15",
+  "ignored": true,
+  "ignoredReasons": [
+   {
+    "name": "uninteresting",
+    "value": {
+     "type": "boolean",
+     "value": true
+    }
+   }
+  ],
+  "role": {
+   "type": "role",
+   "value": "none"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 0
+  },
+  "parentId": "10",
+  "childIds": [
+   "16",
+   "17"
+  ],
+  "backendDOMNodeId": 15
+ },
+ {
+  "nodeId": "16",
+  "ignored": false,
+  "role": {
+   "type": "role",
+   "value": "banner"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 94
+  },
+  "name": {
+   "type": "computedString",
+   "value": "",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    },
+    {
+     "type": "attribute",
+     "attribute": "title"
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "15",
+  "childIds": [
+   "57"
+  ],
+  "backendDOMNodeId": 16
+ },
+ {
+  "nodeId": "17",
+  "ignored": true,
+  "ignoredReasons": [
+   {
+    "name": "uninteresting",
+    "value": {
+     "type": "boolean",
+     "value": true
+    }
+   }
+  ],
+  "role": {
+   "type": "role",
+   "value": "none"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 0
+  },
+  "parentId": "15",
+  "childIds": [
+   "18"
+  ],
+  "backendDOMNodeId": 17
+ },
+ {
+  "nodeId": "18",
+  "ignored": false,
+  "role": {
+   "type": "role",
+   "value": "main"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 118
+  },
+  "name": {
+   "type": "computedString",
+   "value": "",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    },
+    {
+     "type": "attribute",
+     "attribute": "title"
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "17",
+  "childIds": [
+   "19",
+   "20",
+   "21",
+   "1"
+  ],
+  "backendDOMNodeId": 18
+ },
+ {
+  "nodeId": "79",
+  "ignored": true,
+  "ignoredReasons": [
+   {
+    "name": "ariaHiddenSubtree",
+    "value": {
+     "type": "idref",
+     "relatedNodes": [
+      {
+       "backendDOMNodeId": 80
+      }
+     ]
+    }
+   }
+  ],
+  "role": {
+   "type": "role",
+   "value": "none"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 0
+  },
+  "parentId": "10",
+  "childIds": [],
+  "backendDOMNodeId": 79
+ },
+ {
+  "nodeId": "57",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "StaticText"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 158
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Support Desk",
+   "sources": [
+    {
+     "type": "contents",
+     "value": {
+      "type": "computedString",
+      "value": "Support Desk"
+     }
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "16",
+  "childIds": [
+   "-1000000002"
+  ],
+  "backendDOMNodeId": 57
+ },
+ {
+  "nodeId": "19",
+  "ignored": false,
+  "role": {
+   "type": "role",
+   "value": "heading"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 96
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Printer offline after firmware update",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    },
+    {
+     "type": "contents",
+     "value": {
+      "type": "computedString",
+      "value": "Printer offline after firmware update"
+     }
+    },
+    {
+     "type": "attribute",
+     "attribute": "title",
+     "superseded": true
+    }
+   ]
+  },
+  "properties": [
+   {
+    "name": "level",
+    "value": {
+     "type": "integer",
+     "value": 1
+    }
+   }
+  ],
+  "parentId": "18",
+  "childIds": [
+   "58"
+  ],
+  "backendDOMNodeId": 19
+ },
+ {
+  "nodeId": "20",
+  "ignored": false,
+  "role": {
+   "type": "role",
+   "value": "paragraph"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 133
+  },
+  "name": {
+   "type": "computedString",
+   "value": "",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "18",
+  "childIds": [
+   "59"
+  ],
+  "backendDOMNodeId": 20
+ },
+ {
+  "nodeId": "21",
+  "ignored": false,
+  "role": {
+   "type": "role",
+   "value": "region"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 143
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Conversation",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "value": {
+      "type": "computedString",
+      "value": "Conversation"
+     },
+     "attribute": "aria-label",
+     "attributeValue": {
+      "type": "string",
+      "value": "Conversation"
+     }
+    },
+    {
+     "type": "attribute",
+     "attribute": "title",
+     "superseded": true
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "18",
+  "childIds": [
+   "22",
+   "23",
+   "7",
+   "26"
+  ],
+  "backendDOMNodeId": 21
+ },
+ {
+  "nodeId": "1",
+  "ignored": false,
+  "role": {
+   "type": "role",
+   "value": "form"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 87
+  },
+  "name": {
+   "type": "computedString",
+   "value": "",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    },
+    {
+     "type": "attribute",
+     "attribute": "title"
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "18",
+  "childIds": [
+   "28"
+  ],
+  "backendDOMNodeId": 1
+ },
+ {
+  "nodeId": "-1000000002",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "InlineTextBox"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 101
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Support Desk"
+  },
+  "properties": [],
+  "parentId": "57",
+  "childIds": []
+ },
+ {
+  "nodeId": "58",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "StaticText"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 158
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Printer offline after firmware update",
+   "sources": [
+    {
+     "type": "contents",
+     "value": {
+      "type": "computedString",
+      "value": "Printer offline after firmware update"
+     }
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "19",
+  "childIds": [
+   "-1000000003"
+  ],
+  "backendDOMNodeId": 58
+ },
+ {
+  "nodeId": "59",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "StaticText"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 158
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Ticket #4821 · opened 2 days ago · priority high",
+   "sources": [
+    {
+     "type": "contents",
+     "value": {
+      "type": "computedString",
+      "value": "Ticket #4821 · opened 2 days ago · priority high"
+     }
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "20",
+  "childIds": [
+   "-1000000004"
+  ],
+  "backendDOMNodeId": 59
+ },
+ {
+  "nodeId": "22",
+  "ignored": false,
+  "role": {
+   "type": "role",
+   "value": "heading"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 96
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Conversation",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    },
+    {
+     "type": "contents",
+     "value": {
+      "type": "computedString",
+      "value": "Conversation"
+     }
+    },
+    {
+     "type": "attribute",
+     "attribute": "title",
+     "superseded": true
+    }
+   ]
+  },
+  "properties": [
+   {
+    "name": "level",
+    "value": {
+     "type": "integer",
+     "value": 2
+    }
+   }
+  ],
+  "parentId": "21",
+  "childIds": [
+   "60"
+  ],
+  "backendDOMNodeId": 22
+ },
+ {
+  "nodeId": "23",
+  "ignored": true,
+  "ignoredReasons": [
+   {
+    "name": "uninteresting",
+    "value": {
+     "type": "boolean",
+     "value": true
+    }
+   }
+  ],
+  "role": {
+   "type": "role",
+   "value": "none"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 0
+  },
+  "parentId": "21",
+  "childIds": [
+   "24",
+   "62"
+  ],
+  "backendDOMNodeId": 23
+ },
+ {
+  "nodeId": "24",
+  "ignored": false,
+  "role": {
+   "type": "role",
+   "value": "generic"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 88
+  },
+  "name": {
+   "type": "computedString",
+   "value": "",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "23",
+  "childIds": [
+   "61"
+  ],
+  "backendDOMNodeId": 24
+ },
+ {
+  "nodeId": "62",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "StaticText"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 158
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Since the 3.2 firmware update my HP M452 shows as offline after every reboot. Power cycling the printer fixes it until the next restart. Three machines on the same subnet are affected, all running Windows 11.",
+   "sources": [
+    {
+     "type": "contents",
+     "value": {
+      "type": "computedString",
+      "value": "Since the 3.2 firmware update my HP M452 shows as offline after every reboot. Power cycling the printer fixes it until the next restart. Three machines on the same subnet are affected, all running Windows 11."
+     }
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "23",
+  "childIds": [
+   "-1000000007",
+   "-1000000008"
+  ],
+  "backendDOMNodeId": 62
+ },
+ {
+  "nodeId": "7",
+  "ignored": true,
+  "ignoredReasons": [
+   {
+    "name": "uninteresting",
+    "value": {
+     "type": "boolean",
+     "value": true
+    }
+   }
+  ],
+  "role": {
+   "type": "role",
+   "value": "none"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 0
+  },
+  "parentId": "21",
+  "childIds": [
+   "25",
+   "64"
+  ],
+  "backendDOMNodeId": 7
+ },
+ {
+  "nodeId": "25",
+  "ignored": false,
+  "role": {
+   "type": "role",
+   "value": "generic"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 88
+  },
+  "name": {
+   "type": "computedString",
+   "value": "",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "7",
+  "childIds": [
+   "63"
+  ],
+  "backendDOMNodeId": 25
+ },
+ {
+  "nodeId": "64",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "StaticText"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 158
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Thanks for reporting this. Could you tell me which exact firmware build the printer is on? It is under Settings → Reports → Configuration Page.",
+   "sources": [
+    {
+     "type": "contents",
+     "value": {
+      "type": "computedString",
+      "value": "Thanks for reporting this. Could you tell me which exact firmware build the printer is on? It is under Settings → Reports → Configuration Page."
+     }
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "7",
+  "childIds": [
+   "-1000000010",
+   "-1000000011"
+  ],
+  "backendDOMNodeId": 64
+ },
+ {
+  "nodeId": "26",
+  "ignored": true,
+  "ignoredReasons": [
+   {
+    "name": "uninteresting",
+    "value": {
+     "type": "boolean",
+     "value": true
+    }
+   }
+  ],
+  "role": {
+   "type": "role",
+   "value": "none"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 0
+  },
+  "parentId": "21",
+  "childIds": [
+   "27",
+   "66"
+  ],
+  "backendDOMNodeId": 26
+ },
+ {
+  "nodeId": "27",
+  "ignored": false,
+  "role": {
+   "type": "role",
+   "value": "generic"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 88
+  },
+  "name": {
+   "type": "computedString",
+   "value": "",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "26",
+  "childIds": [
+   "65"
+  ],
+  "backendDOMNodeId": 27
+ },
+ {
+  "nodeId": "66",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "StaticText"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 158
+  },
+  "name": {
+   "type": "computedString",
+   "value": "It says 3.2.0.4711. The other two are on the same build.",
+   "sources": [
+    {
+     "type": "contents",
+     "value": {
+      "type": "computedString",
+      "value": "It says 3.2.0.4711. The other two are on the same build."
+     }
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "26",
+  "childIds": [
+   "-1000000013"
+  ],
+  "backendDOMNodeId": 66
+ },
+ {
+  "nodeId": "28",
+  "ignored": false,
+  "role": {
+   "type": "role",
+   "value": "group"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 93
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Reply",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    },
+    {
+     "type": "relatedElement",
+     "value": {
+      "type": "computedString",
+      "value": "Reply"
+     },
+     "nativeSource": "legend",
+     "nativeSourceValue": {
+      "type": "nodeList",
+      "relatedNodes": [
+       {
+        "backendDOMNodeId": 29,
+        "text": "Reply"
+       }
+      ]
+     }
+    },
+    {
+     "type": "attribute",
+     "attribute": "title",
+     "superseded": true
+    }
+   ]
+  },
+  "properties": [
+   {
+    "name": "invalid",
+    "value": {
+     "type": "token",
+     "value": "false"
+    }
+   },
+   {
+    "name": "labelledby",
+    "value": {
+     "type": "nodeList",
+     "relatedNodes": [
+      {
+       "backendDOMNodeId": 29,
+       "text": "Reply"
+      }
+     ]
+    }
+   }
+  ],
+  "parentId": "1",
+  "childIds": [
+   "29",
+   "30",
+   "47",
+   "49",
+   "53",
+   "56"
+  ],
+  "backendDOMNodeId": 28
+ },
+ {
+  "nodeId": "-1000000003",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "InlineTextBox"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 101
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Printer offline after firmware update"
+  },
+  "properties": [],
+  "parentId": "58",
+  "childIds": []
+ },
+ {
+  "nodeId": "-1000000004",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "InlineTextBox"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 101
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Ticket #4821 · opened 2 days ago · priority high"
+  },
+  "properties": [],
+  "parentId": "59",
+  "childIds": []
+ },
+ {
+  "nodeId": "60",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "StaticText"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 158
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Conversation",
+   "sources": [
+    {
+     "type": "contents",
+     "value": {
+      "type": "computedString",
+      "value": "Conversation"
+     }
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "22",
+  "childIds": [
+   "-1000000005"
+  ],
+  "backendDOMNodeId": 60
+ },
+ {
+  "nodeId": "61",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "StaticText"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 158
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Customer · 2 days ago",
+   "sources": [
+    {
+     "type": "contents",
+     "value": {
+      "type": "computedString",
+      "value": "Customer · 2 days ago"
+     }
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "24",
+  "childIds": [
+   "-1000000006"
+  ],
+  "backendDOMNodeId": 61
+ },
+ {
+  "nodeId": "-1000000007",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "InlineTextBox"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 101
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Since the 3.2 firmware update my HP M452 shows as offline after every reboot. Power cycling the printer fixes "
+  },
+  "properties": [],
+  "parentId": "62",
+  "childIds": []
+ },
+ {
+  "nodeId": "-1000000008",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "InlineTextBox"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 101
+  },
+  "name": {
+   "type": "computedString",
+   "value": "it until the next restart. Three machines on the same subnet are affected, all running Windows 11."
+  },
+  "properties": [],
+  "parentId": "62",
+  "childIds": []
+ },
+ {
+  "nodeId": "63",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "StaticText"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 158
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Agent · 4 hours ago",
+   "sources": [
+    {
+     "type": "contents",
+     "value": {
+      "type": "computedString",
+      "value": "Agent · 4 hours ago"
+     }
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "25",
+  "childIds": [
+   "-1000000009"
+  ],
+  "backendDOMNodeId": 63
+ },
+ {
+  "nodeId": "-1000000010",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "InlineTextBox"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 101
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Thanks for reporting this. Could you tell me which exact firmware build the printer is on? It is under Settings "
+  },
+  "properties": [],
+  "parentId": "64",
+  "childIds": []
+ },
+ {
+  "nodeId": "-1000000011",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "InlineTextBox"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 101
+  },
+  "name": {
+   "type": "computedString",
+   "value": "→ Reports → Configuration Page."
+  },
+  "properties": [],
+  "parentId": "64",
+  "childIds": []
+ },
+ {
+  "nodeId": "65",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "StaticText"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 158
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Customer · 1 hour ago",
+   "sources": [
+    {
+     "type": "contents",
+     "value": {
+      "type": "computedString",
+      "value": "Customer · 1 hour ago"
+     }
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "27",
+  "childIds": [
+   "-1000000012"
+  ],
+  "backendDOMNodeId": 65
+ },
+ {
+  "nodeId": "-1000000013",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "InlineTextBox"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 101
+  },
+  "name": {
+   "type": "computedString",
+   "value": "It says 3.2.0.4711. The other two are on the same build."
+  },
+  "properties": [],
+  "parentId": "66",
+  "childIds": []
+ },
+ {
+  "nodeId": "29",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "Legend"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 108
+  },
+  "name": {
+   "type": "computedString",
+   "value": "",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    },
+    {
+     "type": "attribute",
+     "attribute": "title"
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "28",
+  "childIds": [
+   "67"
+  ],
+  "backendDOMNodeId": 29
+ },
+ {
+  "nodeId": "30",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "LabelText"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 104
+  },
+  "name": {
+   "type": "computedString",
+   "value": "",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    },
+    {
+     "type": "attribute",
+     "attribute": "title"
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "28",
+  "childIds": [
+   "31",
+   "2"
+  ],
+  "backendDOMNodeId": 30
+ },
+ {
+  "nodeId": "47",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "LabelText"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 104
+  },
+  "name": {
+   "type": "computedString",
+   "value": "",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    },
+    {
+     "type": "attribute",
+     "attribute": "title"
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "28",
+  "childIds": [
+   "48",
+   "3"
+  ],
+  "backendDOMNodeId": 47
+ },
+ {
+  "nodeId": "49",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "LabelText"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 104
+  },
+  "name": {
+   "type": "computedString",
+   "value": "",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    },
+    {
+     "type": "attribute",
+     "attribute": "title"
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "28",
+  "childIds": [
+   "50",
+   "4"
+  ],
+  "backendDOMNodeId": 49
+ },
+ {
+  "nodeId": "53",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "LabelText"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 104
+  },
+  "name": {
+   "type": "computedString",
+   "value": "",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    },
+    {
+     "type": "attribute",
+     "attribute": "title"
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "28",
+  "childIds": [
+   "54",
+   "5"
+  ],
+  "backendDOMNodeId": 53
+ },
+ {
+  "nodeId": "56",
+  "ignored": false,
+  "role": {
+   "type": "role",
+   "value": "button"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 9
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Send reply",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    },
+    {
+     "type": "relatedElement",
+     "nativeSource": "label"
+    },
+    {
+     "type": "contents",
+     "value": {
+      "type": "computedString",
+      "value": "Send reply"
+     }
+    },
+    {
+     "type": "attribute",
+     "attribute": "title",
+     "superseded": true
+    }
+   ]
+  },
+  "properties": [
+   {
+    "name": "invalid",
+    "value": {
+     "type": "token",
+     "value": "false"
+    }
+   },
+   {
+    "name": "focusable",
+    "value": {
+     "type": "booleanOrUndefined",
+     "value": true
+    }
+   }
+  ],
+  "parentId": "28",
+  "childIds": [
+   "74"
+  ],
+  "backendDOMNodeId": 56
+ },
+ {
+  "nodeId": "-1000000005",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "InlineTextBox"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 101
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Conversation"
+  },
+  "properties": [],
+  "parentId": "60",
+  "childIds": []
+ },
+ {
+  "nodeId": "-1000000006",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "InlineTextBox"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 101
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Customer · 2 days ago"
+  },
+  "properties": [],
+  "parentId": "61",
+  "childIds": []
+ },
+ {
+  "nodeId": "-1000000009",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "InlineTextBox"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 101
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Agent · 4 hours ago"
+  },
+  "properties": [],
+  "parentId": "63",
+  "childIds": []
+ },
+ {
+  "nodeId": "-1000000012",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "InlineTextBox"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 101
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Customer · 1 hour ago"
+  },
+  "properties": [],
+  "parentId": "65",
+  "childIds": []
+ },
+ {
+  "nodeId": "67",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "StaticText"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 158
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Reply",
+   "sources": [
+    {
+     "type": "contents",
+     "value": {
+      "type": "computedString",
+      "value": "Reply"
+     }
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "29",
+  "childIds": [
+   "-1000000014"
+  ],
+  "backendDOMNodeId": 67
+ },
+ {
+  "nodeId": "31",
+  "ignored": true,
+  "ignoredReasons": [
+   {
+    "name": "uninteresting",
+    "value": {
+     "type": "boolean",
+     "value": true
+    }
+   }
+  ],
+  "role": {
+   "type": "role",
+   "value": "none"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 0
+  },
+  "parentId": "30",
+  "childIds": [
+   "68"
+  ],
+  "backendDOMNodeId": 31
+ },
+ {
+  "nodeId": "68",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "StaticText"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 158
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Status",
+   "sources": [
+    {
+     "type": "contents",
+     "value": {
+      "type": "computedString",
+      "value": "Status"
+     }
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "31",
+  "childIds": [
+   "-1000000015"
+  ],
+  "backendDOMNodeId": 68
+ },
+ {
+  "nodeId": "2",
+  "ignored": false,
+  "role": {
+   "type": "role",
+   "value": "combobox"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 209
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Status",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    },
+    {
+     "type": "relatedElement",
+     "value": {
+      "type": "computedString",
+      "value": "Status"
+     },
+     "nativeSource": "labelwrapped",
+     "nativeSourceValue": {
+      "type": "nodeList",
+      "relatedNodes": [
+       {
+        "backendDOMNodeId": 30,
+        "text": "Status"
+       }
+      ]
+     }
+    },
+    {
+     "type": "attribute",
+     "attribute": "title",
+     "superseded": true
+    }
+   ]
+  },
+  "value": {
+   "type": "string",
+   "value": "Awaiting customer"
+  },
+  "properties": [
+   {
+    "name": "invalid",
+    "value": {
+     "type": "token",
+     "value": "false"
+    }
+   },
+   {
+    "name": "focusable",
+    "value": {
+     "type": "booleanOrUndefined",
+     "value": true
+    }
+   },
+   {
+    "name": "hasPopup",
+    "value": {
+     "type": "token",
+     "value": "menu"
+    }
+   },
+   {
+    "name": "expanded",
+    "value": {
+     "type": "booleanOrUndefined",
+     "value": false
+    }
+   },
+   {
+    "name": "labelledby",
+    "value": {
+     "type": "nodeList",
+     "relatedNodes": [
+      {
+       "backendDOMNodeId": 30,
+       "text": "Status"
+      }
+     ]
+    }
+   }
+  ],
+  "parentId": "30",
+  "childIds": [
+   "34"
+  ],
+  "backendDOMNodeId": 2
+ },
+ {
+  "nodeId": "48",
+  "ignored": true,
+  "ignoredReasons": [
+   {
+    "name": "uninteresting",
+    "value": {
+     "type": "boolean",
+     "value": true
+    }
+   }
+  ],
+  "role": {
+   "type": "role",
+   "value": "none"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 0
+  },
+  "parentId": "47",
+  "childIds": [
+   "69"
+  ],
+  "backendDOMNodeId": 48
+ },
+ {
+  "nodeId": "69",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "StaticText"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 158
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Subject",
+   "sources": [
+    {
+     "type": "contents",
+     "value": {
+      "type": "computedString",
+      "value": "Subject"
+     }
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "48",
+  "childIds": [
+   "-1000000016"
+  ],
+  "backendDOMNodeId": 69
+ },
+ {
+  "nodeId": "3",
+  "ignored": false,
+  "role": {
+   "type": "role",
+   "value": "textbox"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 170
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Subject",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    },
+    {
+     "type": "relatedElement",
+     "value": {
+      "type": "computedString",
+      "value": "Subject"
+     },
+     "nativeSource": "labelwrapped",
+     "nativeSourceValue": {
+      "type": "nodeList",
+      "relatedNodes": [
+       {
+        "backendDOMNodeId": 47,
+        "text": "Subject"
+       }
+      ]
+     }
+    },
+    {
+     "type": "attribute",
+     "attribute": "title",
+     "superseded": true
+    },
+    {
+     "type": "placeholder",
+     "attribute": "placeholder",
+     "superseded": true
+    },
+    {
+     "type": "placeholder",
+     "attribute": "aria-placeholder",
+     "superseded": true
+    },
+    {
+     "type": "attribute",
+     "attribute": "title",
+     "superseded": true
+    }
+   ]
+  },
+  "value": {
+   "type": "string",
+   "value": "Re: Printer offline after firmware update"
+  },
+  "properties": [
+   {
+    "name": "invalid",
+    "value": {
+     "type": "token",
+     "value": "false"
+    }
+   },
+   {
+    "name": "focusable",
+    "value": {
+     "type": "booleanOrUndefined",
+     "value": true
+    }
+   },
+   {
+    "name": "editable",
+    "value": {
+     "type": "token",
+     "value": "plaintext"
+    }
+   },
+   {
+    "name": "settable",
+    "value": {
+     "type": "booleanOrUndefined",
+     "value": true
+    }
+   },
+   {
+    "name": "multiline",
+    "value": {
+     "type": "boolean",
+     "value": false
+    }
+   },
+   {
+    "name": "readonly",
+    "value": {
+     "type": "boolean",
+     "value": false
+    }
+   },
+   {
+    "name": "required",
+    "value": {
+     "type": "boolean",
+     "value": false
+    }
+   },
+   {
+    "name": "labelledby",
+    "value": {
+     "type": "nodeList",
+     "relatedNodes": [
+      {
+       "backendDOMNodeId": 47,
+       "text": "Subject"
+      }
+     ]
+    }
+   }
+  ],
+  "parentId": "47",
+  "childIds": [
+   "8"
+  ],
+  "backendDOMNodeId": 3
+ },
+ {
+  "nodeId": "50",
+  "ignored": true,
+  "ignoredReasons": [
+   {
+    "name": "uninteresting",
+    "value": {
+     "type": "boolean",
+     "value": true
+    }
+   }
+  ],
+  "role": {
+   "type": "role",
+   "value": "none"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 0
+  },
+  "parentId": "49",
+  "childIds": [
+   "71"
+  ],
+  "backendDOMNodeId": 50
+ },
+ {
+  "nodeId": "71",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "StaticText"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 158
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Reply body",
+   "sources": [
+    {
+     "type": "contents",
+     "value": {
+      "type": "computedString",
+      "value": "Reply body"
+     }
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "50",
+  "childIds": [
+   "-1000000018"
+  ],
+  "backendDOMNodeId": 71
+ },
+ {
+  "nodeId": "4",
+  "ignored": false,
+  "role": {
+   "type": "role",
+   "value": "textbox"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 170
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Reply body",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    },
+    {
+     "type": "relatedElement",
+     "value": {
+      "type": "computedString",
+      "value": "Reply body"
+     },
+     "nativeSource": "labelwrapped",
+     "nativeSourceValue": {
+      "type": "nodeList",
+      "relatedNodes": [
+       {
+        "backendDOMNodeId": 49,
+        "text": "Reply body"
+       }
+      ]
+     }
+    },
+    {
+     "type": "attribute",
+     "attribute": "title",
+     "superseded": true
+    },
+    {
+     "type": "placeholder",
+     "value": {
+      "type": "computedString",
+      "value": "Write your reply…"
+     },
+     "attribute": "placeholder",
+     "attributeValue": {
+      "type": "string",
+      "value": "Write your reply…"
+     },
+     "superseded": true
+    },
+    {
+     "type": "placeholder",
+     "attribute": "aria-placeholder",
+     "superseded": true
+    },
+    {
+     "type": "attribute",
+     "attribute": "title",
+     "superseded": true
+    }
+   ]
+  },
+  "value": {
+   "type": "string",
+   "value": "Thanks for the details. Could you"
+  },
+  "properties": [
+   {
+    "name": "invalid",
+    "value": {
+     "type": "token",
+     "value": "false"
+    }
+   },
+   {
+    "name": "focusable",
+    "value": {
+     "type": "booleanOrUndefined",
+     "value": true
+    }
+   },
+   {
+    "name": "focused",
+    "value": {
+     "type": "booleanOrUndefined",
+     "value": true
+    }
+   },
+   {
+    "name": "editable",
+    "value": {
+     "type": "token",
+     "value": "plaintext"
+    }
+   },
+   {
+    "name": "settable",
+    "value": {
+     "type": "booleanOrUndefined",
+     "value": true
+    }
+   },
+   {
+    "name": "multiline",
+    "value": {
+     "type": "boolean",
+     "value": true
+    }
+   },
+   {
+    "name": "readonly",
+    "value": {
+     "type": "boolean",
+     "value": false
+    }
+   },
+   {
+    "name": "required",
+    "value": {
+     "type": "boolean",
+     "value": false
+    }
+   },
+   {
+    "name": "labelledby",
+    "value": {
+     "type": "nodeList",
+     "relatedNodes": [
+      {
+       "backendDOMNodeId": 49,
+       "text": "Reply body"
+      }
+     ]
+    }
+   }
+  ],
+  "parentId": "49",
+  "childIds": [
+   "51",
+   "52"
+  ],
+  "backendDOMNodeId": 4
+ },
+ {
+  "nodeId": "54",
+  "ignored": true,
+  "ignoredReasons": [
+   {
+    "name": "uninteresting",
+    "value": {
+     "type": "boolean",
+     "value": true
+    }
+   }
+  ],
+  "role": {
+   "type": "role",
+   "value": "none"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 0
+  },
+  "parentId": "53",
+  "childIds": [
+   "73"
+  ],
+  "backendDOMNodeId": 54
+ },
+ {
+  "nodeId": "73",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "StaticText"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 158
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Internal note (not sent to customer)",
+   "sources": [
+    {
+     "type": "contents",
+     "value": {
+      "type": "computedString",
+      "value": "Internal note (not sent to customer)"
+     }
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "54",
+  "childIds": [
+   "-1000000020"
+  ],
+  "backendDOMNodeId": 73
+ },
+ {
+  "nodeId": "5",
+  "ignored": false,
+  "role": {
+   "type": "role",
+   "value": "textbox"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 170
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Internal note (not sent to customer)",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    },
+    {
+     "type": "relatedElement",
+     "value": {
+      "type": "computedString",
+      "value": "Internal note (not sent to customer)"
+     },
+     "nativeSource": "labelwrapped",
+     "nativeSourceValue": {
+      "type": "nodeList",
+      "relatedNodes": [
+       {
+        "backendDOMNodeId": 53,
+        "text": "Internal note (not sent to customer)"
+       }
+      ]
+     }
+    },
+    {
+     "type": "attribute",
+     "attribute": "title",
+     "superseded": true
+    },
+    {
+     "type": "placeholder",
+     "attribute": "placeholder",
+     "superseded": true
+    },
+    {
+     "type": "placeholder",
+     "attribute": "aria-placeholder",
+     "superseded": true
+    },
+    {
+     "type": "attribute",
+     "attribute": "title",
+     "superseded": true
+    }
+   ]
+  },
+  "properties": [
+   {
+    "name": "invalid",
+    "value": {
+     "type": "token",
+     "value": "false"
+    }
+   },
+   {
+    "name": "focusable",
+    "value": {
+     "type": "booleanOrUndefined",
+     "value": true
+    }
+   },
+   {
+    "name": "editable",
+    "value": {
+     "type": "token",
+     "value": "plaintext"
+    }
+   },
+   {
+    "name": "settable",
+    "value": {
+     "type": "booleanOrUndefined",
+     "value": true
+    }
+   },
+   {
+    "name": "multiline",
+    "value": {
+     "type": "boolean",
+     "value": false
+    }
+   },
+   {
+    "name": "readonly",
+    "value": {
+     "type": "boolean",
+     "value": false
+    }
+   },
+   {
+    "name": "required",
+    "value": {
+     "type": "boolean",
+     "value": false
+    }
+   },
+   {
+    "name": "labelledby",
+    "value": {
+     "type": "nodeList",
+     "relatedNodes": [
+      {
+       "backendDOMNodeId": 53,
+       "text": "Internal note (not sent to customer)"
+      }
+     ]
+    }
+   }
+  ],
+  "parentId": "53",
+  "childIds": [
+   "55"
+  ],
+  "backendDOMNodeId": 5
+ },
+ {
+  "nodeId": "74",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "StaticText"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 158
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Send reply",
+   "sources": [
+    {
+     "type": "contents",
+     "value": {
+      "type": "computedString",
+      "value": "Send reply"
+     }
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "56",
+  "childIds": [
+   "-1000000021"
+  ],
+  "backendDOMNodeId": 74
+ },
+ {
+  "nodeId": "-1000000014",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "InlineTextBox"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 101
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Reply"
+  },
+  "properties": [],
+  "parentId": "67",
+  "childIds": []
+ },
+ {
+  "nodeId": "-1000000015",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "InlineTextBox"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 101
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Status"
+  },
+  "properties": [],
+  "parentId": "68",
+  "childIds": []
+ },
+ {
+  "nodeId": "34",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "MenuListPopup"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 128
+  },
+  "name": {
+   "type": "computedString",
+   "value": "",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    },
+    {
+     "type": "attribute",
+     "attribute": "title"
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "2",
+  "childIds": [
+   "35"
+  ],
+  "backendDOMNodeId": 34
+ },
+ {
+  "nodeId": "-1000000016",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "InlineTextBox"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 101
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Subject"
+  },
+  "properties": [],
+  "parentId": "69",
+  "childIds": []
+ },
+ {
+  "nodeId": "8",
+  "ignored": false,
+  "role": {
+   "type": "role",
+   "value": "generic"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 88
+  },
+  "name": {
+   "type": "computedString",
+   "value": "",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    }
+   ]
+  },
+  "properties": [
+   {
+    "name": "editable",
+    "value": {
+     "type": "token",
+     "value": "plaintext"
+    }
+   }
+  ],
+  "parentId": "3",
+  "childIds": [
+   "70"
+  ],
+  "backendDOMNodeId": 8
+ },
+ {
+  "nodeId": "-1000000018",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "InlineTextBox"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 101
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Reply body"
+  },
+  "properties": [],
+  "parentId": "71",
+  "childIds": []
+ },
+ {
+  "nodeId": "51",
+  "ignored": true,
+  "ignoredReasons": [
+   {
+    "name": "notRendered",
+    "value": {
+     "type": "boolean",
+     "value": true
+    }
+   }
+  ],
+  "role": {
+   "type": "role",
+   "value": "none"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 0
+  },
+  "parentId": "4",
+  "childIds": [],
+  "backendDOMNodeId": 51
+ },
+ {
+  "nodeId": "52",
+  "ignored": false,
+  "role": {
+   "type": "role",
+   "value": "generic"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 88
+  },
+  "name": {
+   "type": "computedString",
+   "value": "",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    }
+   ]
+  },
+  "properties": [
+   {
+    "name": "editable",
+    "value": {
+     "type": "token",
+     "value": "plaintext"
+    }
+   }
+  ],
+  "parentId": "4",
+  "childIds": [
+   "72"
+  ],
+  "backendDOMNodeId": 52
+ },
+ {
+  "nodeId": "-1000000020",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "InlineTextBox"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 101
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Internal note (not sent to customer)"
+  },
+  "properties": [],
+  "parentId": "73",
+  "childIds": []
+ },
+ {
+  "nodeId": "55",
+  "ignored": false,
+  "role": {
+   "type": "role",
+   "value": "generic"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 88
+  },
+  "name": {
+   "type": "computedString",
+   "value": "",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    }
+   ]
+  },
+  "properties": [
+   {
+    "name": "editable",
+    "value": {
+     "type": "token",
+     "value": "plaintext"
+    }
+   }
+  ],
+  "parentId": "5",
+  "childIds": [],
+  "backendDOMNodeId": 55
+ },
+ {
+  "nodeId": "-1000000021",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "InlineTextBox"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 101
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Send reply"
+  },
+  "properties": [],
+  "parentId": "74",
+  "childIds": []
+ },
+ {
+  "nodeId": "35",
+  "ignored": true,
+  "ignoredReasons": [
+   {
+    "name": "uninteresting",
+    "value": {
+     "type": "boolean",
+     "value": true
+    }
+   }
+  ],
+  "role": {
+   "type": "role",
+   "value": "none"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 0
+  },
+  "parentId": "34",
+  "childIds": [
+   "38",
+   "41",
+   "44"
+  ],
+  "backendDOMNodeId": 35
+ },
+ {
+  "nodeId": "38",
+  "ignored": false,
+  "role": {
+   "type": "role",
+   "value": "option"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 127
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Pending",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    },
+    {
+     "type": "contents",
+     "value": {
+      "type": "computedString",
+      "value": "Pending"
+     }
+    },
+    {
+     "type": "attribute",
+     "attribute": "title",
+     "superseded": true
+    }
+   ]
+  },
+  "properties": [
+   {
+    "name": "focusable",
+    "value": {
+     "type": "booleanOrUndefined",
+     "value": true
+    }
+   },
+   {
+    "name": "selected",
+    "value": {
+     "type": "booleanOrUndefined",
+     "value": false
+    }
+   }
+  ],
+  "parentId": "35",
+  "childIds": [],
+  "backendDOMNodeId": 38
+ },
+ {
+  "nodeId": "41",
+  "ignored": false,
+  "role": {
+   "type": "role",
+   "value": "option"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 127
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Awaiting customer",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    },
+    {
+     "type": "contents",
+     "value": {
+      "type": "computedString",
+      "value": "Awaiting customer"
+     }
+    },
+    {
+     "type": "attribute",
+     "attribute": "title",
+     "superseded": true
+    }
+   ]
+  },
+  "properties": [
+   {
+    "name": "focusable",
+    "value": {
+     "type": "booleanOrUndefined",
+     "value": true
+    }
+   },
+   {
+    "name": "selected",
+    "value": {
+     "type": "booleanOrUndefined",
+     "value": true
+    }
+   }
+  ],
+  "parentId": "35",
+  "childIds": [],
+  "backendDOMNodeId": 41
+ },
+ {
+  "nodeId": "44",
+  "ignored": false,
+  "role": {
+   "type": "role",
+   "value": "option"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 127
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Resolved",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    },
+    {
+     "type": "contents",
+     "value": {
+      "type": "computedString",
+      "value": "Resolved"
+     }
+    },
+    {
+     "type": "attribute",
+     "attribute": "title",
+     "superseded": true
+    }
+   ]
+  },
+  "properties": [
+   {
+    "name": "focusable",
+    "value": {
+     "type": "booleanOrUndefined",
+     "value": true
+    }
+   },
+   {
+    "name": "selected",
+    "value": {
+     "type": "booleanOrUndefined",
+     "value": false
+    }
+   }
+  ],
+  "parentId": "35",
+  "childIds": [],
+  "backendDOMNodeId": 44
+ },
+ {
+  "nodeId": "70",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "StaticText"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 158
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Re: Printer offline after firmware update",
+   "sources": [
+    {
+     "type": "contents",
+     "value": {
+      "type": "computedString",
+      "value": "Re: Printer offline after firmware update"
+     }
+    }
+   ]
+  },
+  "properties": [
+   {
+    "name": "editable",
+    "value": {
+     "type": "token",
+     "value": "plaintext"
+    }
+   }
+  ],
+  "parentId": "8",
+  "childIds": [
+   "-1000000017"
+  ],
+  "backendDOMNodeId": 70
+ },
+ {
+  "nodeId": "72",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "StaticText"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 158
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Thanks for the details. Could you",
+   "sources": [
+    {
+     "type": "contents",
+     "value": {
+      "type": "computedString",
+      "value": "Thanks for the details. Could you"
+     }
+    }
+   ]
+  },
+  "properties": [
+   {
+    "name": "editable",
+    "value": {
+     "type": "token",
+     "value": "plaintext"
+    }
+   }
+  ],
+  "parentId": "52",
+  "childIds": [
+   "-1000000019"
+  ],
+  "backendDOMNodeId": 72
+ },
+ {
+  "nodeId": "-1000000017",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "InlineTextBox"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 101
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Re: Printer offline after firmware update"
+  },
+  "properties": [
+   {
+    "name": "editable",
+    "value": {
+     "type": "token",
+     "value": "plaintext"
+    }
+   }
+  ],
+  "parentId": "70",
+  "childIds": []
+ },
+ {
+  "nodeId": "-1000000019",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "InlineTextBox"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 101
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Thanks for the details. Could you"
+  },
+  "properties": [
+   {
+    "name": "editable",
+    "value": {
+     "type": "token",
+     "value": "plaintext"
+    }
+   }
+  ],
+  "parentId": "72",
+  "childIds": []
+ }
+]

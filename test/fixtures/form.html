@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Ticket #4821 — Support Desk</title>
+    <style>
+      body { font: 15px/1.6 system-ui, sans-serif; margin: 0; background: #f4f6f9; color: #12161d; }
+      .wrap { max-width: 760px; margin: 0 auto; padding: 32px 20px 80px; }
+      header { background: #12161d; color: #fff; padding: 12px 20px; }
+      h1 { font-size: 20px; margin: 24px 0 4px; }
+      .meta { color: #5d6b7f; margin: 0 0 24px; }
+      .msg { background: #fff; border: 1px solid #dde3ec; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; }
+      .msg b { display: block; font-size: 13px; color: #5d6b7f; margin-bottom: 4px; }
+      fieldset { background: #fff; border: 1px solid #dde3ec; border-radius: 10px; padding: 16px; }
+      legend { font-weight: 700; padding: 0 6px; }
+      label { display: block; margin-bottom: 14px; }
+      span.l { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+      input, textarea, select { width: 100%; padding: 8px 10px; font: inherit; border: 1px solid #c8d1de; border-radius: 7px; }
+      textarea { min-height: 120px; }
+      button { font: inherit; font-weight: 600; padding: 9px 18px; border-radius: 7px; border: 0; background: #1668c4; color: #fff; }
+    </style>
+  </head>
+  <body>
+    <header>Support Desk</header>
+    <div class="wrap">
+      <main>
+        <h1>Printer offline after firmware update</h1>
+        <p class="meta">Ticket #4821 · opened 2 days ago · priority high</p>
+
+        <section aria-label="Conversation">
+          <h2 style="font-size: 14px; color: #5d6b7f">Conversation</h2>
+          <div class="msg">
+            <b>Customer · 2 days ago</b>
+            Since the 3.2 firmware update my HP M452 shows as offline after every reboot.
+            Power cycling the printer fixes it until the next restart. Three machines on the
+            same subnet are affected, all running Windows 11.
+          </div>
+          <div class="msg">
+            <b>Agent · 4 hours ago</b>
+            Thanks for reporting this. Could you tell me which exact firmware build the printer
+            is on? It is under Settings → Reports → Configuration Page.
+          </div>
+          <div class="msg">
+            <b>Customer · 1 hour ago</b>
+            It says 3.2.0.4711. The other two are on the same build.
+          </div>
+        </section>
+
+        <form>
+          <fieldset>
+            <legend>Reply</legend>
+            <label>
+              <span class="l">Status</span>
+              <select id="status" name="status">
+                <option>Pending</option>
+                <option selected>Awaiting customer</option>
+                <option>Resolved</option>
+              </select>
+            </label>
+            <label>
+              <span class="l">Subject</span>
+              <input id="subject" name="subject" type="text" value="Re: Printer offline after firmware update" />
+            </label>
+            <label>
+              <span class="l">Reply body</span>
+              <textarea id="body" name="body" placeholder="Write your reply…"></textarea>
+            </label>
+            <label>
+              <span class="l">Internal note (not sent to customer)</span>
+              <input id="note" name="note" type="text" />
+            </label>
+            <button type="button" id="send">Send reply</button>
+            <p id="sent" role="status" hidden style="color: #1f8a4c; font-weight: 600; margin: 12px 0 0">
+              Reply sent.
+            </p>
+          </fieldset>
+        </form>
+        <script>
+          document.getElementById("send").addEventListener("click", () => {
+            document.getElementById("sent").hidden = false;
+          });
+        </script>
+      </main>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,20 @@
+{
+  "name": "carat",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cursor-style tab autocomplete for browser text fields, powered by Chrome's accessibility tree.",
+  "type": "module",
+  "scripts": {
+    "build": "node esbuild.config.mjs",
+    "watch": "node esbuild.config.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "node esbuild.test.mjs && node test/.tmp/run.mjs",
+    "test:e2e": "node test/e2e.mjs",
+    "fixtures": "node test/serve.mjs"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.268",
+    "esbuild": "^0.21.5",
+    "typescript": "^5.4.5"
+  }
+}

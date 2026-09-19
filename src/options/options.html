@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Carat settings</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #f6f7f9;
+        --panel: #ffffff;
+        --ink: #11151c;
+        --muted: #5d6b7f;
+        --line: #d9dee7;
+        --accent: #1668c4;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0d1017;
+          --panel: #141924;
+          --ink: #e6ecf5;
+          --muted: #8698b0;
+          --line: #262e3d;
+          --accent: #7cc4ff;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 40px 20px 80px;
+        background: var(--bg);
+        color: var(--ink);
+        font: 14px/1.6 ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
+      }
+      main { max-width: 640px; margin: 0 auto; }
+      h1 { font-size: 20px; margin: 0 0 4px; }
+      .sub { color: var(--muted); margin: 0 0 28px; }
+      section {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 18px 20px;
+        margin-bottom: 16px;
+      }
+      h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin: 0 0 14px; }
+      label { display: block; margin-bottom: 14px; }
+      label:last-child { margin-bottom: 0; }
+      .name { display: block; font-weight: 600; margin-bottom: 4px; }
+      .hint { display: block; color: var(--muted); font-size: 12px; margin-top: 3px; }
+      input[type="text"], input[type="password"], input[type="number"], select, textarea {
+        width: 100%;
+        padding: 8px 10px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: var(--bg);
+        color: var(--ink);
+        font: inherit;
+      }
+      textarea { min-height: 78px; resize: vertical; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+      .row { display: flex; gap: 12px; }
+      .row > label { flex: 1; }
+      .check { display: flex; align-items: flex-start; gap: 10px; }
+      .check input { margin-top: 4px; }
+      footer {
+        position: sticky; bottom: 0; display: flex; gap: 10px; align-items: center;
+        padding: 14px 0 0;
+      }
+      button {
+        font: inherit; font-weight: 600; cursor: pointer;
+        padding: 9px 18px; border-radius: 7px; border: 1px solid transparent;
+      }
+      #save { background: var(--accent); color: #fff; }
+      #test { background: transparent; border-color: var(--line); color: var(--ink); }
+      #status { color: var(--muted); font-size: 13px; }
+      #status.ok { color: #2e9e5b; }
+      #status.bad { color: #d6453d; }
+      kbd {
+        font: 12px ui-monospace, Menlo, monospace; border: 1px solid var(--line);
+        border-bottom-width: 2px; border-radius: 4px; padding: 1px 5px; background: var(--bg);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Carat</h1>
+      <p class="sub">
+        Ghost-text autocomplete in any text field, grounded in Chrome's accessibility tree.
+        <kbd>Tab</kbd> accepts, <kbd>Esc</kbd> dismisses, <kbd>Ctrl</kbd>+<kbd>.</kbd> forces a
+        suggestion, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>.</kbd> opens the debug HUD.
+      </p>
+
+      <section>
+        <h2>Model</h2>
+        <label>
+          <span class="name">OpenAI API key</span>
+          <input id="apiKey" type="password" placeholder="sk-..." autocomplete="off" spellcheck="false" />
+          <span class="hint">Stored in this browser profile only (chrome.storage.local) and sent straight to OpenAI.</span>
+        </label>
+        <div class="row">
+          <label>
+            <span class="name">Model</span>
+            <input id="model" type="text" spellcheck="false" />
+          </label>
+          <label>
+            <span class="name">API surface</span>
+            <select id="api">
+              <option value="responses">/v1/responses</option>
+              <option value="chat">/v1/chat/completions</option>
+            </select>
+          </label>
+        </div>
+        <label>
+          <span class="name">Base URL</span>
+          <input id="baseUrl" type="text" spellcheck="false" />
+          <span class="hint">Point this at a compatible proxy if you do not want the key in the browser.</span>
+        </label>
+      </section>
+
+      <section>
+        <h2>Behaviour</h2>
+        <label class="check">
+          <input id="enabled" type="checkbox" />
+          <span>
+            <span class="name">Enabled</span>
+            <span class="hint">Also toggleable with <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd>.</span>
+          </span>
+        </label>
+        <label class="check">
+          <input id="predictActions" type="checkbox" />
+          <span>
+            <span class="name">Predict next actions</span>
+            <span class="hint">
+              Beyond text: highlight the button, field or option you are likely to use next.
+              Only runs after you interact with a page, never on page load. Anything that sends,
+              submits, pays or deletes needs <kbd>Tab</kbd> twice.
+            </span>
+          </span>
+        </label>
+        <label>
+          <span class="name">Minimum confidence for an action</span>
+          <input id="actionConfidence" type="number" min="0" max="1" step="0.05" />
+          <span class="hint">0–1. Higher means fewer, surer suggestions.</span>
+        </label>
+        <label class="check">
+          <input id="useAccessibilityTree" type="checkbox" />
+          <span>
+            <span class="name">Use Chrome's accessibility tree</span>
+            <span class="hint">
+              Attaches the debugger to read the real AX tree, which is why Chrome shows a
+              "being debugged" banner. Turn this off to use the DOM approximation instead.
+            </span>
+          </span>
+        </label>
+        <div class="row">
+          <label>
+            <span class="name">Idle before suggesting (ms)</span>
+            <input id="debounceMs" type="number" min="80" max="2000" step="20" />
+          </label>
+          <label>
+            <span class="name">Max completion tokens</span>
+            <input id="maxOutputTokens" type="number" min="8" max="256" step="8" />
+          </label>
+        </div>
+        <label>
+          <span class="name">Never run on these sites</span>
+          <textarea id="blocklist" spellcheck="false" placeholder="chase.com&#10;mail.bank.example"></textarea>
+          <span class="hint">One hostname per line. Subdomains are covered. Password and payment fields are always skipped everywhere.</span>
+        </label>
+      </section>
+
+      <footer>
+        <button id="save" type="button">Save</button>
+        <button id="test" type="button">Test connection</button>
+        <span id="status"></span>
+      </footer>
+    </main>
+    <script type="module" src="options.js"></script>
+  </body>
+</html>
