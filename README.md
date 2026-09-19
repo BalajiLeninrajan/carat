@@ -4,7 +4,7 @@ Hack The North 2026 project
 
 ## What it does
 
-Carat is a Chrome extension that predicts the one thing you are most likely to do next on the page you are on, and offers it as a small chip you accept with Tab. On a results page for "doordash" the chip is `Click "DoorDash Food Delivery"`. Halfway down an article it is `Scroll down`. On a checkout with nothing left to type it is `Click "Continue to payment"`. On a page with an empty field and something you just read that fits it, it is `Fill Search with "Seven Shores Cafe"`. One chip, Tab, next chip. Esc means "not that": the chip goes, the refusal goes into what the model reads, and three seconds later carat asks again for something else. A second Esc buys six seconds, and a third ends it until you move.
+Carat is a Chrome extension that predicts the one thing you are most likely to do next on the page you are on, and offers it as a small chip you accept with Tab. On a results page for "doordash" the chip is `Click "DoorDash Food Delivery"`. At the top of a long article it is `Scroll down`, and `Scroll more` for each screen after that. On a checkout with nothing left to type it is `Click "Continue to payment"`. On a page with an empty field and something you just read that fits it, it is `Fill Search with "Seven Shores Cafe"`. One chip, Tab, next chip. Esc means "not that": the chip goes, the refusal goes into what the model reads, and three seconds later carat asks again for something else. A second Esc buys six seconds, and a third ends it until you move.
 
 Text you read in other tabs is one input to that prediction, not a precondition for it. Carat asks on every page it is allowed to act on, and the model answers from the page itself when the page is enough.
 

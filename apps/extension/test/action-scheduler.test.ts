@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { NextAction } from '@carat/shared';
+import type { NextAction, PageScroll } from '@carat/shared';
+import { scrollLabel } from '@carat/shared';
 import { CHIP_SETTLE_MS, createChip } from '../src/chip';
 import type { ScriptContext } from '../src/content';
 import { SNAPSHOT_TIMING, startActions } from '../src/content/action-scheduler';
 import type { FrameHub } from '../src/frames';
 import { safeSendMessage } from '../src/messaging';
+import { SCROLL_MAX_MS, SCROLL_SETTLE_MS, scrollPageDown } from '../src/scroll';
 
 vi.mock('../src/messaging', () => ({ safeSendMessage: vi.fn(async () => undefined) }));
 
@@ -580,6 +582,109 @@ describe('getting out of the way', () => {
     // The user acting is a reason to ask again; the scroll is not offered a second time.
     await settled();
     expect(asks().length).toBeGreaterThan(1);
+    expect(chip.visible).toBe(false);
+    chip.destroy();
+  });
+});
+
+describe('scroll, then scroll again', () => {
+  /**
+   * A page three viewports tall that really moves: carat's scroll arrives
+   * over several frames, as a smooth one does, and every frame is a scroll
+   * event the page can hear.
+   */
+  function threeScreens(): void {
+    const vh = window.innerHeight;
+    document.body.innerHTML = '<main><p>screen one</p><p>screen two</p><p>screen three</p><button>Save</button></main>';
+    let y = 0;
+    Object.defineProperty(window, 'scrollY', { get: () => y, configurable: true });
+    Object.defineProperty(document.documentElement, 'scrollHeight', { value: vh * 3, configurable: true });
+    [...document.querySelectorAll('p')].forEach((el, i) => {
+      el.getBoundingClientRect = () => new DOMRect(0, vh * i - y, 300, 40);
+    });
+    document.querySelector('button')!.getBoundingClientRect = () => new DOMRect(0, 100 - y, 100, 30);
+    window.scrollBy = ((opts: ScrollToOptions) => {
+      const from = y;
+      const to = Math.min(y + (opts.top ?? 0), vh * 2);
+      // Four frames, the last of them well past the settle window.
+      for (let step = 1; step <= 4; step++) {
+        window.setTimeout(() => {
+          y = from + ((to - from) * step) / 4;
+          window.dispatchEvent(new Event('scroll'));
+        }, step * 40);
+      }
+    }) as typeof window.scrollBy;
+  }
+
+  /** The background as the engine answers it: a scroll only while there is page below, labelled from where the page is. */
+  function answerScrolls(): void {
+    sent.mockImplementation((async (type: string, msg: unknown) => {
+      if (type === 'nextAction') {
+        const { scroll } = (msg as { page: { scroll: PageScroll } }).page;
+        if (!scroll.more) return { action: null };
+        return { action: action({ kind: 'scroll', target: null, value: '', label: scrollLabel(scroll) }) };
+      }
+      if (type === 'nextActionRefine') return {};
+      return undefined;
+    }) as unknown as typeof safeSendMessage);
+  }
+
+  /** Carat's scroll runs, the page settles, and the question after it goes out. */
+  const scrolledAndSettled = async (): Promise<void> => {
+    await tick(SCROLL_MAX_MS);
+    await settled();
+  };
+
+  afterEach(() => {
+    Object.defineProperty(window, 'scrollY', { value: 0, configurable: true });
+  });
+
+  it('offers the next scroll once the page has moved, and stops at the bottom', async () => {
+    threeScreens();
+    answerScrolls();
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    expect(chip.text).toBe('Scroll down');
+
+    // One Tab, and nothing else: no click, no keystroke, no scroll of the user's own.
+    tab();
+    await scrolledAndSettled();
+    expect(window.scrollY).toBe(window.innerHeight);
+    expect(chip.visible).toBe(true);
+    expect(chip.text).toBe('Scroll more');
+    // The accept is in the timeline before the question that reads it.
+    const order = sent.mock.calls.map((c) => c[0]);
+    expect(order.indexOf('feedback')).toBeLessThan(order.lastIndexOf('nextAction'));
+    expect(feedbacks()[0]).toMatchObject({ accepted: true, kind: 'scroll' });
+
+    // The second Tab lands on the last screen, where there is nothing below to offer.
+    tab();
+    await scrolledAndSettled();
+    expect(window.scrollY).toBe(window.innerHeight * 2);
+    expect(asks().length).toBeGreaterThan(2);
+    expect(chip.visible).toBe(false);
+    chip.destroy();
+  });
+
+  it('keeps the chip up while carat is the one scrolling', async () => {
+    threeScreens();
+    answer(action({ target: 1, label: 'Click "Save"' }));
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    expect(chip.visible).toBe(true);
+    // Past the window the chip grants its own arrival, so only the mark can save it.
+    await tick(CHIP_SETTLE_MS);
+
+    void scrollPageDown(window);
+    await tick(200);
+    expect(window.scrollY).toBeGreaterThan(0);
+    expect(chip.visible).toBe(true);
+
+    // Once carat's scroll has stopped, a scroll is the user reading on again.
+    await tick(SCROLL_MAX_MS + SCROLL_SETTLE_MS);
+    window.dispatchEvent(new Event('scroll'));
     expect(chip.visible).toBe(false);
     chip.destroy();
   });

@@ -6,7 +6,7 @@ import { createFrameHub } from '../frames';
 import { performInteraction, roleOf, stillFits } from '../interact';
 import type { OutlineTarget } from '../outline';
 import { assembleEvidence } from '../outline';
-import { inViewport, scrollPageDown, scrollToTarget } from '../scroll';
+import { caratScrolling, inViewport, scrollPageDown, scrollToTarget, viewportsOf } from '../scroll';
 import type { ScriptContext } from './context';
 import type { PageState } from './page-state';
 import { send } from './send';
@@ -217,9 +217,10 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
       }
       const now = Date.now();
       const fresh = hash !== lastHash;
-      // A lost ticket is the one question the memo must not answer: the whole
-      // point of asking again is that the last answer never arrived.
-      if (!force && trigger !== 'lost') {
+      // Two questions the memo must not answer: a lost ticket, whose whole
+      // point is that the last answer never arrived, and the one after carat
+      // acted, which the timeline has a new line for whatever the outline did.
+      if (!force && trigger !== 'lost' && trigger !== 'performed') {
         // A page that settled without changing has nothing new to say.
         if (trigger === 'quiet' && !fresh) return;
         if (!fresh && events === lastEvents && now - lastAt < SNAPSHOT_TIMING.identicalMs) return;
@@ -278,7 +279,9 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
       if (!chip.visible) chip.hide();
       return;
     }
-    const key = actionKey(action);
+    // Taken here, where the offer is made: a scroll's key holds the position
+    // it was offered from, not the one the page has moved on to.
+    const key = actionKey(action, win, doc);
     if (done.has(key) || dismissed.has(key)) return;
     const target = action.target === null ? undefined : registry.get(action.target);
     if (['fill', 'click', 'select'].includes(action.kind) && !target?.el.isConnected) return;
@@ -292,8 +295,8 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
       irreversible: action.irreversible,
       // The field carat just filled still holds the focus; Tab there is for this chip.
       interceptFrom: lastActed && lastActed !== el ? lastActed : null,
-      onAccept: () => void accept(action, target),
-      onDismiss: (why: string) => onDismiss(why, action, target),
+      onAccept: () => void accept(action, target, key),
+      onDismiss: (why: string) => onDismiss(why, action, target, key),
     };
     // A control the user can see gets the chip on it; everything else is the banner.
     if (el && inViewport(el, win)) {
@@ -311,16 +314,16 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
    * "stop": the question goes back out on the retry timer with the dismissal
    * behind it, and the refused action is never offered again on this page.
    */
-  function onDismiss(why: string, action: NextAction, target: OutlineTarget | undefined): void {
+  function onDismiss(why: string, action: NextAction, target: OutlineTarget | undefined, key: string): void {
     if (why === 'acted' || why === 'scrolled') {
       // Scrolling by hand is the step the scroll banner offered: count it done.
-      if (why === 'scrolled' && action.kind === 'scroll') done.add(actionKey(action));
+      if (why === 'scrolled' && action.kind === 'scroll') done.add(key);
       userActed();
       afterUser.soon();
       return;
     }
     if (why !== 'escape' && why !== 'typed') return;
-    dismissed.add(actionKey(action));
+    dismissed.add(key);
     awaitingUser = true;
     // The dismissal is a line in the timeline, so the memo must not swallow what follows it.
     events++;
@@ -350,8 +353,8 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     retryTimer = null;
   }
 
-  async function accept(action: NextAction, target: OutlineTarget | undefined): Promise<void> {
-    done.add(actionKey(action));
+  async function accept(action: NextAction, target: OutlineTarget | undefined, key: string): Promise<void> {
+    done.add(key);
     lastActed = target?.el ?? null;
     performing = true;
     try {
@@ -466,7 +469,12 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
   };
   // A click, a keystroke or a scroll of the user's own: ask again once they pause.
   for (const type of ['click', 'input'] as const) ctx.addEventListener(doc, type, onUser);
-  ctx.addEventListener(win, 'scroll', onUser, { passive: true } as AddEventListenerOptions);
+  // Carat's own smooth scroll fires these too; that one is not the user moving.
+  const onScrolled = (): void => {
+    if (caratScrolling()) return;
+    onUser();
+  };
+  ctx.addEventListener(win, 'scroll', onScrolled, { passive: true } as AddEventListenerOptions);
   // The focus moving is the strongest signal there is; that one does not wait.
   ctx.addEventListener(doc, 'focusin', () => {
     userActed();
@@ -505,8 +513,15 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
   };
 }
 
-/** What counts as the same offer: the kind, the control and the value. */
-function actionKey(action: NextAction): string {
+/**
+ * What counts as the same offer: the kind, the control and the value. A
+ * scroll has neither of the last two, so what tells one from the next is
+ * where the page was when it was offered. Without that every scroll after the
+ * first would read as the one already taken, and the page would go quiet
+ * after a single Tab.
+ */
+function actionKey(action: NextAction, win: Window, doc: Document): string {
+  if (action.kind === 'scroll') return `scroll|${viewportsOf(win, doc).y}`;
   return `${action.kind}|${action.target ?? ''}|${action.value}`;
 }
 

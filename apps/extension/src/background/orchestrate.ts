@@ -6,6 +6,7 @@ import {
   isIrreversibleLabel,
   normalizeWhitespace,
   resolveIntentValue,
+  scrollLabel,
 } from '@carat/shared';
 import type { Provider } from '@carat/providers';
 import { LocalProvider, RaceProvider, createProvider } from '@carat/providers';
@@ -257,7 +258,7 @@ export function validate(action: NextAction | null, req: NextActionRequest, sett
     case 'click':
       break;
   }
-  return { ...action, target: control?.n ?? null, irreversible, label: action.label || fallbackLabel(action, control) };
+  return { ...action, target: control?.n ?? null, irreversible, label: action.label || fallbackLabel(action, control, req) };
 }
 
 function echoes(value: string, control: OutlineControl): boolean {
@@ -265,8 +266,8 @@ function echoes(value: string, control: OutlineControl): boolean {
   return [control.name, control.value].some((t) => t && normalizeWhitespace(t).toLowerCase() === v);
 }
 
-function fallbackLabel(action: NextAction, control: OutlineControl | undefined): string {
-  if (action.kind === 'scroll') return 'Scroll down';
+function fallbackLabel(action: NextAction, control: OutlineControl | undefined, req: NextActionRequest): string {
+  if (action.kind === 'scroll') return scrollLabel(req.page.scroll);
   if (!control) return 'Go';
   if (action.kind === 'fill') return `Fill ${control.name} with "${action.value}"`;
   if (action.kind === 'select') return `Set ${control.name} to "${action.value}"`;

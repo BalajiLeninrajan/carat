@@ -184,6 +184,16 @@ describe('validation is safety only', () => {
     expect(validate(scroll, more, s)?.kind).toBe('scroll');
   });
 
+  it('calls the scroll after the first one "Scroll more", and leaves the model’s own words alone', () => {
+    const bare = action({ kind: 'scroll', target: null, label: '' });
+    const top = request({ page: { ...request().page, scroll: { y: 0, pages: 3, more: true } } });
+    const partway = request({ page: { ...request().page, scroll: { y: 1, pages: 3, more: true } } });
+    expect(validate(bare, top, s)?.label).toBe('Scroll down');
+    expect(validate(bare, partway, s)?.label).toBe('Scroll more');
+    // The model said what it wanted said; the fallback is only for an empty label.
+    expect(validate(action({ kind: 'scroll', target: null, label: 'Read the rest of the review' }), partway, s)?.label).toBe('Read the rest of the review');
+  });
+
   it('opens only what the intent registry can build, never a URL the model wrote', () => {
     const open = (value: string) => validate(action({ kind: 'open', target: null, value, label: 'Open Maps' }), request(), s);
     expect(open('maps:Seven Shores Cafe')?.kind).toBe('open');

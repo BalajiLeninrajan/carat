@@ -1,4 +1,4 @@
-import { SCROLL_SETTLE_MS } from '../scroll';
+import { SCROLL_SETTLE_MS, caratScrolling } from '../scroll';
 import { deepActiveElement, shouldInterceptTab } from './keys';
 import { placeChip } from './position';
 import { CHIP_CSS } from './styles';
@@ -219,12 +219,13 @@ export function createChip(doc: Document = document): Chip {
   };
 
   /**
-   * A wheel, a drag or a scroll: the user is reading on, not answering. The
-   * first settle window of the chip's life is the exception, because that is
-   * the tail of the scroll carat did to bring this very target into view.
+   * A wheel, a drag or a scroll: the user is reading on, not answering. Two
+   * exceptions, both of them carat's own doing: a scroll it started and has
+   * not seen stop, and the first settle window of the chip's life, which is
+   * the tail of whatever brought this target into view.
    */
   const onUserScroll = (): void => {
-    if (!session || Date.now() - session.shownAt < CHIP_SETTLE_MS) return;
+    if (!session || caratScrolling() || Date.now() - session.shownAt < CHIP_SETTLE_MS) return;
     dismiss('scrolled');
   };
 

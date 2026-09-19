@@ -54,6 +54,15 @@ export interface NextActionRequest {
   eagerness: Eagerness;
 }
 
+/**
+ * What a scroll offer says. The first one on a page is `Scroll down`; from
+ * anywhere below the top it is `Scroll more`, because the user has already
+ * taken one. A label the model wrote is never replaced by this.
+ */
+export function scrollLabel(scroll: PageScroll): string {
+  return scroll.y > 0 ? 'Scroll more' : 'Scroll down';
+}
+
 export type NextActionKind = 'fill' | 'click' | 'select' | 'scroll' | 'open' | 'switch' | 'none';
 
 export interface NextAction {

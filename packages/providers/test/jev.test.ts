@@ -56,9 +56,11 @@ describe('the Jev question', () => {
     expect(decide(built, answers(NONE, 0.9), req)).toBeNull();
   });
 
-  it('only scrolls while there is more page below', () => {
+  it('only scrolls while there is more page below, and says so from where the page is', () => {
     const built = buildJevRequest(req)!;
-    expect(decide(built, answers(SCROLL, 0.6), req)).toMatchObject({ kind: 'scroll', target: null });
+    expect(decide(built, answers(SCROLL, 0.6), req)).toMatchObject({ kind: 'scroll', target: null, label: 'Scroll down' });
+    const partway = { ...req, page: { ...req.page, scroll: { y: 1, pages: 3, more: true } } };
+    expect(decide(built, answers(SCROLL, 0.6), partway)).toMatchObject({ label: 'Scroll more' });
     const atTheEnd = { ...req, page: { ...req.page, scroll: { y: 1, pages: 1, more: false } } };
     expect(decide(built, answers(SCROLL, 0.6), atTheEnd)).toBeNull();
   });
