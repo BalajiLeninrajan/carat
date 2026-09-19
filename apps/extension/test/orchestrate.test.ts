@@ -84,7 +84,7 @@ describe('one action per page', () => {
   });
 
   it('answers with the placeholder at once and replaces it through the ticket', async () => {
-    const refine = new RefineQueue(() => undefined);
+    const refine = new RefineQueue({ setTimer: () => undefined });
     const placeholder = action({ kind: 'fill', target: 1, value: 'Seven Shores Cafe', confidence: 0.5, label: 'Fill Search with "Seven Shores Cafe"' });
     const model = action({ confidence: 0.8 });
     const res = await nextAction(snapshot(), { tabId: 1, origin: 'x' }, {
@@ -101,7 +101,7 @@ describe('one action per page', () => {
   });
 
   it('keeps a surer context-backed fill over the model', async () => {
-    const refine = new RefineQueue(() => undefined);
+    const refine = new RefineQueue({ setTimer: () => undefined });
     const placeholder = action({ kind: 'fill', target: 1, value: 'Seven Shores Cafe', confidence: 0.9 });
     const res = await nextAction(snapshot(), { tabId: 1, origin: 'x' }, {
       settings: async () => settings(),
@@ -242,7 +242,7 @@ describe('how fast the chip goes up', () => {
     // Only the timers the fake model and the ticket use; the clock stays real so the 50 ms means something.
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
-      const refine = new RefineQueue(() => undefined);
+      const refine = new RefineQueue({ setTimer: () => undefined });
       const placeholder = action({ kind: 'fill', target: 1, value: 'Seven Shores Cafe', confidence: 0.5, label: 'Fill Search with "Seven Shores Cafe"' });
       const diags: SuggestDiag[] = [];
       const started = Date.now();

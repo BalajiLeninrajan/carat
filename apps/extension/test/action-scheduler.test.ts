@@ -602,6 +602,36 @@ describe('the early ring', () => {
   });
 });
 
+describe('a ticket the service worker lost', () => {
+  it('asks again rather than settling for the placeholder, and only once', async () => {
+    document.body.innerHTML = '<main><input aria-label="Title"><button>Save</button></main>';
+    layAll();
+    const save = action({ target: 2, label: 'Click "Save"' });
+    let asked = 0;
+    sent.mockImplementation((async (type: string) => {
+      // The first request gets a ticket the restarted worker knows nothing about.
+      if (type === 'nextAction') return asked++ === 0 ? { action: null, ticket: 't1' } : { action: save };
+      if (type === 'nextActionRefine') return { lost: true };
+      return undefined;
+    }) as unknown as typeof safeSendMessage);
+
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    expect(asks()).toHaveLength(1);
+
+    // Nothing waited for: the re-ask only sits out the gap in front of it.
+    await tick(SNAPSHOT_TIMING.minGapMs);
+    expect(asks()).toHaveLength(2);
+    expect(chip.text).toBe('Click "Save"');
+
+    // A worker that keeps dying costs one extra request, not a loop.
+    await tick(SNAPSHOT_TIMING.identicalMs);
+    expect(asks()).toHaveLength(2);
+    chip.destroy();
+  });
+});
+
 describe('a context clear', () => {
   it('drops the chip, the memo and what this page load had answered', async () => {
     document.body.innerHTML = '<main><input aria-label="Title"><button>Save</button></main>';

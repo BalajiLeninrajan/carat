@@ -27,6 +27,7 @@ import {
   redactSettings,
   requesterFromSender,
   setPinned,
+  useAnswerStorage,
 } from '../src/background';
 import type { CaptureVerdict, ScreenApi } from '../src/background';
 
@@ -39,10 +40,14 @@ export default defineBackground(() => {
   const shots = new ShotStore(chrome.storage.session);
   const diag = new DiagLog(chrome.storage.session);
   const settings = createSettingsStore(chrome.storage.local);
+  // The 60 s answer cache is mirrored to session storage, so a page already paid for is not asked about twice.
+  useAnswerStorage(chrome.storage.session);
   const extensionBase = chrome.runtime.getURL('');
   const trusted = (sender: chrome.runtime.MessageSender) => isExtensionPage(sender, extensionBase);
   const tabs = chromeTabsApi();
-  const refine = new RefineQueue();
+  // Which tickets are open outlives the worker, so a restart mid-answer is
+  // told apart from a ticket that closed with nothing better to say.
+  const refine = new RefineQueue({ area: chrome.storage.session });
   // What the user did, per tab: clicks and typing from the page, navigations and carat's own chips from here.
   const history = new HistoryStore(chrome.storage.session);
   history.attach(chrome.webNavigation, chrome.tabs);

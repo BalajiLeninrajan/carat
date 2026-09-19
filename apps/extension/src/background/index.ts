@@ -13,10 +13,11 @@ export type {
   VisionDiag,
   VisionVerdict,
 } from './diag';
-export { CACHE_MS, cacheKeyFor, clearActionCache, nextAction, pick, validate } from './orchestrate';
+export { CACHE_MS, answerCacheFlushed, cacheKeyFor, clearActionCache, nextAction, pick, useAnswerStorage, validate } from './orchestrate';
+export { AnswerCache, ANSWER_KEY } from './answer-cache';
 export type { NextActionDeps } from './orchestrate';
-export { RefineQueue } from './refine';
-export type { RefineTicket } from './refine';
+export { RefineQueue, TICKETS_KEY } from './refine';
+export type { RefineQueueOptions, RefineTicket } from './refine';
 export { createVisionPipeline } from './vision';
 export type { ScreenApi, VisionCue, VisionDeps, VisionPipeline } from './vision';
 export { downscale, MAX_EDGE } from './downscale';

@@ -35,7 +35,7 @@ export const SNAPSHOT_TIMING = {
  * needs the outline to have changed, `force` skips every gate, `retry`
  * follows an Esc, and the rest go through the memo.
  */
-type Trigger = 'first' | 'quiet' | 'evidence' | 'focus' | 'performed' | 'user' | 'retry' | 'force';
+type Trigger = 'first' | 'quiet' | 'evidence' | 'focus' | 'performed' | 'user' | 'retry' | 'lost' | 'force';
 
 export interface ActionsHandle {
   /** The page's own text changed; ask again unless a chip is already up. */
@@ -111,6 +111,8 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
   let reported: Promise<unknown> = Promise.resolve();
   /** Carat is in the middle of an action; the next question waits for the accept to be reported. */
   let performing = false;
+  /** One re-ask per lost ticket, so a worker that keeps dying costs one extra request, not a loop. */
+  let lostRetry = false;
 
   const hub: FrameHub =
     opts.hub ??
@@ -215,7 +217,9 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
       }
       const now = Date.now();
       const fresh = hash !== lastHash;
-      if (!force) {
+      // A lost ticket is the one question the memo must not answer: the whole
+      // point of asking again is that the last answer never arrived.
+      if (!force && trigger !== 'lost') {
         // A page that settled without changing has nothing new to say.
         if (trigger === 'quiet' && !fresh) return;
         if (!fresh && events === lastEvents && now - lastAt < SNAPSHOT_TIMING.identicalMs) return;
@@ -246,6 +250,17 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     for (;;) {
       const update = await send('nextActionRefine', { ticket });
       if (!update || mine !== seq || !ctx.isValid) break;
+      // The service worker went down holding this ticket, so what is on the
+      // chip is all the placeholder ever had. Ask once more rather than let
+      // it stand as the model's answer.
+      if (update.lost) {
+        settle(mine);
+        if (!lostRetry) {
+          lostRetry = true;
+          ask('lost');
+        }
+        return;
+      }
       // The number lands long before the words do; the ring goes up on it now.
       if (update.target !== undefined) {
         const target = registry.get(update.target)?.el;
@@ -254,6 +269,7 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
       if (update.action !== undefined) present(update.action);
       if (!update.more) break;
     }
+    lostRetry = false;
     settle(mine);
   }
 
@@ -440,6 +456,7 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     events = 0;
     awaitingUser = false;
     performing = false;
+    lostRetry = false;
     // Nothing is asked for on the spot; the next ordinary trigger does that.
   }
 
