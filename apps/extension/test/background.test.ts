@@ -66,9 +66,9 @@ describe('gate', () => {
     expect(gate(maps, [item({ origin: 'https://www.google.com' })], enabled, requester, NOW)).toBe(false);
   });
 
-  it('ignores items older than 10 minutes', () => {
-    expect(gate(maps, [item({ lastSeenAt: NOW - 11 * MIN })], enabled, requester, NOW)).toBe(false);
-    expect(gate(maps, [item({ lastSeenAt: NOW - 9 * MIN })], enabled, requester, NOW)).toBe(true);
+  it('ignores items older than the store TTL', () => {
+    expect(gate(maps, [item({ lastSeenAt: NOW - 31 * MIN })], enabled, requester, NOW)).toBe(false);
+    expect(gate(maps, [item({ lastSeenAt: NOW - 29 * MIN })], enabled, requester, NOW)).toBe(true);
   });
 
   it('refuses denylisted hosts, disabled, and no fields', () => {
@@ -285,6 +285,28 @@ describe('orchestrate', () => {
     const b = await orchestrate(maps, requester, deps);
     expect(a).toEqual(b);
     expect(remote.calls).toBe(1);
+  });
+
+  it('caches a genuine empty answer but never a failure', async () => {
+    const { store, ctxId, now } = await seeded();
+    const empty = fakeProvider('openai', async () => []);
+    const deps = { store, settings: async () => enabled, createProvider: () => empty, now };
+    await orchestrate(maps, requester, deps);
+    await orchestrate(maps, requester, deps);
+    expect(empty.calls).toBe(1);
+
+    let down = true;
+    const flaky = fakeProvider('openai', async () => {
+      if (down) throw new Error('HTTP 503');
+      return [suggestion({ sourceContextId: ctxId })];
+    });
+    const local = fakeProvider('local', async () => []);
+    const other = { ...maps, fields: [{ i: 'f0', t: 'input:text', nm: 'q' }] };
+    const flakyDeps = { store, settings: async () => enabled, createProvider: () => flaky, localProvider: local, now };
+    expect((await orchestrate(other, requester, flakyDeps)).suggestions).toEqual([]);
+    down = false;
+    expect((await orchestrate(other, requester, flakyDeps)).suggestions).toHaveLength(1);
+    expect(flaky.calls).toBe(2);
   });
 
   it('filters suggestions the user already accepted for that field', async () => {

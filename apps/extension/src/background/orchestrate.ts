@@ -51,13 +51,31 @@ export async function orchestrate(
       now: new Date(now()).toISOString(),
       ...(typeof navigator !== 'undefined' && navigator.language ? { locale: navigator.language } : {}),
     };
-    suggestions = valid(await callProvider(req, settings, deps, timeoutMs), input.fields);
-    await store.setCached(key, suggestions);
+    const outcome = await callProvider(req, settings, deps, timeoutMs);
+    suggestions = valid(outcome.suggestions, input.fields);
+    // A transport error or timeout is not "nothing to suggest": caching it
+    // would hide chips for a minute after one blip. Only a real answer is kept.
+    if (!outcome.failed) await store.setCached(key, suggestions);
   }
 
   const suppressed = await store.suppressedKeys();
   const visible = suggestions.filter((s) => !isSuppressed(s, input, suppressed));
   return { suggestions: topPerField(visible).slice(0, LIMITS.maxSuggestions) };
+}
+
+/** One provider call as it went. */
+export interface ProviderAttempt {
+  id: Provider['id'];
+  ms: number;
+  count: number;
+  error?: string;
+}
+
+export interface ProviderOutcome {
+  suggestions: Suggestion[];
+  attempts: ProviderAttempt[];
+  /** True when the provider the user configured never gave an answer. */
+  failed: boolean;
 }
 
 /**
@@ -70,32 +88,57 @@ async function callProvider(
   settings: Settings,
   deps: OrchestrateDeps,
   timeoutMs: number,
-): Promise<Suggestion[]> {
+): Promise<ProviderOutcome> {
   const local = deps.localProvider ?? new LocalProvider();
   const deadline = Date.now() + timeoutMs;
   const floor = Math.min(FALLBACK_FLOOR_MS, timeoutMs);
+  const attempts: ProviderAttempt[] = [];
 
   let provider: Provider;
   try {
     provider = (deps.createProvider ?? createProvider)(settings);
-  } catch {
+  } catch (e) {
+    attempts.push({ id: settings.provider, ms: 0, count: 0, error: describeError(e) });
     provider = local;
   }
 
-  try {
-    const result = await withTimeout(provider, req, timeoutMs);
-    if (result.length > 0 || provider.id === 'local' || settings.apiKey) return result;
-  } catch {
-    if (provider.id === 'local') return [];
+  const first = await attempt(provider, req, timeoutMs);
+  attempts.push(first);
+  if (!first.error) {
+    // An empty answer from the network provider with no key configured means
+    // it was never really asked; give the regex pass a turn.
+    if (first.count > 0 || provider.id === 'local' || settings.apiKey) {
+      return { suggestions: first.suggestions, attempts, failed: false };
+    }
+  } else if (provider.id === 'local') {
+    return { suggestions: [], attempts, failed: true };
   }
-  try {
-    return await withTimeout(local, req, Math.max(floor, deadline - Date.now()));
-  } catch {
-    return [];
-  }
+
+  const second = await attempt(local, req, Math.max(floor, deadline - Date.now()));
+  attempts.push(second);
+  return { suggestions: second.suggestions, attempts, failed: first.error !== undefined };
 }
 
 const FALLBACK_FLOOR_MS = 1000;
+
+async function attempt(
+  provider: Provider,
+  req: SuggestRequest,
+  timeoutMs: number,
+): Promise<ProviderAttempt & { suggestions: Suggestion[] }> {
+  const started = Date.now();
+  try {
+    const suggestions = await withTimeout(provider, req, timeoutMs);
+    return { id: provider.id, ms: Date.now() - started, count: suggestions.length, suggestions };
+  } catch (e) {
+    return { id: provider.id, ms: Date.now() - started, count: 0, error: describeError(e), suggestions: [] };
+  }
+}
+
+function describeError(e: unknown): string {
+  if (e instanceof Error) return e.name === 'TimeoutError' ? 'timed out' : e.message || e.name;
+  return String(e);
+}
 
 // Races the signal as well as passing it: a provider that ignores abort still cannot hold the chip past the budget.
 function withTimeout(provider: Provider, req: SuggestRequest, timeoutMs: number): Promise<Suggestion[]> {
