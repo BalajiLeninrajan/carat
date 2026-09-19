@@ -10,7 +10,7 @@ const req: SuggestRequest = {
   now: '2026-09-16T14:04:00-04:00',
 };
 
-const hit: Suggestion = { fieldId: 'f0', value: 'Seven Shores Cafe', confidence: 0.9, reason: 'r', sourceContextId: 'c1' };
+const hit: Suggestion = { kind: 'fill', fieldId: 'f0', value: 'Seven Shores Cafe', confidence: 0.9, reason: 'r', sourceContextId: 'c1' };
 
 function fake(id: Provider['id'], impl: (signal: AbortSignal) => Promise<Suggestion[]>): Provider & { calls: number } {
   const p = {

@@ -1,4 +1,4 @@
-import type { SuggestRequest, Suggestion } from '@carat/shared';
+import type { FillSuggestion, SuggestRequest, Suggestion } from '@carat/shared';
 import { LIMITS } from '@carat/shared';
 import type { Provider } from './provider';
 import { sameSite } from './same-site';
@@ -82,7 +82,7 @@ export function decide(built: JevRequest, answers: Answers): Suggestion[] {
   if (gate === null || gate < GATE_MIN) return [];
 
   const byKey = new Map(built.options.map((o) => [o.key, o]));
-  const out: Suggestion[] = [];
+  const out: FillSuggestion[] = [];
   for (const field of built.askedFields) {
     const answer = choice(answers, questionKey(field.i));
     if (!answer || answer.choice === NONE) continue;
@@ -91,6 +91,7 @@ export function decide(built: JevRequest, answers: Answers): Suggestion[] {
     const confidence = answer.probabilities[answer.choice] ?? answer.confidence;
     if (confidence < LIMITS.minConfidence) continue;
     out.push({
+      kind: 'fill',
       fieldId: field.i,
       value: option.candidate.value,
       confidence,

@@ -1,3 +1,4 @@
+import type { Settings } from '@carat/shared';
 import type { StorageArea } from '../store';
 
 /** Why the last suggestion request on a tab did or did not reach a provider. */
@@ -15,7 +16,7 @@ export type GateVerdict =
 export type CaptureVerdict = 'stored' | 'disabled' | 'site-off' | 'denylisted' | 'pinned' | 'empty' | 'not-http';
 
 export interface ProviderAttempt {
-  id: 'openai' | 'baseten' | 'local';
+  id: Settings['provider'];
   ms: number;
   count: number;
   error?: string;

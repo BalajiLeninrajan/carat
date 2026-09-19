@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { SuggestRequest } from '@carat/shared';
+import type { FillSuggestion, SuggestRequest, Suggestion } from '@carat/shared';
 import { JevProvider, GATE_MIN } from '../src/jev';
 import { buildJevRequest } from '../src/jev/request';
 
 const signal = () => new AbortController().signal;
+const fills = (out: Suggestion[]): FillSuggestion[] => out.filter((s): s is FillSuggestion => s.kind === 'fill');
 
 const discord = {
   id: 'c1',
@@ -110,6 +111,7 @@ describe('JevProvider', () => {
 
     expect(out).toEqual([
       {
+        kind: 'fill',
         fieldId: 'f1',
         value: '10 Regina St N, Waterloo, ON N2J 2Z8',
         confidence: 0.9,
@@ -117,6 +119,7 @@ describe('JevProvider', () => {
         sourceContextId: 'c2',
       },
       {
+        kind: 'fill',
         fieldId: 'f0',
         value: 'Dinner at Seven Shores Cafe',
         confidence: 0.81,
@@ -148,7 +151,7 @@ describe('JevProvider', () => {
       }),
     );
     const out = await provider(fetchImpl).suggest(calendar, { signal: signal() });
-    expect(out.map((s) => s.fieldId)).toEqual(['f1']);
+    expect(fills(out).map((s) => s.fieldId)).toEqual(['f1']);
   });
 
   it('drops a chosen candidate under 0.7 and everything when the gate is under the minimum', async () => {
@@ -160,7 +163,7 @@ describe('JevProvider', () => {
         field_f2: pick('none', 0.99, keys),
       }),
     );
-    expect((await provider(low).suggest(calendar, { signal: signal() })).map((s) => [s.fieldId, s.confidence])).toEqual([['f1', 0.7]]);
+    expect(fills(await provider(low).suggest(calendar, { signal: signal() })).map((s) => [s.fieldId, s.confidence])).toEqual([['f1', 0.7]]);
 
     const gated = vi.fn(async () =>
       envelope({
@@ -180,7 +183,7 @@ describe('JevProvider', () => {
       }),
     );
     const out = await provider(fetchImpl).suggest(calendar, { signal: signal() });
-    expect(out.map((s) => [s.fieldId, s.confidence])).toEqual([['f1', 0.75]]);
+    expect(fills(out).map((s) => [s.fieldId, s.confidence])).toEqual([['f1', 0.75]]);
   });
 
   it('keeps at most two suggestions, highest confidence first', async () => {
@@ -201,7 +204,7 @@ describe('JevProvider', () => {
       }),
     );
     const out = await provider(fetchImpl).suggest(wide, { signal: signal() });
-    expect(out.map((s) => s.fieldId)).toEqual(['f1', 'f2']);
+    expect(fills(out).map((s) => s.fieldId)).toEqual(['f1', 'f2']);
   });
 
   it('returns [] on a Cloudflare error envelope, whatever the status', async () => {
@@ -256,6 +259,6 @@ describe('JevProvider', () => {
       if (this !== undefined && this !== globalThis) throw new TypeError("Failed to execute 'fetch': Illegal invocation");
       return Promise.resolve(envelope({ relevant: noul(0.9), field_f1: pick(keyOf('10 Regina St N, Waterloo, ON N2J 2Z8'), 0.9, keys) }));
     } as unknown as typeof fetch;
-    expect((await provider(strict).suggest(calendar, { signal: signal() })).map((s) => s.fieldId)).toEqual(['f1']);
+    expect(fills(await provider(strict).suggest(calendar, { signal: signal() })).map((s) => s.fieldId)).toEqual(['f1']);
   });
 });
