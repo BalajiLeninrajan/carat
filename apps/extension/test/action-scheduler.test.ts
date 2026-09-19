@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NextAction, PageScroll } from '@carat/shared';
 import { scrollLabel } from '@carat/shared';
-import { CHIP_SETTLE_MS, createChip } from '../src/chip';
+import { CHIP_SETTLE_MS, QUIET_HINT, createChip } from '../src/chip';
 import type { ScriptContext } from '../src/content';
 import { SNAPSHOT_TIMING, startActions } from '../src/content/action-scheduler';
 import type { FrameHub } from '../src/frames';
@@ -587,6 +587,149 @@ describe('Esc means "not that"', () => {
     await settled();
     expect(asks().length).toBeGreaterThan(2);
     expect(chip.visible).toBe(false);
+    chip.destroy();
+  });
+});
+
+describe('Shift+Tab: quiet for a minute', () => {
+  const esc = (): void => {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  };
+  const shiftTab = (): KeyboardEvent => {
+    const e = new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true });
+    document.dispatchEvent(e);
+    return e;
+  };
+  const LAST_WAIT = SNAPSHOT_TIMING.escRetryMs[SNAPSHOT_TIMING.escRetryMs.length - 1]!;
+  const histories = (): string[] =>
+    sent.mock.calls
+      .filter((c) => c[0] === 'history')
+      .flatMap((c) => (c[1] as { entries: Array<{ kind: string }> }).entries.map((e) => e.kind));
+
+  /** A page of fields, and one fill for each, so every retry has something new to offer. */
+  function fields(n: number): { chip: ReturnType<typeof createChip>; handle: ReturnType<typeof startActions> } {
+    document.body.innerHTML = `<main>${Array.from({ length: n }, (_, i) => `<input aria-label="F${i + 1}">`).join('')}</main>`;
+    layAll();
+    answerEach(
+      Array.from({ length: n }, (_, i) =>
+        action({ kind: 'fill', target: i + 1, value: `v${i + 1}`, label: `Fill F${i + 1} with "v${i + 1}"` }),
+      ),
+    );
+    const chip = createChip(document);
+    const handle = startActions(fakeCtx(), chip, document, { hub: noFrames });
+    return { chip, handle };
+  }
+
+  /** Refuse the chip that is up, and wait for the one the retry brings. */
+  async function refuse(): Promise<void> {
+    esc();
+    await tick(LAST_WAIT);
+  }
+
+  it('offers the key on the chip once Esc has come five times, and not before', async () => {
+    const { chip } = fields(SNAPSHOT_TIMING.snoozeAfterEscapes + 1);
+    await firstAsk();
+
+    for (let i = 1; i < SNAPSHOT_TIMING.snoozeAfterEscapes; i++) await refuse();
+    // The fifth chip: four refusals behind it, and no advice yet.
+    expect(chip.visible).toBe(true);
+    expect(chip.detail).toBe('');
+
+    await refuse();
+    expect(chip.visible).toBe(true);
+    expect(chip.detail).toBe(QUIET_HINT);
+    chip.destroy();
+  });
+
+  it('takes the chip down and lets nothing out for the minute', async () => {
+    const { chip } = fields(3);
+    await firstAsk();
+    // A refusal first, so the retry chain is live when the snooze lands on it.
+    esc();
+    await tick(LAST_WAIT);
+    expect(asks()).toHaveLength(2);
+
+    const e = shiftTab();
+    expect(e.defaultPrevented).toBe(true);
+    expect(chip.visible).toBe(false);
+    // Nothing was refused here, so nothing is reported against the offer that was up.
+    expect(feedbacks()).toHaveLength(1);
+    expect(histories()).toEqual(['snoozed']);
+
+    // The user carries on with the page and it carries on rewriting itself; carat says nothing.
+    document.querySelector<HTMLInputElement>('[aria-label="F2"]')!.focus();
+    document.querySelector('main')!.append(document.createElement('p'));
+    document.querySelector('[aria-label="F1"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await tick(SNAPSHOT_TIMING.snoozeMs - 1);
+    expect(asks()).toHaveLength(2);
+    expect(chip.visible).toBe(false);
+    chip.destroy();
+  });
+
+  it('leaves Shift+Tab to the page when there is no chip to silence', async () => {
+    document.body.innerHTML = '<main><input aria-label="Title"><button>Save</button></main>';
+    layAll();
+    answer(null);
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    expect(chip.visible).toBe(false);
+    expect(shiftTab().defaultPrevented).toBe(false);
+    expect(asks()).toHaveLength(1);
+    chip.destroy();
+  });
+
+  it('disarms an irreversible chip rather than acting on it', async () => {
+    document.body.innerHTML = '<main><button>Send</button></main>';
+    layAll();
+    answer(action({ target: 1, label: 'Click "Send"', irreversible: true }));
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+    tab();
+    expect(chip.armed).toBe(true);
+
+    shiftTab();
+    expect(chip.armed).toBe(false);
+    expect(chip.visible).toBe(false);
+    expect(feedbacks()).toHaveLength(0);
+    expect(histories()).toEqual(['snoozed']);
+    chip.destroy();
+  });
+
+  it('ends the snooze on the shortcut and asks at once', async () => {
+    const { chip, handle } = fields(3);
+    await firstAsk();
+    shiftTab();
+    await tick(SNAPSHOT_TIMING.minGapMs);
+    expect(asks()).toHaveLength(1);
+
+    handle.force();
+    await tick(0);
+    expect(asks()).toHaveLength(2);
+    chip.destroy();
+  });
+
+  it('starts the refusals over when the minute is up, and waits for a trigger to ask', async () => {
+    const { chip } = fields(SNAPSHOT_TIMING.snoozeAfterEscapes + 1);
+    await firstAsk();
+    for (let i = 0; i < SNAPSHOT_TIMING.snoozeAfterEscapes; i++) await refuse();
+    expect(chip.detail).toBe(QUIET_HINT);
+    const before = asks().length;
+
+    shiftTab();
+    await tick(SNAPSHOT_TIMING.snoozeMs);
+    // The clock running out is not a reason to ask; it only lifts the silence.
+    expect(asks()).toHaveLength(before);
+    expect(chip.visible).toBe(false);
+
+    // The page moves, which is an ordinary trigger, and the counter it asks with has started over.
+    document.querySelector('main')!.append(document.createElement('input'));
+    layAll();
+    await tick(SNAPSHOT_TIMING.mutationQuietMs + SNAPSHOT_TIMING.minGapMs);
+    expect(asks()).toHaveLength(before + 1);
+    expect(chip.visible).toBe(true);
+    expect(chip.detail).toBe('');
     chip.destroy();
   });
 });

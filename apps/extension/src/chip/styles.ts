@@ -13,7 +13,9 @@ export const CHIP_CSS = `
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  max-width: 360px;
+  /* Narrow viewports get the same pill, just less of the label: the second
+     line is an instruction and has to stay whole. */
+  max-width: min(360px, calc(100vw - 24px));
   padding: 6px 8px 6px 12px;
   border-radius: 999px;
   background: #1e1e2e;
@@ -27,6 +29,7 @@ export const CHIP_CSS = `
 }
 .chip:hover { background: #181825; }
 .text { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
+/* The label is what gives way when the two lines do not both fit. */
 .label { overflow: hidden; text-overflow: ellipsis; }
 .sub { font-size: 11px; line-height: 1.2; color: #a6adc8; overflow: hidden; text-overflow: ellipsis; }
 .sub[hidden] { display: none; }

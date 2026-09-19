@@ -1,5 +1,6 @@
 import type { NextAction } from '@carat/shared';
 import type { Chip } from '../chip';
+import { QUIET_HINT } from '../chip';
 import { performFill } from '../fill';
 import type { FrameHub, KnownFrame } from '../frames';
 import { createFrameHub } from '../frames';
@@ -35,6 +36,10 @@ export const SNAPSHOT_TIMING = {
    * the page is open; the model is never left with nothing to try.
    */
   escRetryMs: [3000, 6000, 10_000],
+  /** Refusals in a row before the chip starts saying how to shut carat up. */
+  snoozeAfterEscapes: 5,
+  /** Shift+Tab: how long this tab hears nothing at all. */
+  snoozeMs: 60_000,
 } as const;
 
 /**
@@ -44,6 +49,9 @@ export const SNAPSHOT_TIMING = {
  * the rest go through the memo.
  */
 type Trigger = 'first' | 'quiet' | 'evidence' | 'focus' | 'performed' | 'settled' | 'user' | 'retry' | 'lost' | 'force';
+
+/** Why an ask did not go out. `snoozed` is the one the user chose. */
+type Refusal = 'gone' | 'snoozed' | 'performing' | 'awaiting' | 'queued';
 
 export interface ActionsHandle {
   /** The page's own text changed; ask again unless a chip is already up. */
@@ -60,6 +68,8 @@ const NO_HANDLE: ActionsHandle = { refresh: () => undefined, force: () => undefi
 export interface RequestObserver {
   onRequest?(): void;
   onAnswer?(): void;
+  /** A snooze started and will be over at this time, or ended, which is `null`. */
+  onQuiet?(until: number | null): void;
 }
 
 export interface ActionOptions extends RequestObserver {
@@ -121,6 +131,9 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
   let performing = false;
   /** One re-ask per lost ticket, so a worker that keeps dying costs one extra request, not a loop. */
   let lostRetry = false;
+  /** Shift+Tab: when carat may speak on this tab again, or 0 when it may now. */
+  let quietUntil = 0;
+  let quietTimer: number | null = null;
 
   const hub: FrameHub =
     opts.hub ??
@@ -166,12 +179,15 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
    * time, no closer together than the gap, and the last trigger to arrive
    * while waiting is the one that goes.
    */
-  function ask(trigger: Trigger): void {
-    if (!ctx.isValid) return;
+  function ask(trigger: Trigger): Refusal | undefined {
+    if (!ctx.isValid) return 'gone';
+    // Shift+Tab bought a minute of silence, and nothing buys its way past that:
+    // the shortcut ends the snooze itself before it asks.
+    if (quietUntil !== 0) return 'snoozed';
     // The focus moving because carat filled a field is not the user moving it.
-    if (performing && trigger !== 'force') return;
+    if (performing && trigger !== 'force') return 'performing';
     // After Esc, only the user and the retry timer get carat talking again.
-    if (awaitingUser && trigger !== 'force' && trigger !== 'user' && trigger !== 'focus' && trigger !== 'retry') return;
+    if (awaitingUser && trigger !== 'force' && trigger !== 'user' && trigger !== 'focus' && trigger !== 'retry') return 'awaiting';
     const force = nextTrigger === 'force' || trigger === 'force';
     nextTrigger = force ? 'force' : trigger;
     // The shortcut waits for nothing, and neither does the question after
@@ -182,16 +198,17 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
       clearTimeout(gapTimer);
       gapTimer = null;
     }
-    if (gapTimer !== null || inFlight) return;
+    if (gapTimer !== null || inFlight) return 'queued';
     const wait = immediate ? 0 : SNAPSHOT_TIMING.minGapMs - (Date.now() - lastSentAt);
     if (wait > 0) {
       gapTimer = ctx.setTimeout(() => {
         gapTimer = null;
         run();
       }, wait);
-      return;
+      return 'queued';
     }
     run();
+    return undefined;
   }
 
   function run(): void {
@@ -305,6 +322,8 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     const shared = {
       label: action.label,
       reason: action.reason,
+      // Said no this often and the user wants the key, not another answer.
+      ...(escapes >= SNAPSHOT_TIMING.snoozeAfterEscapes ? { detail: QUIET_HINT } : {}),
       pending,
       irreversible: action.irreversible,
       // The field carat just filled still holds the focus; Tab there is for this chip.
@@ -329,6 +348,12 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
    * behind it, and the refused action is never offered again on this page.
    */
   function onDismiss(why: string, action: NextAction, target: OutlineTarget | undefined, key: string): void {
+    // Shift+Tab says nothing about this offer, so nothing is reported and
+    // nothing is suppressed; it asks for a minute without any offer at all.
+    if (why === 'snoozed') {
+      snooze();
+      return;
+    }
     if (why === 'acted' || why === 'scrolled') {
       // Scrolling by hand is the step the scroll banner offered: count it done.
       if (why === 'scrolled' && action.kind === 'scroll') done.add(key);
@@ -364,6 +389,49 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
   function cancelRetry(): void {
     if (retryTimer !== null) clearTimeout(retryTimer);
     retryTimer = null;
+  }
+
+  /**
+   * Shift+Tab. Carat goes quiet on this tab for a minute: every timer that
+   * could ask is dropped, the Esc chain with them, and `ask` refuses whatever
+   * arrives in the meantime. The minute is the only thing still running.
+   */
+  function snooze(): void {
+    quietUntil = Date.now() + SNAPSHOT_TIMING.snoozeMs;
+    nextTrigger = null;
+    if (gapTimer !== null) clearTimeout(gapTimer);
+    gapTimer = null;
+    afterUser.cancel();
+    afterCapture.cancel();
+    afterPerform.cancel();
+    afterMutation.cancel();
+    cancelRetry();
+    awaitingUser = false;
+    if (quietTimer !== null) clearTimeout(quietTimer);
+    quietTimer = ctx.setTimeout(wake, SNAPSHOT_TIMING.snoozeMs);
+    observer.onQuiet?.(quietUntil);
+    // The model reads this next time: the user wanted silence here, not a better answer.
+    events++;
+    void send('history', { entries: [{ t: Date.now(), kind: 'snoozed' }] });
+  }
+
+  /**
+   * The minute is up. The refusals that led here are forgotten, so the hint
+   * comes off the next chip, and nothing goes out until something asks for
+   * it: the user moving is what starts carat off again, not the clock.
+   */
+  function wake(): void {
+    endSnooze();
+    escapes = 0;
+  }
+
+  /** The shortcut and a context clear are the two things that cut a snooze short. */
+  function endSnooze(): void {
+    if (quietTimer !== null) clearTimeout(quietTimer);
+    quietTimer = null;
+    if (quietUntil === 0) return;
+    quietUntil = 0;
+    observer.onQuiet?.(null);
   }
 
   async function accept(action: NextAction, target: OutlineTarget | undefined, key: string): Promise<void> {
@@ -487,6 +555,7 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     afterMutation.cancel();
     afterCapture.cancel();
     cancelRetry();
+    endSnooze();
     escapes = 0;
     pending = false;
     chip.hide();
@@ -548,6 +617,8 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
       awaitingUser = false;
       escapes = 0;
       cancelRetry();
+      // The user asking by hand outranks the quiet they asked for a moment ago.
+      endSnooze();
       ask('force');
     },
     clear,

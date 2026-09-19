@@ -53,7 +53,8 @@ export type HistoryEntry =
   | { t: number; kind: 'nav'; how: NavHow; to: string }
   | { t: number; kind: 'opened'; from: number }
   | { t: number; kind: 'accepted'; what: string }
-  | { t: number; kind: 'dismissed'; what: string };
+  | { t: number; kind: 'dismissed'; what: string }
+  | { t: number; kind: 'snoozed' };
 
 /**
  * One line of the timeline, without its age: `clicked button "Add to cart"`,
@@ -73,6 +74,8 @@ export function describeEntry(e: HistoryEntry): string {
       return `accepted suggestion: ${e.what}`;
     case 'dismissed':
       return `dismissed suggestion: ${e.what}`;
+    case 'snoozed':
+      return 'snoozed for a minute';
   }
 }
 
