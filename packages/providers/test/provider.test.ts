@@ -83,7 +83,7 @@ describe('createSmartProvider', () => {
     const openai = { ...DEFAULT_SETTINGS, apiKey: 'sk-x' };
     const fast = createProvider(openai) as OpenAICompatProvider;
     const smart = createSmartProvider(openai) as OpenAICompatProvider;
-    expect(fast.options.reasoningEffort).toBe('minimal');
+    expect(fast.options.reasoningEffort).toBe('none');
     expect(smart.options.reasoningEffort).toBe('low');
     // Same model, different effort: that is the whole difference between the two passes by default.
     expect(smart.options.model).toBe(fast.options.model);

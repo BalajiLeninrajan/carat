@@ -4,3 +4,6 @@ node_modules
 dist
 .env*
 *.local
+
+# Claude Code agent worktrees
+.claude/worktrees/

@@ -17,7 +17,8 @@ import { sameSite } from './same-site';
 export type OutputMode = 'json_schema' | 'json_object' | 'prompt';
 
 /** OpenAI's `reasoning_effort` values that make sense here; the fast path wants none, the smart path a little. */
-export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high';
+// 'none' is the no-reasoning value on GPT-5.1+; 'minimal' is rejected there.
+export type ReasoningEffort = 'none' | 'low' | 'medium' | 'high';
 
 export interface OpenAICompatOptions {
   id: 'openai' | 'baseten';

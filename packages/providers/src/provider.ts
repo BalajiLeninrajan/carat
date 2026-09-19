@@ -25,7 +25,7 @@ export interface VisionProvider extends Provider {
  */
 export function createProvider(settings: Settings, fetchImpl: typeof fetch = fetch): Provider {
   if (settings.provider === 'local') return new LocalProvider();
-  const llm = chatProvider(settings, settings.model, 'minimal', fetchImpl);
+  const llm = chatProvider(settings, settings.model, 'none', fetchImpl);
 
   if (settings.provider === 'cloudflare' && settings.cfAccountId && settings.cfApiToken) {
     const jev = new JevProvider({ accountId: settings.cfAccountId, apiToken: settings.cfApiToken }, fetchImpl);

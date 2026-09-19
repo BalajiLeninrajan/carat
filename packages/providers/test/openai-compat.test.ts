@@ -263,8 +263,8 @@ describe('OpenAICompatProvider', () => {
 
   it('sends reasoning_effort on suggest and transcribe only when the option is set', async () => {
     const fast = vi.fn(async () => completion(JSON.stringify({ suggestions: [good] })));
-    await provider(fast, 'json_schema', 'minimal').suggest(req, { signal: new AbortController().signal });
-    expect(requestBody(fast.mock.calls[0]!).reasoning_effort).toBe('minimal');
+    await provider(fast, 'json_schema', 'none').suggest(req, { signal: new AbortController().signal });
+    expect(requestBody(fast.mock.calls[0]!).reasoning_effort).toBe('none');
 
     const smart = vi.fn(async () => completion(JSON.stringify({ suggestions: [good] })));
     const smartProvider = provider(smart, 'json_schema', 'low');
