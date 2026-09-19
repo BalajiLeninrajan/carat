@@ -45,6 +45,8 @@ function sanitize(raw: unknown): Settings {
     screenshots: typeof r.screenshots === 'boolean' ? r.screenshots : DEFAULT_SETTINGS.screenshots,
     smartModel: str(r.smartModel, '').trim() || legacySmartModel(r.visionModel),
     eagerness: isEagerness(r.eagerness) ? r.eagerness : DEFAULT_SETTINGS.eagerness,
+    // Strictly a boolean true: anything else, including a truthy string, keeps payments off.
+    allowPayments: r.allowPayments === true,
   };
 }
 

@@ -14,7 +14,19 @@ import type {
   SuggestRequest,
   Suggestion,
 } from '@carat/shared';
-import { EAGERNESS, LIMITS, fnv1a, impliedVerb, isDestructiveName, isIntentName, isOffScreen, mergeSuggestions, verbFits } from '@carat/shared';
+import {
+  EAGERNESS,
+  LIMITS,
+  clickAllowed,
+  fnv1a,
+  impliedVerb,
+  isDestructiveName,
+  isIntentName,
+  isOffScreen,
+  mayPay,
+  mergeSuggestions,
+  verbFits,
+} from '@carat/shared';
 import type { EntitySource, Provider, SuggestOptions } from '@carat/providers';
 import { LocalProvider, RaceProvider, createProvider, createSmartProvider, matchEntities } from '@carat/providers';
 import type { InteractionView, RefineResponse, SuggestResponse, SuggestionSource, SuggestionView } from '../messaging';
@@ -22,6 +34,7 @@ import type { ContextStore, EntityStore } from '../store';
 import { interactSuppressionKey, navSuppressionKey, suppressionPrefix } from '../store';
 import type { AnswerOrigin, GateVerdict, ProviderAttempt, SuggestDiag } from './diag';
 import { fingerprintMatchesDescriptor } from './fingerprint';
+import { flowActive } from './flow';
 import { explainGate } from './gate';
 import type { OpenTab } from './navigation';
 import { resolveNavigation } from './navigation';
@@ -92,9 +105,11 @@ export async function orchestrate(input: SuggestInput, requester: Requester, dep
   const filled = requester.tabId === undefined ? [] : await store.recentFillSources(requester.tabId);
   // Freshness follows the store's clock, which stands still while pinned.
   const at = await store.clock();
-  diag.gate = explainGate({ ...input, elements, filled }, items, settings, requester, at);
+  // The later goal layer's say on whether this page is a step in a flow; false until it exists.
+  const flow = flowActive(input.page);
+  diag.gate = explainGate({ ...input, elements, filled, flow }, items, settings, requester, at);
   const smart = smartPath(settings, deps, requester);
-  const shape: Shape = { input, elements, filled, store, eagerness };
+  const shape: Shape = { input, elements, filled, store, eagerness, flow, pay: mayPay(settings) };
   if (diag.gate !== 'ok') {
     const result: SuggestResponse = { ...NONE };
     // Nothing to read yet, but a screenshot is being transcribed: the smart pass alone may have an answer.
@@ -194,6 +209,10 @@ interface Shape {
   filled: string[];
   store: ContextStore;
   eagerness: Eagerness;
+  /** A stored task marks this page as a step in an ongoing flow. */
+  flow: boolean;
+  /** Money controls may be offered (the setting, through `mayPay`). */
+  pay: boolean;
 }
 
 /** Everything one request settled before its first answer, shared by the reply and what runs on behind it. */
@@ -449,7 +468,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 function request(shape: Shape, context: RequestContext, own: RequestContext, now: number): SuggestRequest {
-  const { input, elements, filled } = shape;
+  const { input, elements, filled, flow } = shape;
   return {
     page: input.page,
     fields: input.fields,
@@ -457,6 +476,7 @@ function request(shape: Shape, context: RequestContext, own: RequestContext, now
     ...(filled.length > 0 ? { filled } : {}),
     context,
     ...(own.length > 0 ? { own } : {}),
+    ...(flow ? { flow: true as const } : {}),
     now: new Date(now).toISOString(),
     ...(typeof navigator !== 'undefined' && navigator.language ? { locale: navigator.language } : {}),
   };
@@ -674,9 +694,11 @@ function withTimeout(provider: Provider, req: SuggestRequest, timeoutMs: number,
  * cite the page's own text; interactions must name a described element with
  * a verb that fits its role and state, cite another tab's text or a recent
  * fill, and never a destructive name. A button or link is clicked only after
- * carat filled something on the page. A scroll to an element that is already
- * on-screen becomes the verb it stood in for, or nothing. Whatever passes all
- * that but sits under the level's confidence floor is dropped and counted.
+ * carat filled something on the page, or when it is the primary action and
+ * the level or a flow allows that (`clickAllowed`); a money control only
+ * when `mayPay` says so. A scroll to an element that is already on-screen
+ * becomes the verb it stood in for, or nothing. Whatever passes all that but
+ * sits under the level's confidence floor is dropped and counted.
  */
 function valid(suggestions: Suggestion[], shape: Shape, context: RequestContext, own: RequestContext, onUnderFloor?: () => void): Suggestion[] {
   const { input, elements, filled } = shape;
@@ -684,6 +706,7 @@ function valid(suggestions: Suggestion[], shape: Shape, context: RequestContext,
   const contextIds = new Set(context.map((c) => c.id));
   const ownIds = new Set(own.map((o) => o.id));
   const interactIds = new Set([...contextIds, ...filled]);
+  const gate = { filled: filled.length > 0, flow: shape.flow, eagerness: shape.eagerness, fillable: input.fields.some((f) => !f.v) };
   const wellFormed = (s: Suggestion): boolean => {
     if (typeof s.value !== 'string') return false;
     const bare = s.kind === 'interact' && s.verb === 'scroll';
@@ -692,8 +715,9 @@ function valid(suggestions: Suggestion[], shape: Shape, context: RequestContext,
     if (s.kind === 'interact') {
       const el = elements.find((e) => e.i === s.elementId);
       if (!el || isDestructiveName(el.nm) || !interactIds.has(s.sourceContextId)) return false;
+      if (el.m === 1 && !shape.pay) return false;
       if (!verbFits(el, s.verb, s.value.trim())) return false;
-      return s.verb !== 'click' || (el.r !== 'button' && el.r !== 'link') || filled.length > 0;
+      return s.verb !== 'click' || clickAllowed(el, gate);
     }
     const field = input.fields.find((f) => f.i === s.fieldId);
     return !!field && !field.v && contextIds.has(s.sourceContextId); // never over what the user typed, never from their own page
@@ -753,7 +777,9 @@ function topBy<T extends { confidence: number }>(list: T[], keyOf: (t: T) => str
 }
 
 function cacheKey(shape: Shape, context: RequestContext, own: RequestContext): string {
-  const { input, elements, filled, eagerness } = shape;
+  const { input, elements, filled, eagerness: level, flow, pay } = shape;
+  // The click and money rules are part of the key: an answer filtered without a flow is not the answer with one.
+  const eagerness = `${level}${flow ? '+flow' : ''}${pay ? '+pay' : ''}`;
   // Focus, width and what is scrolled into view change as the user moves around without changing what to suggest.
   const fields = input.fields.map(({ f: _f, w: _w, o: _o, ...rest }) => rest);
   const els = elements.map(({ o: _o, ...rest }) => rest);

@@ -1,6 +1,6 @@
 import type { TabDiag } from '@/src/background/diag';
 import { relativeAge } from '@/src/format/age';
-import { describeCapture, describePrewarm, describeSuggest, describeVision } from '@/src/format/diag';
+import { describeCapture, describePerform, describePrewarm, describeSuggest, describeVision } from '@/src/format/diag';
 import { sendMessage, type KnownItem } from '@/src/messaging';
 import { isSiteOff, siteHost, withSite } from '@/src/store/sites';
 
@@ -18,6 +18,7 @@ const diagCapture = document.getElementById('diag-capture') as HTMLElement;
 const diagSuggest = document.getElementById('diag-suggest') as HTMLElement;
 const diagVision = document.getElementById('diag-vision') as HTMLElement;
 const diagPrewarm = document.getElementById('diag-prewarm') as HTMLElement;
+const diagPerform = document.getElementById('diag-perform') as HTMLElement;
 
 // The host of the tab the popup was opened over; undefined on chrome:// and friends.
 let activeHost: string | undefined;
@@ -56,6 +57,10 @@ function renderDiag(diag: TabDiag | null): void {
   // Likewise only after a navigation onto a page carat knows the fields of.
   diagPrewarm.hidden = !diag?.prewarm;
   diagPrewarm.textContent = diag?.prewarm ? describePrewarm(diag.prewarm, now) : '';
+  // The last money control pressed, or fill left half done, on this tab.
+  const perform = diag?.performs?.at(-1);
+  diagPerform.hidden = !perform;
+  diagPerform.textContent = perform ? describePerform(perform, now) : '';
 }
 
 function renderSite(settings: { disabledHosts?: string[] }): void {

@@ -1,5 +1,5 @@
 import { DEFAULT_EAGERNESS, EAGERNESS } from '@carat/shared';
-import type { AnswerOrigin, CaptureDiag, CaptureVerdict, GateVerdict, ProviderAttempt, SuggestDiag, VisionDiag, VisionVerdict } from '../background/diag';
+import type { AnswerOrigin, CaptureDiag, CaptureVerdict, GateVerdict, PerformDiag, ProviderAttempt, SuggestDiag, VisionDiag, VisionVerdict } from '../background/diag';
 import type { PrewarmDiag, PrewarmVerdict } from '../background/prewarm';
 import { relativeAge } from './age';
 
@@ -99,6 +99,12 @@ export function describePrewarm(d: PrewarmDiag, now: number = Date.now()): strin
 function describeAttempt(a: ProviderAttempt): string {
   if (a.error) return `${a.id} failed after ${a.ms} ms (${a.error})`;
   return `${a.id} answered in ${a.ms} ms with ${a.count}`;
+}
+
+/** One line: `pressed "Pay $312" on aircanada.com 12s ago (Enter)` or `filled f2 on aircanada.com 12s ago, pick left undone`. */
+export function describePerform(d: PerformDiag, now: number = Date.now()): string {
+  if (d.kind === 'money') return `pressed "${d.name}" on ${d.host} ${relativeAge(d.at, now)} (Enter)`;
+  return `filled ${d.name} on ${d.host} ${relativeAge(d.at, now)}, pick left undone`;
 }
 
 /** One line: "screenshot of discord.com 12s ago: transcript stored, picture deleted". */

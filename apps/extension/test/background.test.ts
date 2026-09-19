@@ -10,6 +10,7 @@ import type { StorageArea } from '../src/store';
 import type { SuggestDiag } from '../src/background';
 import {
   DiagLog,
+  MAX_PERFORMS,
   RefineQueue,
   explainGate,
   fingerprintMatchesDescriptor,
@@ -151,6 +152,37 @@ describe('DiagLog', () => {
     expect(await log.get(1)).toBeUndefined();
     expect(await log.get(10)).toBeUndefined();
     expect(await log.get(39)).toBeDefined();
+  });
+});
+
+describe('perform log', () => {
+  it('keeps the last few performs per tab, newest last', async () => {
+    const log = new DiagLog(new FakeArea());
+    for (let i = 0; i < MAX_PERFORMS + 2; i++) {
+      await log.recordPerform(1, { at: i, host: 'aircanada.com', kind: 'money', name: `Pay ${i}`, outcome: 'done' });
+    }
+    const performs = (await log.get(1))!.performs!;
+    expect(performs).toHaveLength(MAX_PERFORMS);
+    expect(performs.at(-1)!.name).toBe(`Pay ${MAX_PERFORMS + 1}`);
+  });
+
+  it('logs an accepted money control and a fill that stopped short, and nothing else', async () => {
+    const store = new ContextStore(new FakeArea());
+    const seen: Array<[number, string, string]> = [];
+    const sinks = { onPerform: (tabId: number, e: { kind: string; name: string }) => void seen.push([tabId, e.kind, e.name]) };
+    const money = { kind: 'interact' as const, host: 'aircanada.com', role: 'button', name: 'Pay $312.40', accepted: true, money: true as const };
+    await handleFeedback(money, store, 7, sinks);
+    // A money control the user dismissed is suppressed like any other, and not logged.
+    await handleFeedback({ ...money, accepted: false, money: undefined }, store, 7, sinks);
+    await handleFeedback({ kind: 'interact', host: 'aircanada.com', role: 'button', name: 'Continue', accepted: true }, store, 7, sinks);
+    await handleFeedback({ fieldId: 'f2', fingerprint: 'fp', contextId: 'c1', accepted: true, host: 'aircanada.com', outcome: 'partial' }, store, 7, sinks);
+    await handleFeedback({ fieldId: 'f3', fingerprint: 'fp', contextId: 'c1', accepted: true, host: 'aircanada.com' }, store, 7, sinks);
+    expect(seen).toEqual([
+      [7, 'money', 'Pay $312.40'],
+      [7, 'fill', 'f2'],
+    ]);
+    // The partial fill still counts as a fill on that tab, so the next request may offer the button that commits it.
+    expect(await store.recentFillSources(7)).toEqual(['c1']);
   });
 });
 
@@ -1225,9 +1257,15 @@ const elements: ElementDescriptor[] = [
 
 describe('hasWork and gate for elements', () => {
   const page = calendarPage;
-  it('counts a field, a control, or buttons after a fill; never buttons alone', () => {
+  it('counts a field, a control, or buttons after a fill; a lone button only when it is the primary action and the level or a flow allows it', () => {
     expect(hasWork({ page, fields: [] })).toBe(false);
-    expect(hasWork({ page, fields: [], elements: [elements[0]!] })).toBe(false);
+    // The primary Save with nothing to fill: work at eager, not below, unless a flow is under way.
+    expect(hasWork({ page, fields: [], elements: [elements[0]!] })).toBe(true);
+    expect(hasWork({ page, fields: [], elements: [elements[0]!] }, 'balanced')).toBe(false);
+    expect(hasWork({ page, fields: [], elements: [elements[0]!], flow: true }, 'conservative')).toBe(true);
+    expect(hasWork({ page, fields: [], elements: [{ i: 'e0', r: 'button', nm: 'More options', p: 1 }] })).toBe(false);
+    expect(hasWork({ page, fields: [], elements: [{ i: 'e0', r: 'button', nm: 'Save' }] })).toBe(false);
+    expect(hasWork({ page, fields: [], elements: [{ i: 'e0', r: 'button', nm: 'Pay now', p: 1, m: 1 }] })).toBe(false);
     expect(hasWork({ page, fields: [], elements: [elements[0]!], filled: ['c1'] })).toBe(true);
     expect(hasWork({ page, fields: [], elements: [elements[1]!] })).toBe(true);
     expect(hasWork({ page, fields: [], elements: [elements[2]!] })).toBe(true);
@@ -1242,8 +1280,43 @@ describe('hasWork and gate for elements', () => {
 });
 
 describe('orchestrate interactions', () => {
-  const input = { page: calendarPage, fields: [], elements };
+  // An empty field on the page keeps the primary Save behind the fill rule at every level; the eager no-fill case has its own tests below.
+  const emptyField = { i: 'f0', t: 'textarea', al: 'Description' };
+  const input = { page: calendarPage, fields: [emptyField], elements };
   const local: Settings = { ...DEFAULT_SETTINGS, provider: 'local', apiKey: '' };
+
+  it('offers the primary continue-style button with no fill behind it at eager once nothing is left to fill, and not below eager', async () => {
+    const { store, now } = await seeded();
+    const bare = { page: calendarPage, fields: [], elements };
+    const at = (eagerness: Settings['eagerness']) => orchestrate(bare, onCalendar, { store, settings: async () => ({ ...local, eagerness }), now });
+    expect((await at('eager')).interactions).toEqual([
+      expect.objectContaining({ elementId: 'e0', verb: 'click', value: 'Save', confidence: 0.5, sourceContextId: expect.any(String) }),
+    ]);
+    expect((await at('balanced')).interactions).toEqual([]);
+    expect((await at('conservative')).interactions).toEqual([]);
+    // With an empty field still on the page, the fill comes first and the button waits.
+    expect((await orchestrate(input, onCalendar, { store, settings: async () => local, now })).interactions).toEqual([]);
+  });
+
+  it('drops a model click on a non-primary button, and on the primary one when a field is still empty, unless something was filled', async () => {
+    const { store, ctxId, now } = await seeded();
+    const remote = fakeProvider('openai', async () => [interact({ sourceContextId: ctxId }), interact({ sourceContextId: ctxId, elementId: 'e3', value: 'Delete event' })]);
+    const deps = { store, settings: async () => enabled, createProvider: () => remote, now };
+    const bare = { page: calendarPage, fields: [], elements };
+    expect((await orchestrate(bare, onCalendar, deps)).interactions.map((s) => s.elementId)).toEqual(['e0']);
+    expect((await orchestrate(input, onCalendar, deps)).interactions).toEqual([]);
+  });
+
+  it('keeps a money control out unless payments are allowed, and then only through the same click rules', async () => {
+    const { store, ctxId, now } = await seeded();
+    await handleFeedback({ fieldId: 'f0', fingerprint: 'input|text|||Add title|', contextId: ctxId, accepted: true, host: 'calendar.google.com' }, store, 2);
+    const pay = { ...input, elements: [{ i: 'e0', r: 'button' as const, nm: 'Pay now', p: 1 as const, m: 1 as const }] };
+    const remote = fakeProvider('openai', async () => [interact({ sourceContextId: ctxId, value: 'Pay now' })]);
+    const off = await orchestrate(pay, onCalendar, { store, settings: async () => enabled, createProvider: () => remote, now });
+    expect(off.interactions).toEqual([]);
+    const on = await orchestrate(pay, onCalendar, { store, settings: async () => ({ ...enabled, allowPayments: true }), createProvider: () => remote, now });
+    expect(on.interactions.map((s) => s.value)).toEqual(['Pay now']);
+  });
 
   it('offers the Save button only once carat filled a field on that tab, and remembers that for a minute', async () => {
     const { store, ctxId, now, tick } = await seeded();
@@ -1390,7 +1463,7 @@ describe('orchestrate interactions', () => {
     const remote = fakeProvider('openai', async () => [interact({ sourceContextId: ctxId, elementId: 'e2', verb: 'set', value: '40' })]);
     const deps = { store, settings: async () => enabled, createProvider: () => remote, now, onDiag: (d: SuggestDiag) => void reports.push(d) };
     expect((await orchestrate(input, onCalendar, deps)).interactions).toHaveLength(1);
-    expect(reports[0]).toMatchObject({ gate: 'ok', fields: 0, elements: 4, offered: 0, navigation: 0, interactions: 1 });
+    expect(reports[0]).toMatchObject({ gate: 'ok', fields: 1, elements: 4, offered: 0, navigation: 0, interactions: 1 });
 
     const off = { ...enabled, disabledHosts: ['calendar.google.com'] };
     expect((await orchestrate(input, onCalendar, { ...deps, settings: async () => off })).interactions).toEqual([]);

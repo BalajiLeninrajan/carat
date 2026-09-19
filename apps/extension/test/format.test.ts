@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { relativeAge } from '../src/format/age';
-import { describeCapture, describePrewarm, describeSuggest, describeVision } from '../src/format/diag';
+import { describeCapture, describePerform, describePrewarm, describeSuggest, describeVision } from '../src/format/diag';
 
 const NOW = 1_000_000;
 
@@ -76,6 +76,17 @@ describe('describeSuggest', () => {
   it('says when the answer came from cache', () => {
     expect(describeSuggest({ ...base, gate: 'ok', cached: true, offered: 0 }, NOW)).toBe(
       'checked 15s ago: answer from cache, offered 0',
+    );
+  });
+});
+
+describe('describePerform', () => {
+  it('names the money control that was pressed, and the fill that stopped short', () => {
+    expect(describePerform({ at: NOW - 12_000, host: 'aircanada.com', kind: 'money', name: 'Pay $312.40', outcome: 'done' }, NOW)).toBe(
+      'pressed "Pay $312.40" on aircanada.com 12s ago (Enter)',
+    );
+    expect(describePerform({ at: NOW, host: 'aircanada.com', kind: 'fill', name: 'f2', outcome: 'partial' }, NOW)).toBe(
+      'filled f2 on aircanada.com just now, pick left undone',
     );
   });
 });

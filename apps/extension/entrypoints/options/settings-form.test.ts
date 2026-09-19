@@ -8,7 +8,7 @@ import {
   normalizeSettings,
 } from './settings-form';
 
-const base = { enabled: true, provider: 'openai', baseURL: '', apiKey: '', model: '', statusLine: false, cfAccountId: '', cfApiToken: '', smartModel: '', screenshots: false, eagerness: 'eager' };
+const base = { enabled: true, provider: 'openai', baseURL: '', apiKey: '', model: '', statusLine: false, cfAccountId: '', cfApiToken: '', smartModel: '', screenshots: false, eagerness: 'eager', allowPayments: false };
 
 describe('normalizeSettings', () => {
   it('fills blank baseURL and model with the defaults', () => {
@@ -93,6 +93,13 @@ describe('normalizeSettings', () => {
     ]);
     // A level the slider never had still lands the thumb on the default.
     expect(eagernessPosition('reckless')).toBe(EAGERNESS_LEVELS.indexOf(DEFAULT_SETTINGS.eagerness));
+  });
+
+  it('keeps payments off unless the box is ticked, and only a real true turns them on', () => {
+    expect(normalizeSettings(base).allowPayments).toBe(false);
+    expect(DEFAULT_SETTINGS.allowPayments).toBe(false);
+    expect(normalizeSettings({ ...base, allowPayments: true }).allowPayments).toBe(true);
+    expect(normalizeSettings({ ...base, allowPayments: 'on' as unknown as boolean }).allowPayments).toBe(false);
   });
 
   it('carries the status line toggle through', () => {

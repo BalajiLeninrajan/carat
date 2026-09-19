@@ -99,15 +99,33 @@ export interface SuggestDiag {
   refined?: number;
 }
 
+/**
+ * One thing carat performed on a tab that is worth remembering: a money
+ * control accepted with Enter (always logged, with the button's name), or a
+ * fill that stopped short of the pick that should have followed it. The
+ * later goal layer reads these to know where a flow stands.
+ */
+export interface PerformDiag {
+  at: number;
+  host: string;
+  kind: 'money' | 'fill';
+  /** The button's accessible name, or the field id for a partial fill. */
+  name: string;
+  outcome: 'done' | 'partial';
+}
+
 export interface TabDiag {
   capture?: CaptureDiag;
   suggest?: SuggestDiag;
   vision?: VisionDiag;
   prewarm?: PrewarmDiag;
+  /** Newest last, at most MAX_PERFORMS. */
+  performs?: PerformDiag[];
 }
 
 const KEY = 'diag';
 const MAX_TABS = 20;
+export const MAX_PERFORMS = 8;
 
 /**
  * The last capture and suggestion outcome per tab, for the popup's debug
@@ -148,6 +166,13 @@ export class DiagLog {
     this.write(tabId);
   }
 
+  async recordPerform(tabId: number, perform: PerformDiag): Promise<void> {
+    const state = await this.load();
+    const performs = [...(state[tabId]?.performs ?? []), perform].slice(-MAX_PERFORMS);
+    state[tabId] = { ...state[tabId], performs };
+    this.write(tabId);
+  }
+
   async get(tabId: number): Promise<TabDiag | undefined> {
     return (await this.load())[tabId];
   }
@@ -175,5 +200,11 @@ export class DiagLog {
 }
 
 function latest(d: TabDiag): number {
-  return Math.max(d.capture?.at ?? 0, d.suggest?.at ?? 0, d.vision?.at ?? 0, d.prewarm?.at ?? 0);
+  return Math.max(
+    d.capture?.at ?? 0,
+    d.suggest?.at ?? 0,
+    d.vision?.at ?? 0,
+    d.prewarm?.at ?? 0,
+    d.performs?.at(-1)?.at ?? 0,
+  );
 }

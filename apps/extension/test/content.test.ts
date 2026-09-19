@@ -300,6 +300,7 @@ describe('content wiring', () => {
     // The extra field waits its turn: it is the next chip after this fill.
     title.focus();
     tab();
+    await flush();
     expect(title.value).toBe('Dinner');
     expect(chip.visible).toBe(true);
     expect(show.mock.calls.at(-1)![0].value).toBe('10 Regina St N');
@@ -438,6 +439,7 @@ describe('content wiring', () => {
     const e = tab();
     expect(e.defaultPrevented).toBe(true);
     expect(title.value).toBe('Dinner');
+    await flush();
     expect(calls('feedback')[0]).toMatchObject({ accepted: true, contextId: 'c1', host: location.host });
   });
 
@@ -463,6 +465,7 @@ describe('content wiring', () => {
     expect(calls('suggestRequest')).toHaveLength(1);
 
     tab();
+    await flush();
     expect(title.value).toBe('Dinner');
     expect(chip.visible).toBe(true);
     expect(document.activeElement).toBe(title);
@@ -472,6 +475,7 @@ describe('content wiring', () => {
     const e = tab();
     expect(e.defaultPrevented).toBe(true);
     expect(where.value).toBe('123 King St');
+    await flush();
     expect(calls('feedback')).toHaveLength(2);
 
     // Only the fill that exhausted the answer asks the provider again.
@@ -507,6 +511,7 @@ describe('content wiring', () => {
 
     title.focus();
     tab();
+    await flush();
     expect(title.value).toBe('Dinner');
     // The next suggestion is below the fold: a banner, not an invisible chip, and not yet a filling page for it.
     expect(chip.text).toBe('Scroll to "Location"?');
@@ -529,6 +534,7 @@ describe('content wiring', () => {
     const e2 = tab();
     expect(e2.defaultPrevented).toBe(true);
     expect(where.value).toBe('123 King St');
+    await flush();
     expect(calls('feedback')).toHaveLength(2);
     expect(calls('feedback')[1]).toMatchObject({ accepted: true, contextId: 'c1' });
     expect(calls('suggestRequest')).toHaveLength(1);
@@ -735,6 +741,8 @@ describe('content wiring', () => {
       visible: false,
       text: '',
       pending: false,
+      key: 'Tab',
+      relay: () => undefined,
     };
     startSuggestions(ctx, chip, document);
     await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
@@ -846,6 +854,8 @@ describe('navigation chip', () => {
       visible: false,
       text: '',
       pending: false,
+      key: 'Tab',
+      relay: () => undefined,
     };
     startSuggestions(ctx, chip, document);
     await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
@@ -871,6 +881,7 @@ describe('navigation chip', () => {
     expect(host.style.bottom).toBe('');
     title.focus();
     tab();
+    await flush();
     expect(title.value).toBe('Dinner');
     expect(calls('navigate')).toEqual([]);
     // With the fill consumed, the same answer's navigation takes the corner.
@@ -915,6 +926,77 @@ describe('navigation chip', () => {
     await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.debounceMs);
     await flush();
     expect(calls('suggestRequest')).toHaveLength(2);
+  });
+});
+
+describe('a field inside a cross-origin frame', () => {
+  let ctx: ReturnType<typeof fakeCtx>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    sent.mockReset();
+    sent.mockResolvedValue(undefined);
+    ctx = fakeCtx();
+    document.body.innerHTML = '';
+  });
+
+  afterEach(() => {
+    ctx.invalidate();
+    document.body.innerHTML = '';
+    vi.useRealTimers();
+  });
+
+  it('merges the frame\'s descriptors, anchors the chip over the frame, arms it, and has the frame perform the fill', async () => {
+    const iframe = document.createElement('iframe');
+    document.body.append(iframe);
+    iframe.getBoundingClientRect = () => new DOMRect(100, 200, 400, 300);
+    const win = iframe.contentWindow!;
+    const posted: Array<Record<string, unknown>> = [];
+    win.postMessage = ((msg: Record<string, unknown>) => void posted.push(msg)) as typeof win.postMessage;
+    const report = {
+      fields: [{ i: 'f0', t: 'input:text', al: 'Card number', w: 'm' }],
+      elements: [],
+      rects: { f0: { x: 20, y: 30, w: 200, h: 30 } },
+      fingerprints: { f0: 'input|text|cardnumber|||Card number' },
+      entries: {},
+    };
+    const fromFrame = (msg: Record<string, unknown>): void => {
+      window.dispatchEvent(new MessageEvent('message', { data: { carat: 'carat-frame', v: 1, ...msg }, source: win }));
+    };
+
+    sent.mockImplementation(async (type, data) => {
+      if (type !== 'suggestRequest') return undefined;
+      const { fields } = data as { fields: Array<{ i: string; al?: string; fr?: number }> };
+      const f = fields.find((x) => x.al === 'Card number');
+      return { suggestions: f ? [{ kind: 'fill', fieldId: f.i, value: '4242 4242 4242 4242', confidence: 0.9, reason: '', sourceContextId: 'c1' }] : [], navigation: [], interactions: [] };
+    });
+
+    const chip = createChip(document);
+    startSuggestions(ctx, chip, document);
+    fromFrame({ type: 'report', token: 'abc', reply: false, report });
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
+    // The hub asks the frame to report again and waits a beat for the answer.
+    fromFrame({ type: 'report', token: 'abc', reply: true, report });
+    await flush();
+
+    const asked = calls('suggestRequest').at(-1)!.fields as Array<Record<string, unknown>>;
+    expect(asked).toEqual([expect.objectContaining({ al: 'Card number', fr: 1 })]);
+    expect(chip.text).toBe('Fill "4242 4242 4242 4242"?');
+    // Anchored over the frame: the frame's box plus the box the frame reported.
+    expect(chipHost().style.top).toBe(`${200 + 30 + 30 + 6}px`);
+    expect(chipHost().style.left).toBe('120px');
+    expect(posted.at(-1)).toMatchObject({ type: 'arm', key: 'Tab' });
+
+    // The key was pressed inside the frame, which relays it; the frame performs the fill and answers.
+    fromFrame({ type: 'key', token: 'abc', key: 'Tab' });
+    await flush();
+    const perform = posted.find((m) => m.type === 'perform')!;
+    expect(perform.req).toMatchObject({ kind: 'fill', id: 'f0', value: '4242 4242 4242 4242', host: location.host });
+    fromFrame({ type: 'performed', token: 'abc', seq: perform.seq, reply: { ok: true, outcome: 'done' } });
+    await flush();
+    expect(calls('feedback').at(-1)).toMatchObject({ fieldId: expect.any(String), accepted: true, contextId: 'c1' });
+    // Armed while the chip was up, disarmed the moment it was accepted, then the one perform.
+    expect(posted.map((m) => m.type).slice(-3)).toEqual(['arm', 'disarm', 'perform']);
   });
 });
 
@@ -996,6 +1078,49 @@ describe('interaction chip', () => {
     await flush();
     expect(chip.visible).toBe(false);
     expect(clicks).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers a money control behind Enter, lets Tab through it, and reports the accept as money', async () => {
+    const pay = button('Pay $312.40', 100);
+    const clicks = vi.fn();
+    pay.addEventListener('click', clicks);
+    sent.mockImplementation(async (type, data) => {
+      if (type === 'getSettings') return { allowPayments: true };
+      if (type !== 'suggestRequest') return undefined;
+      const { elements } = data as { elements?: Elements };
+      const e = (elements ?? []).find((x) => x.nm === 'Pay $312.40');
+      return { suggestions: [], navigation: [], interactions: e ? [{ kind: 'interact', elementId: e.i, verb: 'click', value: 'Pay $312.40', confidence: 0.8, reason: '', sourceContextId: 'c1' }] : [] };
+    });
+    const chip = createChip(document);
+    startSuggestions(ctx, chip, document);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
+    await flush();
+    // The money control reached the model flagged, and the chip asks for Enter.
+    expect(calls('suggestRequest')[0]?.elements).toEqual([expect.objectContaining({ nm: 'Pay $312.40', m: 1 })]);
+    expect(chip.text).toBe('Click "Pay $312.40"?');
+    expect(chip.key).toBe('Enter');
+
+    const passed = tab();
+    expect(passed.defaultPrevented).toBe(false);
+    expect(clicks).not.toHaveBeenCalled();
+    const accept = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    document.body.dispatchEvent(accept);
+    await flush();
+    expect(accept.defaultPrevented).toBe(true);
+    expect(clicks).toHaveBeenCalledTimes(1);
+    expect(calls('feedback').at(-1)).toEqual({ kind: 'interact', host: location.host, role: 'button', name: 'Pay $312.40', accepted: true, money: true });
+  });
+
+  it('leaves a money control undescribed while payments are off', async () => {
+    button('Pay $312.40', 100);
+    field('Title', 200);
+    sent.mockImplementation(async (type) => (type === 'suggestRequest' ? { suggestions: [], navigation: [], interactions: [] } : undefined));
+    startSuggestions(ctx, createChip(document), document);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
+    await flush();
+    // The field is there to ask about; the Pay button is not described at all.
+    expect(calls('suggestRequest')[0]?.fields).toHaveLength(1);
+    expect(calls('suggestRequest')[0]?.elements).toBeUndefined();
   });
 
   it('checks a box on Tab, sets a slider with the value in the label, and never re-offers a box already on', async () => {
@@ -1176,6 +1301,7 @@ describe('interaction chip', () => {
     expect(chip.text).toBe('Fill "Dinner"?');
     title.focus();
     tab();
+    await flush();
     // The fill exhausted; the same answer's interaction takes the chip, not the corner.
     expect(chip.text).toBe('Click "Save"?');
     expect((document.querySelector('[data-carat-chip]') as HTMLElement).style.bottom).toBe('');

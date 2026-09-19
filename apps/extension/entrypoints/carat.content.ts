@@ -1,15 +1,24 @@
 import { defineContentScript } from 'wxt/utils/define-content-script';
 import { createChip } from '../src/chip';
-import { createPageState, startCapture, startStatus, startSuggestions } from '../src/content';
+import { createPageState, send, startCapture, startStatus, startSuggestions } from '../src/content';
+import { startFrameAgent } from '../src/frames';
 import { createStatusLine } from '../src/status';
 import { onMessage } from '../src/messaging';
 
 export default defineContentScript({
   matches: ['<all_urls>'],
+  // Payment forms live in cross-origin frames (Stripe, Adyen); the script runs there too, as a frame agent.
+  allFrames: true,
   runAt: 'document_idle',
   main(ctx) {
-    // One page item per tab: a frame's text must not replace the top document's.
-    if (window.self !== window.top) return;
+    if (window.self !== window.top) {
+      // A same-origin child is read by its parent directly; a cross-origin one reports through the frame protocol.
+      if (parentReachable()) return;
+      startFrameAgent(ctx, document, {
+        allowPayments: async () => (await send('getSettings', undefined))?.allowPayments === true,
+      });
+      return;
+    }
     // Shared between the two schedulers: once a chip has shown here, no picture of this page.
     const page = createPageState();
     const status = startStatus(ctx, createStatusLine(document), document);
@@ -30,3 +39,11 @@ export default defineContentScript({
     ctx.onInvalidated(stop);
   },
 });
+
+function parentReachable(): boolean {
+  try {
+    return !!window.parent.document;
+  } catch {
+    return false;
+  }
+}

@@ -107,7 +107,10 @@ export default defineBackground(() => {
     }
   });
 
-  onMessage('feedback', ({ data, sender }) => handleFeedback(data, store, sender.tab?.id));
+  // Every accepted money control and every fill that stopped short is logged per tab, with the control's name.
+  onMessage('feedback', ({ data, sender }) =>
+    handleFeedback(data, store, sender.tab?.id, { onPerform: (tabId, entry) => void diag.recordPerform(tabId, entry) }),
+  );
 
   // The only place carat ever opens or focuses a tab, and only in answer to a Tab press on a visible chip.
   onMessage('navigate', async ({ data, sender }) => {

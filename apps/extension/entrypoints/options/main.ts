@@ -29,6 +29,7 @@ const smartModel = field<HTMLInputElement>('smartModel');
 const screenshots = field<HTMLInputElement>('screenshots');
 const eagerness = field<HTMLInputElement>('eagerness');
 const eagernessNoteEl = document.getElementById('eagerness-note') as HTMLElement;
+const allowPayments = field<HTMLInputElement>('allowPayments');
 
 // The thumb carries a position; everything a reader needs — the level's name
 // for a screen reader, the line under the track — is derived from it here.
@@ -60,6 +61,7 @@ function render(s: Settings): void {
   screenshots.checked = s.screenshots;
   eagerness.value = String(eagernessPosition(s.eagerness));
   showEagerness();
+  allowPayments.checked = s.allowPayments;
 }
 
 function read(): Partial<Settings> {
@@ -75,6 +77,7 @@ function read(): Partial<Settings> {
     smartModel: smartModel.value,
     screenshots: screenshots.checked,
     eagerness: eagernessAt(eagerness.value),
+    allowPayments: allowPayments.checked,
   });
 }
 
