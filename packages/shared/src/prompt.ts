@@ -198,19 +198,30 @@ function escapeAttr(s: string): string {
 }
 
 /**
- * The turn that changes per request: notes, then history, then the open tabs,
- * then the page. The outline is last because it is the longest and the least
- * shared, so everything before it stays in the cached prefix.
+ * The head of the user turn: notes, then history, then the open tabs, and
+ * nothing that moves between two requests on the same page. A warm-up call
+ * sends exactly this much and the real call repeats it byte for byte, so the
+ * provider's prefix cache is already hot when the outline lands.
+ *
+ * `now` is deliberately not in here: a clock in the prefix would break the
+ * cache on every request. It goes after, with the page.
  */
-export function renderRequest(req: NextActionRequest): string {
+export function renderPrefix(req: Pick<NextActionRequest, 'notes' | 'history' | 'tabs'>): string {
   const notes = req.notes.map((n) => `- ${n}`);
   const history = req.history.map((h) => `- ${h}`);
   const tabs = req.tabs.map((t) => `- [tab ${t.id}] ${t.host} — ${t.title}`);
+  return [block('notes', notes), block('history', history), block('tabs', tabs)].join('\n');
+}
+
+/**
+ * The turn that changes per request: the shared prefix, then the clock, then
+ * the page. The outline is last because it is the longest and the least
+ * shared, so everything before it stays in the cached prefix.
+ */
+export function renderRequest(req: NextActionRequest): string {
   return [
+    renderPrefix(req),
     `<now>${req.now}</now>`,
-    block('notes', notes),
-    block('history', history),
-    block('tabs', tabs),
     `<page host="${escapeAttr(req.page.host)}" path="${escapeAttr(req.page.path)}" scroll="${scrollText(req)}">`,
     req.page.title,
     req.outline,
@@ -229,6 +240,22 @@ export function buildNextActionMessages(req: NextActionRequest): ChatMessage[] {
     ...FEW_SHOTS,
     { role: 'user', content: renderRequest(req) },
   ];
+}
+
+/**
+ * What a warm-up call puts where the outline goes. Dumb on purpose: the point
+ * is the prefix in front of it, not the answer, which is thrown away.
+ */
+export const WARMUP_OUTLINE = 'main: (warming the cache; the page has not been read yet)';
+
+/**
+ * The same request with the outline replaced by one placeholder line. Sent
+ * with a one-token cap on navigation, so the static instructions, the
+ * few-shots, the notes, the history and the tabs are in the provider's prefix
+ * cache before the user's page has finished rendering.
+ */
+export function buildWarmupMessages(req: NextActionRequest): ChatMessage[] {
+  return buildNextActionMessages({ ...req, outline: WARMUP_OUTLINE, controls: [] });
 }
 
 // Text-only output so the reading drops straight into the notes pipeline. The

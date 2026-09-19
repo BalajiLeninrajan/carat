@@ -18,9 +18,12 @@ export {
   DISTILL_RESPONSE_FORMAT,
   FEW_SHOTS,
   TRANSCRIBE_PROMPT,
+  WARMUP_OUTLINE,
   actionInstructions,
   buildNextActionMessages,
+  buildWarmupMessages,
   distillMessages,
+  renderPrefix,
   renderRequest,
 } from './prompt';
 export type { ChatMessage, ChatRole } from './prompt';
