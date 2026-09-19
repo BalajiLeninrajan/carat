@@ -1,9 +1,9 @@
 import type { ImageInput, Settings, SuggestRequest, Suggestion } from '@carat/shared';
-import { FastThenSmartProvider } from './fast-then-smart';
 import { JevProvider } from './jev';
 import { LocalProvider } from './local';
 import { OpenAICompatProvider } from './openai-compat';
 import type { ReasoningEffort } from './openai-compat';
+import { RaceProvider } from './race';
 
 export interface SuggestOptions {
   signal: AbortSignal;
@@ -27,21 +27,24 @@ export interface VisionProvider extends Provider {
 }
 
 /**
- * local: regex only. openai/baseten: the chat model when a key is set, else
- * regex. cloudflare: Jev first when an account id and token are set, then the
- * chat model at baseURL when a key is set too; without Cloudflare credentials
- * it behaves like openai. The chat model runs with no reasoning: the chip
- * has a 6s budget and the prompt carries the few-shots it needs.
+ * local: regex only. Anything else is a race between every source the
+ * settings allow, regex always among them: openai/baseten add the chat model
+ * when a key is set; cloudflare adds Jev when an account id and token are set
+ * and the chat model at baseURL when a key is set too. Without Cloudflare
+ * credentials it behaves like openai; with no key at all it is regex alone.
+ * The chat model runs with no reasoning: the chip has a 6s budget and the
+ * prompt carries the few-shots it needs. Start order is also rank on a tie:
+ * chat beats Jev beats regex.
  */
 export function createProvider(settings: Settings, fetchImpl: typeof fetch = fetch): Provider {
   if (settings.provider === 'local') return new LocalProvider(settings.eagerness);
+  const sources: Provider[] = [new LocalProvider(settings.eagerness)];
+  const jev = settings.provider === 'cloudflare' && settings.cfAccountId && settings.cfApiToken;
+  if (jev) sources.push(new JevProvider({ accountId: settings.cfAccountId, apiToken: settings.cfApiToken, eagerness: settings.eagerness }, fetchImpl));
   const llm = chatProvider(settings, settings.model, 'none', fetchImpl);
-
-  if (settings.provider === 'cloudflare' && settings.cfAccountId && settings.cfApiToken) {
-    const jev = new JevProvider({ accountId: settings.cfAccountId, apiToken: settings.cfApiToken, eagerness: settings.eagerness }, fetchImpl);
-    return llm ? new FastThenSmartProvider(jev, llm) : jev;
-  }
-  return llm ?? new LocalProvider(settings.eagerness);
+  if (llm) sources.push(llm);
+  if (sources.length === 1) return sources[0]!;
+  return new RaceProvider(sources, { id: jev ? 'cloudflare' : llm!.id });
 }
 
 /**
