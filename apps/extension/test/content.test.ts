@@ -737,6 +737,32 @@ describe('content wiring', () => {
     expect(calls('suggestRequest')).toHaveLength(2);
   });
 
+  it('a click into another field takes the chip away, says nothing about it, and the next snapshot asks afresh', async () => {
+    field('Title', 100);
+    const notes = field('Notes', 160);
+    sent.mockImplementation(async (type, data) => {
+      if (type !== 'suggestRequest') return undefined;
+      const { fields } = data as { fields: Array<{ i: string }> };
+      return { suggestions: [s(fields[0]!.i, 'Dinner', 0.9)] };
+    });
+    const chip = createChip(document);
+    startSuggestions(ctx, chip, document);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
+    await flush();
+    expect(chip.visible).toBe(true);
+    expect(calls('suggestRequest')).toHaveLength(1);
+
+    notes.focus();
+    expect(chip.visible).toBe(false);
+    // The user picked their own next step; that is not them turning the fill down.
+    expect(calls('feedback')).toHaveLength(0);
+
+    // The memo would have answered this locally; after the user acted it asks about the page as it is now.
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.debounceMs);
+    await flush();
+    expect(calls('suggestRequest')).toHaveLength(2);
+  });
+
   it('tells the chip where the value came from and why', async () => {
     field('Title', 100);
     const twoMinutesAgo = Date.now() - 2 * 60_000;
@@ -1428,6 +1454,29 @@ describe('page scroll chip', () => {
     await vi.advanceTimersByTimeAsync(SCROLL_SETTLE_MS + SNAPSHOT_TIMING.debounceMs);
     await flush();
     expect(calls('suggestRequest')[1]?.state).toMatchObject({ y: 1, more: true, done: ['scroll'] });
+    expect(chip.visible).toBe(false);
+  });
+
+  it('counts a scroll the user does themselves as the step, and stops offering it', async () => {
+    sent.mockImplementation(async (type) => (type === 'suggestRequest' ? { suggestions: [], navigation: [], interactions: [scrollOffer] } : undefined));
+    const chip = createChip(document);
+    startSuggestions(ctx, chip, document);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
+    await flush();
+    expect(chip.text).toBe('Scroll down?');
+
+    // Past the moment that belongs to carat's own scrolling, this wheel is the user's.
+    await vi.advanceTimersByTimeAsync(SCROLL_SETTLE_MS);
+    window.dispatchEvent(new Event('wheel'));
+    expect(chip.visible).toBe(false);
+    // They scrolled; they did not turn the offer down, so nothing is reported and nothing is suppressed.
+    expect(calls('feedback')).toHaveLength(0);
+
+    page(8000, 800);
+    setVisibility('visible');
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.debounceMs);
+    await flush();
+    expect(calls('suggestRequest').at(-1)?.state).toMatchObject({ y: 1, done: ['scroll'] });
     expect(chip.visible).toBe(false);
   });
 

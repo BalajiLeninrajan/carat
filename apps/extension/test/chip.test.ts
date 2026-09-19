@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { AUTO_DISMISS_MS, CORNER_INSET_PX, PENDING_HINT, createChip, type Chip, type DismissReason } from '../src/chip';
 import { CHIP_CSS } from '../src/chip/styles';
+import { SCROLL_SETTLE_MS } from '../src/scroll';
 
 // Grabbed before any test spies on it, so a spy never wraps an earlier spy.
 const attachShadow = Element.prototype.attachShadow;
@@ -74,7 +75,10 @@ describe('chip', () => {
   });
 
   it('lets Tab through when another text input has focus', () => {
+    // Focus moved first, then the chip went up: moving into a field is the user acting, and takes a chip that is already there.
+    chip.hide();
     other.focus();
+    chip.show({ target, value: 'Seven Shores Cafe', onAccept, onDismiss });
     const e = key(other, 'Tab');
     expect(e.defaultPrevented).toBe(false);
     expect(onAccept).not.toHaveBeenCalled();
@@ -105,6 +109,71 @@ describe('chip', () => {
     target.dispatchEvent(new Event('input', { bubbles: true }));
     expect(onDismiss).toHaveBeenCalledWith('typed');
     expect(chip.visible).toBe(false);
+  });
+
+  it('hides on a pointerdown anywhere but the chip, and reports only that the user acted', () => {
+    document.body.dispatchEvent(new Event('pointerdown', { bubbles: true, composed: true }));
+    expect(onDismiss).toHaveBeenCalledWith('acted');
+    expect(chip.visible).toBe(false);
+  });
+
+  it('stays for a pointerdown on the chip itself, which is an accept in the making', () => {
+    hosts()[0]!.dispatchEvent(new Event('pointerdown', { bubbles: true, composed: true }));
+    expect(onDismiss).not.toHaveBeenCalled();
+    expect(chip.visible).toBe(true);
+  });
+
+  it('hides on a key pressed anywhere else, but not on Tab or a modifier on its own', () => {
+    key(target, 'Shift', { shiftKey: true });
+    key(other, 'Tab', { shiftKey: true });
+    expect(onDismiss).not.toHaveBeenCalled();
+    expect(chip.visible).toBe(true);
+
+    key(other, 'k');
+    expect(onDismiss).toHaveBeenCalledWith('acted');
+    expect(chip.visible).toBe(false);
+  });
+
+  it('leaves typing in its own field to the typed path, which is the one that reports', () => {
+    key(target, 'k');
+    expect(onDismiss).not.toHaveBeenCalled();
+    target.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(onDismiss).toHaveBeenCalledWith('typed');
+  });
+
+  it('hides when focus moves to another field', () => {
+    other.focus();
+    expect(onDismiss).toHaveBeenCalledWith('acted');
+    expect(chip.visible).toBe(false);
+  });
+
+  it('hides on a wheel, a drag or a scroll the user started', () => {
+    vi.advanceTimersByTime(SCROLL_SETTLE_MS);
+    window.dispatchEvent(new Event('wheel'));
+    expect(onDismiss).toHaveBeenCalledWith('scrolled');
+    expect(chip.visible).toBe(false);
+
+    chip.show({ target, value: 'Seven Shores Cafe', onAccept, onDismiss });
+    vi.advanceTimersByTime(SCROLL_SETTLE_MS);
+    window.dispatchEvent(new Event('touchmove'));
+    expect(onDismiss).toHaveBeenLastCalledWith('scrolled');
+
+    chip.show({ target, value: 'Seven Shores Cafe', onAccept, onDismiss });
+    vi.advanceTimersByTime(SCROLL_SETTLE_MS);
+    window.dispatchEvent(new Event('scroll'));
+    expect(onDismiss).toHaveBeenLastCalledWith('scrolled');
+  });
+
+  it('sits through the tail of the scroll that placed it', () => {
+    // Carat scrolled this target into view and put the chip up as the page stopped;
+    // the last event of its own scroll must not read as the user moving on.
+    window.dispatchEvent(new Event('scroll'));
+    expect(onDismiss).not.toHaveBeenCalled();
+    expect(chip.visible).toBe(true);
+
+    vi.advanceTimersByTime(SCROLL_SETTLE_MS);
+    window.dispatchEvent(new Event('scroll'));
+    expect(onDismiss).toHaveBeenCalledWith('scrolled');
   });
 
   it('auto-dismisses after 20s', () => {
@@ -243,7 +312,8 @@ describe('chip', () => {
   it('hides visually and ignores Tab and Escape while the target is off screen', () => {
     target.getBoundingClientRect = () =>
       ({ top: -500, left: 20, bottom: -470, right: 220, width: 200, height: 30 }) as DOMRect;
-    window.dispatchEvent(new Event('scroll'));
+    // A resize, not a scroll: a scroll is the user moving on and would take the chip with it.
+    window.dispatchEvent(new Event('resize'));
     expect((hosts()[0] as HTMLElement).style.display).toBe('none');
     target.focus();
     const tab = key(target, 'Tab');
@@ -442,6 +512,8 @@ describe('corner chip', () => {
 
   it('accepts Tab even while a text field has focus, and swallows it', () => {
     composer.focus();
+    // The offer came up while the user was already in the composer; moving into it is what takes a banner away.
+    chip.showCorner({ label: 'Open in Google Maps', value: 'Seven Shores Cafe', onAccept, onDismiss });
     const pageHandler = vi.fn();
     document.addEventListener('keydown', pageHandler);
     const e = key(composer, 'Tab');
@@ -480,10 +552,10 @@ describe('corner chip', () => {
   it('can drop the colon and, given a target, defers Tab to another text field the way a field chip does', () => {
     const target = document.createElement('input');
     document.body.append(target);
+    composer.focus();
     chip.showCorner({ label: 'Scroll to', bare: true, value: 'Add location', target, onAccept, onDismiss });
     expect(chip.text).toBe('Scroll to "Add location"?');
 
-    composer.focus();
     expect(key(composer, 'Tab').defaultPrevented).toBe(false);
     expect(onAccept).not.toHaveBeenCalled();
 

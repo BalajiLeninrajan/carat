@@ -295,6 +295,17 @@ export function startSuggestions(
     present(last, view.descriptors, view.registries);
   }
 
+  /**
+   * The user got on with the page themselves: a click, a key, a scroll, a
+   * move to another field. The chip is already gone. Nothing is reported and
+   * nothing is suppressed, but the memoised answer stops standing in for a
+   * fresh look, so the next trigger asks about the page as it is now.
+   */
+  function acted(): void {
+    if (last) last.at = 0;
+    shown = null;
+  }
+
   /** From here on this is the page being filled: no picture of it, ever. */
   function markFilling(): void {
     if (last) last.shown = true;
@@ -399,6 +410,7 @@ export function startSuggestions(
       },
       onDismiss(reason) {
         disarm();
+        if (reason === 'acted' || reason === 'scrolled') return acted();
         // A timeout or a vanished target says nothing about the suggestion; Esc and typing over it do.
         if (reason !== 'escape' && reason !== 'typed') return;
         forget();
@@ -518,6 +530,7 @@ export function startSuggestions(
       },
       onDismiss(reason) {
         disarm();
+        if (reason === 'acted' || reason === 'scrolled') return acted();
         if (reason !== 'escape' && reason !== 'typed') return;
         forget();
         feedback(false);
@@ -567,6 +580,14 @@ export function startSuggestions(
         });
       },
       onDismiss(reason) {
+        // Scrolling the page by hand is the step this offer was for: count it done and stop offering it.
+        if (reason === 'scrolled') {
+          forget();
+          done.add(PAGE_SCROLL_DONE);
+          scrolledAtHeight = documentHeight(win, doc);
+          return acted();
+        }
+        if (reason === 'acted') return acted();
         if (reason !== 'escape' && reason !== 'typed') return;
         forget();
         feedback(false);
@@ -610,6 +631,7 @@ export function startSuggestions(
         });
       },
       onDismiss(reason) {
+        if (reason === 'acted' || reason === 'scrolled') return acted();
         if (reason !== 'escape' && reason !== 'typed') return;
         offer.forget();
         // Declining a scroll is "not that one" as much as Esc on a chip is: the answer's next item gets its turn.
@@ -647,6 +669,7 @@ export function startSuggestions(
         void send('navigate', nav);
       },
       onDismiss(reason) {
+        if (reason === 'acted' || reason === 'scrolled') return acted();
         if (reason !== 'escape' && reason !== 'typed') return;
         forget();
         feedback(false);
