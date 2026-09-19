@@ -9,10 +9,13 @@ import { ContextStore, EntityStore } from '../src/store';
 import type { StorageArea } from '../src/store';
 import type { SuggestDiag } from '../src/background';
 import {
+  COMMANDS,
   DiagLog,
   MAX_PERFORMS,
   RefineQueue,
+  clearAll,
   explainGate,
+  handleCommand,
   fingerprintMatchesDescriptor,
   gate,
   handleFeedback,
@@ -1754,5 +1757,64 @@ describe('orchestrate fills from the page the user is on', () => {
     const good = fakeProvider('openai', async () => [junk('Pho Dau Bo')]);
     const res = await orchestrate({ page: reddit, fields: [search], force: true }, onReddit, { store, settings: async () => enabled, createProvider: () => good, now });
     expect(res.suggestions.map((s) => s.value)).toEqual(['Pho Dau Bo']);
+  });
+});
+
+describe('keyboard commands', () => {
+  function deps() {
+    const notify = vi.fn<(tabId: number, message: string) => void>();
+    const clear = vi.fn<() => Promise<void>>(async () => undefined);
+    return { notify, clear };
+  }
+
+  it('asks the focused tab to snapshot again on the suggest key', () => {
+    const d = deps();
+    handleCommand(COMMANDS.suggest, 7, d);
+    expect(d.notify).toHaveBeenCalledWith(7, 'forceSuggest');
+    expect(d.clear).not.toHaveBeenCalled();
+  });
+
+  it('clears first and tells the tab afterwards on the clear key', async () => {
+    const order: string[] = [];
+    const notify = vi.fn((_tabId: number, message: string) => void order.push(message));
+    const clear = vi.fn(async () => {
+      order.push('cleared');
+    });
+    handleCommand(COMMANDS.clear, 7, { clear, notify });
+    await vi.waitFor(() => expect(notify).toHaveBeenCalled());
+    expect(order).toEqual(['cleared', 'contextCleared']);
+    expect(notify).toHaveBeenCalledWith(7, 'contextCleared');
+  });
+
+  it('does nothing without a tab, for an unknown command, or when the clear throws', async () => {
+    const d = deps();
+    handleCommand(COMMANDS.clear, undefined, d);
+    handleCommand('carat-something-else', 7, d);
+    expect(d.clear).not.toHaveBeenCalled();
+    expect(d.notify).not.toHaveBeenCalled();
+
+    const failing = { clear: vi.fn(async () => Promise.reject(new Error('storage gone'))), notify: vi.fn() };
+    handleCommand(COMMANDS.clear, 7, failing);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(failing.notify).not.toHaveBeenCalled();
+  });
+});
+
+describe('clearAll', () => {
+  it('wipes the context store, the screenshots and the entities together', async () => {
+    const area = new FakeArea();
+    const store = new ContextStore(area);
+    await store.upsertPage({ tabId: 1, url: 'https://discord.com/channels/1', title: 'Discord', text: 'dinner at Lazeez Shawarma?' });
+    await store.pin();
+    const shots = { clear: vi.fn(async () => undefined) };
+    const entities = { clear: vi.fn(async () => undefined) };
+
+    await clearAll({ store, shots, entities });
+
+    expect(await store.items()).toEqual([]);
+    expect(await store.isPinned()).toBe(false);
+    expect(shots.clear).toHaveBeenCalled();
+    expect(entities.clear).toHaveBeenCalled();
   });
 });

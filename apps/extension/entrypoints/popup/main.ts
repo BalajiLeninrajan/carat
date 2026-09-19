@@ -151,17 +151,36 @@ enabled.addEventListener('change', async () => {
   }
 });
 
+/** The three things the button can say. It is never disabled: a slow worker must not make clearing look broken. */
+type ClearState = 'idle' | 'working' | 'done';
+const CLEAR_LABEL = 'Clear what carat remembers';
+const CLEARED_MS = 2000;
+let clearedTimer: number | undefined;
+let clearing = false;
+
+function setClearState(state: ClearState): void {
+  clearButton.dataset.state = state;
+  clearButton.textContent = state === 'working' ? 'Clearing…' : state === 'done' ? 'Cleared' : CLEAR_LABEL;
+}
+
 clearButton.addEventListener('click', async () => {
-  clearButton.disabled = true;
+  if (clearing) return;
+  clearing = true;
+  if (clearedTimer !== undefined) clearTimeout(clearedTimer);
+  // The list is this popup's copy of what carat knows; empty it as the user
+  // clicks rather than after the round trip. Clear wipes the pin with the rest.
+  renderList([]);
+  renderPinned(false);
+  setClearState('working');
   try {
     await withTimeout(sendMessage('clearKnown', undefined));
-    renderList([]);
-    // Clear wipes the whole session store, pin included.
-    renderPinned(false);
+    setClearState('done');
+    clearedTimer = window.setTimeout(() => setClearState('idle'), CLEARED_MS);
   } catch {
     app.dataset.state = 'offline';
+    setClearState('idle');
   } finally {
-    clearButton.disabled = false;
+    clearing = false;
   }
 });
 

@@ -6,12 +6,13 @@ import {
   DiagLog,
   RefineQueue,
   chromeTabsApi,
-  clearKnown,
+  clearAll,
   createPredictPipeline,
   createPrewarmer,
   createVisionPipeline,
   describeStatus,
   getKnown,
+  handleCommand,
   handleFeedback,
   isExtensionPage,
   openTabs,
@@ -24,7 +25,6 @@ import {
 import type { CaptureVerdict, ScreenApi } from '../src/background';
 
 const SWEEP_ALARM = 'carat-sweep';
-const SUGGEST_COMMAND = 'carat-suggest';
 
 export default defineBackground(() => {
   // Constructed eagerly, loaded lazily: the first store call after a wake reads storage.session back.
@@ -129,7 +129,10 @@ export default defineBackground(() => {
   onMessage('getKnown', ({ sender }) => (trusted(sender) ? getKnown(store) : { items: [], pinned: false }));
   onMessage('clearKnown', async ({ sender }) => {
     if (!trusted(sender)) return;
-    await Promise.all([clearKnown(store), shots.clear(), entities.clear()]);
+    await clearAll({ store, shots, entities });
+    // The popup is its own page, so the tab whose chip should go is the active one.
+    const tabId = await activeTabId();
+    if (tabId !== undefined) tellTab(tabId, 'contextCleared');
   });
   onMessage('setPinned', async ({ data, sender }) =>
     trusted(sender) ? setPinned(store, data.pinned) : { pinned: await store.isPinned() },
@@ -150,11 +153,13 @@ export default defineBackground(() => {
     return next;
   });
 
-  // The shortcut asks the focused tab's content script to snapshot again, past
-  // every cache. A tab with no content script (chrome://, the store) rejects; that is fine.
+  // Alt+Shift+C asks the focused tab's content script to snapshot again, past
+  // every cache; Alt+Shift+X wipes the store and tells that tab to drop its chip.
   chrome.commands?.onCommand.addListener((command, tab) => {
-    if (command !== SUGGEST_COMMAND || tab?.id === undefined) return;
-    sendMessage('forceSuggest', undefined, tab.id).catch(() => undefined);
+    handleCommand(command, tab?.id, {
+      clear: () => clearAll({ store, shots, entities }),
+      notify: tellTab,
+    });
   });
 
   // Every minute rather than five: a screenshot must not outlive its three-minute TTL by much.
@@ -166,6 +171,20 @@ export default defineBackground(() => {
     void predict.sweep();
   });
 });
+
+function tellTab(tabId: number, message: 'forceSuggest' | 'contextCleared'): void {
+  sendMessage(message, undefined, tabId).catch(() => undefined);
+}
+
+/** The tab a popup click came from; the popup is its own page, so its sender carries no tab. */
+async function activeTabId(): Promise<number | undefined> {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    return tab?.id;
+  } catch {
+    return undefined;
+  }
+}
 
 function screenApi(): ScreenApi {
   return {

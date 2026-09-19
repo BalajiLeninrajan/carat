@@ -32,11 +32,21 @@ export default defineContentScript({
     });
     // The page's own text is what a navigation chip is built from, so a new capture re-asks.
     startCapture(ctx, document, { page, onCaptured: () => suggestions.refresh() });
-    // The keyboard shortcut lands here from the background; the only message a content script receives.
-    const stop = onMessage('forceSuggest', () => {
+    // The two messages a content script receives, both from a background that the user just prodded.
+    const stopForce = onMessage('forceSuggest', () => {
       if (ctx.isValid) suggestions.force();
     });
-    ctx.onInvalidated(stop);
+    // The store was wiped, from the pill, the popup or Alt+Shift+X: the chip
+    // goes, and so does everything this page load remembered.
+    const stopCleared = onMessage('contextCleared', () => {
+      if (!ctx.isValid) return;
+      suggestions.forget();
+      status.refresh();
+    });
+    ctx.onInvalidated(() => {
+      stopForce();
+      stopCleared();
+    });
   },
 });
 

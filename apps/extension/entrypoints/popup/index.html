@@ -35,7 +35,11 @@
         padding: 10px 12px;
         border-bottom: 1px solid var(--surface0);
       }
-      header h1 { font-size: 14px; font-weight: 600; margin: 0; flex: 1; }
+      header h1 { font-size: 14px; font-weight: 600; margin: 0; }
+      header .spacer { flex: 1; }
+      #clear { padding: 4px 10px; font-size: 12px; white-space: nowrap; }
+      #clear[data-state="done"] { border-color: var(--teal); color: var(--teal); }
+      #clear[data-state="working"] { color: var(--subtext0); }
       .toggle { display: flex; align-items: center; gap: 6px; color: var(--subtext0); cursor: pointer; }
       .toggle input { width: 14px; height: 14px; margin: 0; accent-color: var(--blue); }
       .site { padding: 6px 12px; border-bottom: 1px solid var(--surface0); font-size: 12px; }
@@ -111,6 +115,8 @@
     <main id="app" data-state="loading">
       <header>
         <h1>Carat</h1>
+        <button type="button" id="clear" data-state="idle">Clear what carat remembers</button>
+        <span class="spacer"></span>
         <label class="toggle">
           <input type="checkbox" id="enabled" />
           <span>Enabled</span>
@@ -144,7 +150,6 @@
         <a href="#" id="options">Settings</a>
         <span class="actions">
           <button type="button" id="pin" aria-pressed="false">Pin</button>
-          <button type="button" id="clear">Clear</button>
         </span>
       </footer>
     </main>

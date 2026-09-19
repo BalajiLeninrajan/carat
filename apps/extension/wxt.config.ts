@@ -12,6 +12,10 @@ export default defineConfig({
         suggested_key: { default: 'Alt+Shift+C' },
         description: 'Ask Carat for a suggestion on this page now',
       },
+      clearContext: {
+        suggested_key: { default: 'Alt+Shift+X' },
+        description: 'Clear what Carat remembers',
+      },
     },
   },
 });

@@ -82,9 +82,15 @@ export interface SuggestionsHandle {
   refresh(): void;
   /** The user pressed the shortcut: ask again right now, past the local memo, the answer cache and the dismissed filter. */
   force(): void;
+  /**
+   * The store was cleared. Drop the chip and everything this page load
+   * remembers: the memoised answer, what was accepted or dismissed here, how
+   * far the page had been scrolled. Nothing is asked for; the next trigger does that.
+   */
+  forget(): void;
 }
 
-const NO_HANDLE: SuggestionsHandle = { refresh: () => undefined, force: () => undefined };
+const NO_HANDLE: SuggestionsHandle = { refresh: () => undefined, force: () => undefined, forget: () => undefined };
 
 /** Told when a request leaves and when its answer is in; the status line pulses in between. */
 export interface RequestObserver {
@@ -687,6 +693,18 @@ export function startSuggestions(
       settle();
       chip.hide();
       void snapshot(true);
+    },
+    forget() {
+      // A request already in flight answers from the context that was just wiped; drop it.
+      seq++;
+      last = null;
+      settle();
+      done.clear();
+      scrolledAtHeight = 0;
+      shown = null;
+      view = null;
+      justFilled = null;
+      chip.hide();
     },
   };
 }

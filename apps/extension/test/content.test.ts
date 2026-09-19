@@ -712,6 +712,31 @@ describe('content wiring', () => {
     expect(calls('suggestRequest')[1]).toMatchObject({ force: true });
   });
 
+  it('forget drops the memo and the chip, and the next trigger asks afresh', async () => {
+    const input = field('Title', 100);
+    sent.mockImplementation(async (type, data) => {
+      if (type !== 'suggestRequest') return undefined;
+      const { fields } = data as { fields: Array<{ i: string }> };
+      return { suggestions: [s(fields[0]!.i, 'Dinner', 0.9)] };
+    });
+    const handle = startSuggestions(ctx, createChip(document), document);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.initialMs);
+    await flush();
+    expect(calls('suggestRequest')).toHaveLength(1);
+    expect(chipHost().style.display).toBe('block');
+
+    handle.forget();
+    expect(chipHost().style.display).toBe('none');
+    // No feedback: clearing is not the user saying the suggestion was wrong.
+    expect(calls('feedback')).toHaveLength(0);
+
+    // The same fields inside the memo window would have been answered locally; they are asked about again.
+    input.focus();
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_TIMING.debounceMs);
+    await flush();
+    expect(calls('suggestRequest')).toHaveLength(2);
+  });
+
   it('tells the chip where the value came from and why', async () => {
     field('Title', 100);
     const twoMinutesAgo = Date.now() - 2 * 60_000;

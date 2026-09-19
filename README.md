@@ -109,10 +109,11 @@ The chip's second line says where the value came from ("from discord.com · 2m a
 The popup shows what Carat currently knows and a few controls:
 
 - An "On for <host>" switch for the tab it was opened over. Off means Carat neither reads that site nor offers chips on it. Hosts match exactly, so switching off `www.google.com` leaves `calendar.google.com` alone.
+- Clear what carat remembers, at the top next to the on switch. It wipes the session store: every page and selection Carat has read, the entities it predicted from them, what you accepted or dismissed, the answer cache, any screenshot waiting to be read, and the pin. The list empties as you click and the button says "Cleared" for two seconds. Settings, the key and the per-site switches are untouched.
 - Pin. While pinned nothing new is read and nothing expires, so a stray tab cannot change what Carat knows mid-demo. Clear also unpins.
 - Two debug lines for the current tab: what happened to its last capture, and how its last suggestion request went. The check line names the page kind and the prior the local predictor found ("checked 5s ago on a serp (first result matches query 'doordash')"), then which check stopped the request, or each provider attempt with latency and error, or a cache hit.
 
-`Alt+Shift+C` asks for a suggestion on the current page right now, past the answer cache and past anything you dismissed with Esc. Change the key at `chrome://extensions/shortcuts`.
+`Alt+Shift+C` asks for a suggestion on the current page right now, past the answer cache and past anything you dismissed with Esc. `Alt+Shift+X` clears what Carat remembers, the same wipe as the popup's Clear button, and takes the chip on the page with it. Change either key at `chrome://extensions/shortcuts`.
 
 ## Tests and eval
 

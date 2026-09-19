@@ -46,9 +46,9 @@ export interface SuggestResponse {
  */
 export type RefineResponse = Pick<SuggestResponse, 'suggestions' | 'interactions'> & { more?: boolean };
 
-// Background handles every message but `forceSuggest`, which it sends to one
-// tab's content script when the keyboard shortcut fires. Content scripts and
-// extension pages otherwise only send.
+// Background handles every message but `forceSuggest` and `contextCleared`,
+// which it sends to one tab's content script when a keyboard shortcut fires or
+// the store is wiped. Content scripts and extension pages otherwise only send.
 export interface Protocol {
   capture(data: { url: string; title: string; text: string; kind: 'page' | 'selection' }): void;
   /** `force` skips the answer cache and the dismissed/consumed filter: the user asked out loud. */
@@ -58,10 +58,13 @@ export interface Protocol {
   /** Screenshot cues from a tab; see VisionCue. */
   vision(data: VisionCue): void;
   forceSuggest(): void;
+  /** The store was just wiped; the tab drops its chip and everything it remembers about this page load. */
+  contextCleared(): void;
   feedback(data: FeedbackInput): void;
   /** Sent only from a navigation chip's Tab press; the background rebuilds the URL before acting. */
   navigate(data: NavSuggestion): { ok: boolean };
   getKnown(): { items: KnownItem[]; pinned: boolean };
+  /** Wipes the session store; the popup's button. The keyboard shortcut runs the same routine in the background. */
   clearKnown(): void;
   setPinned(data: { pinned: boolean }): { pinned: boolean };
   getDiag(data: { tabId: number }): { diag: TabDiag | null };
