@@ -259,19 +259,35 @@ describe('when it asks', () => {
     chip.destroy();
   });
 
-  it('asks again once a scroll of the user’s own settles', async () => {
-    // The outline now stops at the fold, so a scroll changes what the model would see.
-    document.body.innerHTML = '<main><button>Save</button></main>';
-    layAll();
+  it('asks again once a scroll of the user’s own settles, against the page the scroll uncovered', async () => {
+    // The outline stops at the fold, so the second screen is not in the first question.
+    const vh = window.innerHeight;
+    document.body.innerHTML = '<main><button>Save</button><a href="https://example.com/more">Read more</a></main>';
+    Object.defineProperty(document.documentElement, 'scrollHeight', { value: vh * 2, configurable: true });
+    let scrolled = 0;
+    const place = (el: Element, top: number): void => {
+      el.getBoundingClientRect = () => new DOMRect(0, top - scrolled, 300, 40);
+    };
+    place(document.querySelector('button')!, 10);
+    place(document.querySelector('a')!, vh * 1.5);
     answer(null);
     const chip = createChip(document);
     startActions(fakeCtx(), chip, document, { hub: noFrames });
     await firstAsk();
     expect(asks()).toHaveLength(1);
+    const first = (asks()[0] as { outline: string }).outline;
+    expect(first).not.toContain('Read more');
 
+    scrolled = vh;
+    Object.defineProperty(window, 'scrollY', { value: vh, configurable: true });
     window.dispatchEvent(new Event('scroll'));
     await settled();
     expect(asks()).toHaveLength(2);
+    // The hash moved with the visible set, so this is a new question, not the memo's.
+    const second = (asks()[1] as { outline: string }).outline;
+    expect(second).toContain('Read more');
+    expect(second).not.toBe(first);
+    Object.defineProperty(window, 'scrollY', { value: 0, configurable: true });
     chip.destroy();
   });
 

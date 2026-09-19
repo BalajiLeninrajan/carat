@@ -75,8 +75,9 @@ const FEW_SHOT_LINK_USER = `<notes>
 <tabs>
 (none)
 </tabs>
-<page host="www.reddit.com" path="/r/waterloo/comments/1a2b3c/best_brunch" scroll="0.8 of 3.4 viewports, more below">
+<page host="www.reddit.com" path="/r/waterloo/comments/1a2b3c/best_brunch">
 Best brunch in Waterloo? : waterloo
+(0.8 screens above)
 banner:
   [1] link "reddit" -> reddit.com
   [2] searchbox "Search Reddit"
@@ -88,6 +89,7 @@ main:
   [4] button "Reply"
 contentinfo:
   [5] link "Reddit Rules"
+(1.6 more screens below; 9 controls not shown)
 </page>`;
 
 const FEW_SHOT_CARD_USER = `<notes>
@@ -100,7 +102,7 @@ const FEW_SHOT_CARD_USER = `<notes>
 <tabs>
 (none)
 </tabs>
-<page host="www.google.com" path="/maps/search/seven+shores+cafe" scroll="0.0 of 1.0 viewports">
+<page host="www.google.com" path="/maps/search/seven+shores+cafe">
 seven shores cafe - Google Maps
 search:
   [1] searchbox "Search Google Maps" = "seven shores cafe"
@@ -125,7 +127,7 @@ const FEW_SHOT_FILL_USER = `<notes>
 <tabs>
 - [tab 8] discord.com — Discord | #general | Waterloo Friends
 </tabs>
-<page host="www.google.com" path="/maps" scroll="0.0 of 1.0 viewports">
+<page host="www.google.com" path="/maps">
 Google Maps
 search:
   >> FOCUSED [1] searchbox "Search Google Maps"
@@ -188,11 +190,6 @@ function block(name: string, lines: readonly string[]): string {
   return `<${name}>\n${lines.length ? lines.join('\n') : BLOCK_EMPTY}\n</${name}>`;
 }
 
-function scrollText(req: NextActionRequest): string {
-  const { y, pages, more } = req.page.scroll;
-  return `${y.toFixed(1)} of ${pages.toFixed(1)} viewports${more ? ', more below' : ''}`;
-}
-
 function escapeAttr(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 }
@@ -222,7 +219,10 @@ export function renderRequest(req: NextActionRequest): string {
   return [
     renderPrefix(req),
     `<now>${req.now}</now>`,
-    `<page host="${escapeAttr(req.page.host)}" path="${escapeAttr(req.page.path)}" scroll="${scrollText(req)}">`,
+    // No scroll attribute: the outline's own first and last lines say where
+    // the page is, and they measure what was described rather than the
+    // document, so two numbers cannot disagree in front of the model.
+    `<page host="${escapeAttr(req.page.host)}" path="${escapeAttr(req.page.path)}">`,
     req.page.title,
     req.outline,
     '</page>',
