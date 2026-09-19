@@ -1,0 +1,28 @@
+{
+  "name": "reddit-open-link",
+  "request": {
+    "page": {
+      "host": "www.reddit.com",
+      "title": "Best brunch in Waterloo? : waterloo",
+      "path": "/r/waterloo/comments/1a2b3c/best_brunch",
+      "scroll": { "y": 0.6, "pages": 3.1, "more": true }
+    },
+    "outline": "banner:\n  [1] link \"reddit\" -> reddit.com\n  [2] searchbox \"Search Reddit\"\nmain:\n  heading(1) \"Best brunch in Waterloo?\"\n  text: We went to Seven Shores last weekend and it was excellent. Their whole menu is up here:\n  [3] link \"Seven Shores Cafe menu\" -> sevenshores.ca\n  text: 42 comments · 118 upvotes\n  [4] button \"Reply\"\n  [5] button \"Share\"\ncontentinfo:\n  [6] link \"Reddit Rules\" -> reddit.com",
+    "controls": [
+      { "n": 1, "role": "link", "name": "reddit", "host": "reddit.com" },
+      { "n": 2, "role": "searchbox", "name": "Search Reddit" },
+      { "n": 3, "role": "link", "name": "Seven Shores Cafe menu", "host": "sevenshores.ca" },
+      { "n": 4, "role": "button", "name": "Reply" },
+      { "n": 5, "role": "button", "name": "Share" },
+      { "n": 6, "role": "link", "name": "Reddit Rules", "host": "reddit.com" }
+    ],
+    "history": ["1m ago: visited reddit.com/r/waterloo", "12s ago: scrolled down"],
+    "notes": [],
+    "tabs": [],
+    "now": "2026-09-16T15:20:00-04:00",
+    "eagerness": "eager",
+    "allowPayments": false
+  },
+  "expect": { "kind": "click", "target": 3, "irreversible": false, "forbidTargets": [1, 6] },
+  "expectLocal": { "kind": "none" }
+}

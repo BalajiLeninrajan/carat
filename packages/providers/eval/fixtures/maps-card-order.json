@@ -1,0 +1,30 @@
+{
+  "name": "maps-card-order",
+  "request": {
+    "page": {
+      "host": "www.google.com",
+      "title": "seven shores cafe - Google Maps",
+      "path": "/maps/search/seven+shores+cafe",
+      "scroll": { "y": 0, "pages": 1, "more": false }
+    },
+    "outline": "search:\n  [1] searchbox \"Search Google Maps\" = \"seven shores cafe\"\nmain:\n  heading(1) \"Results\"\n  group \"Seven Shores Cafe\":\n    text: 4.6 (312) · Cafe · 10 Regina St N, Waterloo\n    [2] button \"Directions\"\n    [3] link \"Order online\" -> sevenshores.ca\n  group \"Shore Club\":\n    text: 4.2 (88) · Steakhouse · 15 King St S\n    [4] button \"Directions\"\n    [5] link \"Website\" -> shoreclub.ca",
+    "controls": [
+      { "n": 1, "role": "searchbox", "name": "Search Google Maps", "value": "seven shores cafe" },
+      { "n": 2, "role": "button", "name": "Directions" },
+      { "n": 3, "role": "link", "name": "Order online", "host": "sevenshores.ca" },
+      { "n": 4, "role": "button", "name": "Directions" },
+      { "n": 5, "role": "link", "name": "Website", "host": "shoreclub.ca" }
+    ],
+    "history": [
+      "1m ago: filled searchbox \"Search Google Maps\" with \"seven shores cafe\"",
+      "55s ago: clicked button \"Search\""
+    ],
+    "notes": ["Alex proposed dinner at Seven Shores Cafe on Friday at 6, and asked everyone to order ahead."],
+    "tabs": [{ "id": 8, "host": "discord.com", "title": "Discord | #general | Waterloo Friends" }],
+    "now": "2026-09-16T14:06:00-04:00",
+    "eagerness": "eager",
+    "allowPayments": false
+  },
+  "expect": { "kind": "click", "target": 3, "forbidTargets": [4, 5] },
+  "expectLocal": { "kind": "none" }
+}

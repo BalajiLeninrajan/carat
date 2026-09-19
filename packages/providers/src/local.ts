@@ -1,74 +1,91 @@
-import type { ActionSuggestion, Eagerness, IntentName, PageMeta, RequestContext, SuggestRequest, Suggestion } from '@carat/shared';
-import { DEFAULT_EAGERNESS, EAGERNESS, isIntentDestination, mergeSuggestions } from '@carat/shared';
-import type { Provider, SuggestOptions } from './provider';
-import { sameSite } from './same-site';
-import { CONFIDENCE, fillSources, fills } from './local/fills';
-import { interactions, linkForQuery } from './local/interact';
-import { extractAddress, extractEmailRequest, extractPlan, extractWhen } from './local/extract';
-import { nextStep } from './next-step';
+import type { NextAction, NextActionRequest, OutlineControl } from '@carat/shared';
+import { EAGERNESS, normalizeWhitespace } from '@carat/shared';
+import type { NextOptions, Provider } from './provider';
+import { CANDIDATE_LABEL, extractCandidates, notesAsSources, type Candidate, type CandidateKind } from './local/candidates';
+
+/** Roles a typed value can go into. */
+const TEXT_ROLES = new Set(['textbox', 'searchbox', 'combobox']);
+
+/** What the placeholder is worth: enough for the eager floor, never enough to outrank the model on its own. */
+export const PLACEHOLDER_CONFIDENCE = 0.5;
+
+export const NO_ACTION: NextAction = {
+  kind: 'none',
+  target: null,
+  value: '',
+  label: '',
+  irreversible: false,
+  confidence: 0,
+  reason: 'nothing the regexes could match',
+};
 
 /**
- * Regex fallback: no network, one field per kind, one action per intent,
- * narrow interactions, the search result the page's own query names, and the
- * next-step priors for the page kind. At
- * `eager` it also offers bare capitalised names and lowercase quoted strings
- * for search and title fields, at a confidence that says so, and reads other
- * tabs on the page's own site.
+ * The instant answer, with no network behind it: a value the regexes found in
+ * the notes, dropped into the focused text control or the first empty one.
+ * There are no page-kind rules here and no priors — that is the model's job
+ * now. Anything this cannot answer is `none`, and the chip waits for the
+ * model instead.
  */
 export class LocalProvider implements Provider {
   readonly id = 'local' as const;
 
-  constructor(readonly eagerness: Eagerness = DEFAULT_EAGERNESS) {}
-
-  async suggest(req: SuggestRequest, opts: SuggestOptions): Promise<Suggestion[]> {
-    if (opts.signal.aborted) return [];
-    const knobs = EAGERNESS[this.eagerness];
-    const context = knobs.sameOriginContext ? req.context : req.context.filter((c) => !sameSite(c.origin, req.page.host));
-    const known: Suggestion[] = [
-      ...fills(req.fields, fillSources(req, context), knobs.looseNames),
-      ...interactions(req.elements ?? [], [...(req.own ?? []), ...context], {
-        filled: req.filled ?? [],
-        gate: { eagerness: this.eagerness, flow: req.flow === true, fillable: req.fields.some((f) => !f.v) },
-      }),
-      ...linkForQuery(req.state, req.fields, req.elements ?? []),
-    ];
-    const step = nextStep(req, this.eagerness, known);
-    // The page's priors fill the slots context left empty; per slot the surer one stays.
-    return [...mergeSuggestions(known, step.suggestions), ...actions(req.own ?? [], req.page, req.now)];
+  async next(req: NextActionRequest, opts: NextOptions): Promise<NextAction | null> {
+    if (opts.signal.aborted) return null;
+    return localAction(req);
   }
 }
 
-/**
- * Actions come only from the page being read: a planned "<activity> at <Place>"
- * opens Maps, the same plan with a time goes to Calendar, an email address to
- * Gmail. A destination the user is already on is never offered.
- */
-function actions(own: RequestContext, page: PageMeta, now: string): ActionSuggestion[] {
-  const here = `https://${page.host}${page.path}`;
-  const out = new Map<IntentName, ActionSuggestion>();
-  const offer = (a: ActionSuggestion): void => {
-    if (!out.has(a.intent) && !isIntentDestination(a.intent, here)) out.set(a.intent, a);
+export function localAction(req: NextActionRequest): NextAction {
+  const control = fillTarget(req);
+  if (!control) return NO_ACTION;
+  const loose = EAGERNESS[req.eagerness].looseNames;
+  const candidates = extractCandidates(notesAsSources(req.notes), loose);
+  const picked = candidates.find((c) => fits(c, control) && !echoes(c.value, control));
+  if (!picked) return NO_ACTION;
+  return {
+    kind: 'fill',
+    target: control.n,
+    value: picked.value,
+    label: `Fill ${control.name} with "${picked.value}"`,
+    irreversible: false,
+    confidence: PLACEHOLDER_CONFIDENCE,
+    reason: `${CANDIDATE_LABEL[picked.kind]} from what you read`,
   };
-  for (const ctx of own) {
-    const plan = extractPlan(ctx.text);
-    if (plan) {
-      offer(action('maps', plan.name, ctx.id, 'plan names a place to look up'));
-      const when = extractWhen(ctx.text.slice(plan.end, plan.end + 80), now, plan.activity);
-      if (when) {
-        const activity = plan.activity[0]!.toUpperCase() + plan.activity.slice(1);
-        offer({
-          ...action('calendar', `${activity} at ${plan.name}`, ctx.id, 'plan has a place and a time'),
-          when,
-          location: extractAddress(ctx.text) ?? plan.name,
-        });
-      }
-    }
-    const email = extractEmailRequest(ctx.text);
-    if (email) offer(action('gmail', email, ctx.id, 'the text asks the reader to email this address'));
-  }
-  return [...out.values()];
 }
 
-function action(intent: IntentName, value: string, sourceContextId: string, reason: string): ActionSuggestion {
-  return { kind: 'action', intent, value, when: '', location: '', confidence: CONFIDENCE, reason, sourceContextId };
+/** Nothing a regex found goes into a field that asks for a secret or a payment detail. */
+const SENSITIVE = /\b(card|cvv|cvc|cvn|expiry|expiration|password|passcode|pin|ssn|sin|security|account number|routing)\b/i;
+
+/** The focused text control when it is empty, else the first empty one in the outline. */
+function fillTarget(req: NextActionRequest): OutlineControl | undefined {
+  const empty = (c: OutlineControl): boolean =>
+    TEXT_ROLES.has(c.role) && !c.value && !c.risky && !SENSITIVE.test(c.name) && !/\bdisabled\b/.test(c.state ?? '');
+  const focused = req.controls.find((c) => c.n === req.focused);
+  if (focused && empty(focused)) return focused;
+  return req.controls.find(empty);
+}
+
+/** Cues in a control's name that say what kind of value belongs in it. */
+const CUES: Array<{ kinds: CandidateKind[]; re: RegExp }> = [
+  { kinds: ['email'], re: /\b(e-?mail|recipient|to|cc|bcc)\b/i },
+  { kinds: ['phone'], re: /\b(phone|mobile|tel|telephone)\b/i },
+  { kinds: ['address'], re: /\b(address|location|where|street|destination)\b/i },
+  { kinds: ['plan', 'event', 'place', 'name'], re: /\b(title|summary|event|subject|name)\b/i },
+  { kinds: ['place', 'name', 'event'], re: /\b(search|find|query|look ?up|maps?)\b/i },
+];
+
+function fits(candidate: Candidate, control: OutlineControl): boolean {
+  const name = `${control.name} ${control.state ?? ''}`;
+  for (const cue of CUES) {
+    if (cue.re.test(name)) return cue.kinds.includes(candidate.kind);
+  }
+  // No cue at all: a search box takes a place or a name, anything else waits for the model.
+  return control.role === 'searchbox' && ['place', 'plan', 'event', 'name'].includes(candidate.kind);
+}
+
+/** A field never gets its own label, placeholder or current value typed back into it. */
+function echoes(value: string, control: OutlineControl): boolean {
+  const v = normalizeWhitespace(value).toLowerCase();
+  if (v.length < 2) return true;
+  return [control.name, control.value].some((t) => t && normalizeWhitespace(t).toLowerCase() === v);
 }

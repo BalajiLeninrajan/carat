@@ -1,8 +1,27 @@
-Each fixture is `{ name, request: SuggestRequest, expect: Expectation[] }`. A fill expectation is `{ fieldId, valueIncludes }`; an action expectation is `{ intent, valueIncludes, whenStartsWith? }`; an interaction expectation is `{ elementId, verb, valueIncludes }`, and `{ elementId: "", verb: "scroll" }` with no value is the page scroll. An empty `expect` means the provider must return nothing.
+# Eval fixtures
 
-`request.own` holds text from the page the request came from and `request.context` text from other tabs. Both are sources for fills and interactions, `own` first; actions still come only from `own`. `request.state` is the page's kind, query, scroll position and what carat already did there, which is what the next-step priors read, and its `q` is the one query signal: it is what justifies following a real link (an element with `r: "link"` and a destination site `h`), and such a suggestion cites `"page"` as its source. `request.elements` lists the page's interactive controls and its content links; `request.filled` lists the context ids behind fields carat itself just filled, which is one of the things that justify clicking a button.
+One JSON file per page. Each holds a `NextActionRequest` exactly as the content
+script assembles it — the outline, the numbered controls, the history, the
+notes, the open tabs — and the one action it should be answered with.
 
-Two optional keys make a fixture depend on the eagerness level the eval runs at (`--eagerness`, default `eager`):
+```json
+{
+  "name": "discord-maps-search",
+  "request": { "page": {...}, "outline": "...", "controls": [...], "history": [], "notes": [], "tabs": [], "now": "...", "eagerness": "eager", "allowPayments": false },
+  "expect": { "kind": "fill", "target": 1, "valueIncludes": "Seven Shores Cafe" },
+  "expectLocal": { "kind": "fill", "target": 1, "valueIncludes": "Seven Shores Cafe" }
+}
+```
 
-- `expectAt: { eager: [...] }` replaces `expect` at that level. The `eager-*` fixtures are negatives below eager and positives at eager; `neg-same-tab` becomes a positive at eager because another tab on the page's own site counts as context there.
-- `weakOkAt: ["eager"]` lets a negative pass at that level when every chip it produced sits under the next stricter level's floor. That is the documented cost of eager: a weak chip on `neg-news-search`, one Esc. The runner prints these as WEAK.
+- `expect` is what a model should answer. `pnpm eval --provider openai` judges
+  against it.
+- `expectLocal` is what the offline regex placeholder must answer with no
+  network at all, which for most pages is `{ "kind": "none" }`. `pnpm eval`
+  (provider `local`, the default) judges against it, so the placeholder's
+  behaviour is pinned without a key.
+- An expectation names a `kind` (or `"any"`), and may pin `target`,
+  `valueIncludes` and `irreversible`. A negative uses `forbidTargets` and
+  `forbidKinds`: the pay button, the delete link, a fill on a page with
+  nothing to fill from.
+
+`--eagerness conservative|balanced|eager` overrides the level in the fixture.

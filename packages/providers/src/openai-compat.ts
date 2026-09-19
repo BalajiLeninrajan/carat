@@ -1,32 +1,49 @@
-import type { ChatMessage, ClickGate, Eagerness, ElementDescriptor, ImageInput, InteractSuggestion, SuggestRequest, Suggestion } from '@carat/shared';
+import type { ChatMessage, ImageInput, NextAction, NextActionRequest } from '@carat/shared';
 import {
-  DEFAULT_EAGERNESS,
-  EAGERNESS,
+  DISTILL_RESPONSE_FORMAT,
   LIMITS,
-  PAGE_SOURCE,
-  SUGGESTION_RESPONSE_FORMAT,
-  SuggestionListSchema,
+  NEXT_ACTION_RESPONSE_FORMAT,
   TRANSCRIBE_PROMPT,
-  buildMessages,
-  clickAllowed,
-  isDestructiveName,
-  isIntentDestination,
-  isPageScroll,
+  buildNextActionMessages,
+  distillMessages,
+  fnv1a,
   normalizeWhitespace,
-  pageJustifies,
-  refusesFill,
+  parseNextAction,
+  partialTarget,
+  stripFences,
   truncate,
-  verbFits,
-  weakBelow,
 } from '@carat/shared';
-import type { SuggestOptions, VisionProvider } from './provider';
-import { sameSite } from './same-site';
+import type { NextOptions, VisionProvider } from './provider';
 
 export type OutputMode = 'json_schema' | 'json_object' | 'prompt';
 
-/** OpenAI's `reasoning_effort` values that make sense here; the fast path wants none, the smart path a little. */
+/** OpenAI's `reasoning_effort` values that make sense here; the engine wants none, reading a screenshot a little. */
 // 'none' is the no-reasoning value on GPT-5.1+; 'minimal' is rejected there.
 export type ReasoningEffort = 'none' | 'low' | 'medium' | 'high';
+
+/**
+ * Parameters a model rejected once, remembered so the next call leaves them
+ * out. Backed by chrome.storage.local in the extension; an in-memory map
+ * everywhere else.
+ */
+export interface RelaxStore {
+  dropped(model: string): Promise<string[]>;
+  drop(model: string, param: string): Promise<void>;
+}
+
+export function memoryRelaxStore(): RelaxStore {
+  const seen = new Map<string, Set<string>>();
+  return {
+    async dropped(model) {
+      return [...(seen.get(model) ?? [])];
+    },
+    async drop(model, param) {
+      const set = seen.get(model) ?? new Set<string>();
+      set.add(param);
+      seen.set(model, set);
+    },
+  };
+}
 
 export interface OpenAICompatOptions {
   id: 'openai' | 'baseten';
@@ -36,18 +53,21 @@ export interface OpenAICompatOptions {
   mode: OutputMode;
   /** Sent as `reasoning_effort` on every call when set. Left unset for servers that reject unknown parameters. */
   reasoningEffort?: ReasoningEffort;
-  /** Picks the prompt's last rule and the confidence floor. Defaults to the product default. */
-  eagerness?: Eagerness;
+  relaxStore?: RelaxStore;
+  /** Cap on the action call's output; a long fill value is what spends it. */
+  maxTokens?: number;
 }
 
-type Parsed = { ok: true; suggestions: Suggestion[] } | { ok: false; error: string };
+/** Parameters the request cannot do without, whatever the server says about them. */
+const NEVER_DROP = new Set(['model', 'messages', 'stream']);
+const NOTES_MAX_TOKENS = 300;
 
 interface ChatCompletion {
   choices?: Array<{ message?: { content?: unknown } }>;
 }
 
-// Only `transcribe` sends parts; `suggest` stays on plain string content so a
-// text-only server (or provider) never sees an image_url it cannot handle.
+// Only `transcribe` sends parts; everything else stays on plain string content
+// so a text-only server never sees an image_url it cannot handle.
 type ContentPart =
   | { type: 'text'; text: string }
   | { type: 'image_url'; image_url: { url: string; detail: 'low' | 'high' | 'auto' } };
@@ -59,39 +79,53 @@ interface PartsMessage {
 
 export class OpenAICompatProvider implements VisionProvider {
   readonly id: 'openai' | 'baseten';
+  private readonly relaxStore: RelaxStore;
 
   constructor(
     readonly options: OpenAICompatOptions,
     readonly fetchImpl: typeof fetch = fetch,
   ) {
     this.id = options.id;
-  }
-
-  // An unparseable reply (twice in a row) or an abort is "nothing to suggest"
-  // and resolves to []. A transport or HTTP failure rejects so the caller can
-  // tell "the model said no" from "the model was never reached" and fall back.
-  async suggest(req: SuggestRequest, opts: SuggestOptions): Promise<Suggestion[]> {
-    if (opts.signal.aborted) return [];
-    const eagerness = this.options.eagerness ?? DEFAULT_EAGERNESS;
-    const messages = buildMessages(req, eagerness);
-    try {
-      const first = await this.complete(messages, opts.signal);
-      if (first.ok) return finalize(first.suggestions, req, eagerness, opts.onUnderFloor);
-      if (opts.signal.aborted) return [];
-      const second = await this.complete(withParseError(messages, first.error), opts.signal);
-      return second.ok ? finalize(second.suggestions, req, eagerness, opts.onUnderFloor) : [];
-    } catch (e) {
-      if (opts.signal.aborted) return [];
-      throw e;
-    }
+    this.relaxStore = options.relaxStore ?? memoryRelaxStore();
   }
 
   /**
-   * The visible text of a screenshot plus a `Facts:` block (dates resolved
-   * against `image.now`, places, addresses, people, prices, what any inner
-   * image shows), whitespace-collapsed and clipped to a page item's length.
-   * An abort or an empty reply is '' (nothing to store); transport and HTTP
-   * failures reject like `suggest`.
+   * One streamed action. The target reaches the caller through `onPartial`
+   * as soon as the integer is closed, so the ring lands on the control while
+   * the label is still being written; a body the output limit cut short is
+   * salvaged rather than thrown away. An abort resolves to null; a transport
+   * or HTTP failure rejects, so the caller can tell "the model said nothing"
+   * from "the model was never reached".
+   */
+  async next(req: NextActionRequest, opts: NextOptions): Promise<NextAction | null> {
+    if (opts.signal.aborted) return null;
+    const body: Record<string, unknown> = {
+      model: this.options.model,
+      messages: buildNextActionMessages(req),
+      stream: true,
+      max_completion_tokens: this.options.maxTokens ?? 400,
+      // Caching is per page, not per keystroke: everything before the outline is the same for this origin and path.
+      prompt_cache_key: cacheKey(req.page.host, req.page.path),
+      ...responseFormat(this.options.mode),
+      ...this.reasoning(),
+    };
+    let announced = false;
+    const text = await this.stream(body, opts.signal, (soFar) => {
+      if (announced || !opts.onPartial) return;
+      const target = partialTarget(soFar);
+      if (target === null) return;
+      announced = true;
+      opts.onPartial({ target });
+    });
+    if (text === null) return null;
+    const parsed = parseNextAction(text);
+    return parsed.ok ? parsed.action : null;
+  }
+
+  /**
+   * The visible text of a screenshot plus a `Facts:` block, whitespace
+   * collapsed and clipped. An abort or an empty reply is ''; transport and
+   * HTTP failures reject.
    */
   async transcribe(image: ImageInput, opts: { signal: AbortSignal }): Promise<string> {
     if (opts.signal.aborted) return '';
@@ -117,39 +151,103 @@ export class OpenAICompatProvider implements VisionProvider {
     }
   }
 
-  private async complete(messages: ChatMessage[], signal: AbortSignal): Promise<Parsed> {
-    const body = { model: this.options.model, messages, ...responseFormat(this.options.mode), ...this.reasoning() };
-    return parseContent(await this.post(body, signal));
+  /**
+   * The notes call: a page the user just left, down to at most five
+   * self-contained facts. Small and thoughtless by design — it runs on every
+   * tab switch — so no reasoning and a short output. Never rejects: notes are
+   * a bonus, not a step in the chip's path.
+   */
+  async distill(text: string, host: string, signal: AbortSignal): Promise<string[]> {
+    if (signal.aborted || text.trim().length < 40) return [];
+    const body = {
+      model: this.options.model,
+      messages: distillMessages(text, host),
+      max_completion_tokens: NOTES_MAX_TOKENS,
+      ...(this.options.mode === 'json_schema' ? { response_format: DISTILL_RESPONSE_FORMAT } : { response_format: { type: 'json_object' } }),
+      ...(this.options.reasoningEffort ? { reasoning_effort: 'none' } : {}),
+    };
+    try {
+      const content = await this.post(body, signal);
+      if (typeof content !== 'string') return [];
+      const parsed = JSON.parse(stripFences(content)) as { notes?: unknown };
+      if (!Array.isArray(parsed.notes)) return [];
+      return parsed.notes
+        .filter((n): n is string => typeof n === 'string')
+        .map((n) => n.trim())
+        .filter(Boolean)
+        .slice(0, 5);
+    } catch {
+      return [];
+    }
   }
 
   private reasoning(): Record<string, unknown> {
     return this.options.reasoningEffort ? { reasoning_effort: this.options.reasoningEffort } : {};
   }
 
-  /** One chat completion; resolves to the first choice's raw content. */
+  /**
+   * A streamed chat completion, returning the whole text. `onDelta` sees the
+   * text so far after every chunk. A parameter the server names in a 400 is
+   * dropped and remembered for that model, then the call is retried, so a
+   * model change is never more than a settings edit.
+   */
+  private async stream(body: Record<string, unknown>, signal: AbortSignal, onDelta: (soFar: string) => void): Promise<string | null> {
+    if (signal.aborted) return null;
+    const request = { ...body };
+    for (const param of await this.relaxStore.dropped(this.options.model)) delete request[param];
+
+    for (let attempt = 0; attempt < 4; attempt++) {
+      let res: Response;
+      try {
+        res = await this.send(request, signal);
+      } catch (e) {
+        if (signal.aborted) return null;
+        throw e;
+      }
+      if (res.ok) return await readStream(res, onDelta);
+      const { message, param } = await errorOf(res);
+      if (res.status !== 400 || !param || !this.canDrop(request, param)) throw new Error(`HTTP ${res.status}: ${message}`);
+      delete request[param];
+      await this.relaxStore.drop(this.options.model, param);
+    }
+    throw new Error('the model kept rejecting the request');
+  }
+
+  private canDrop(body: Record<string, unknown>, param: string): boolean {
+    const top = param.split('.')[0]!;
+    return top in body && !NEVER_DROP.has(top);
+  }
+
+  /** One non-streamed chat completion; resolves to the first choice's raw content. */
   private async post(body: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
-    // Chrome's fetch throws "Illegal invocation" when called with a non-global
-    // `this`, so never invoke it as this.fetchImpl(...).
-    const { fetchImpl } = this;
-    const res = await fetchImpl(`${this.options.baseURL.replace(/\/$/, '')}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${this.options.apiKey}`,
-      },
-      body: JSON.stringify(body),
-      signal,
-    });
+    const res = await this.send(body, signal);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const completion = (await res.json()) as ChatCompletion;
     return completion.choices?.[0]?.message?.content;
   }
+
+  private send(body: Record<string, unknown>, signal: AbortSignal): Promise<Response> {
+    // Chrome's fetch throws "Illegal invocation" when called with a non-global
+    // `this`, so never invoke it as this.fetchImpl(...).
+    const { fetchImpl } = this;
+    return fetchImpl(`${this.options.baseURL.replace(/\/$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${this.options.apiKey}` },
+      body: JSON.stringify(body),
+      signal,
+    });
+  }
+}
+
+/** `carat-<hash of origin and path>`: one cache entry per page, shared by every visit to it. */
+export function cacheKey(host: string, path: string): string {
+  return `carat-${fnv1a(`https://${host}${path}`).toString(36)}`;
 }
 
 function responseFormat(mode: OutputMode): Record<string, unknown> {
   switch (mode) {
     case 'json_schema':
-      return { response_format: SUGGESTION_RESPONSE_FORMAT };
+      return { response_format: NEXT_ACTION_RESPONSE_FORMAT };
     case 'json_object':
       return { response_format: { type: 'json_object' } };
     case 'prompt':
@@ -157,107 +255,57 @@ function responseFormat(mode: OutputMode): Record<string, unknown> {
   }
 }
 
-function parseContent(content: unknown): Parsed {
-  if (typeof content !== 'string' || content.trim() === '') {
-    return { ok: false, error: 'the reply had no text content' };
-  }
-  let data: unknown;
+async function errorOf(res: Response): Promise<{ message: string; param?: string }> {
   try {
-    data = JSON.parse(stripFences(content));
-  } catch (e) {
-    return { ok: false, error: `invalid JSON (${(e as Error).message})` };
+    const json = (await res.json()) as { error?: { message?: string; param?: string } };
+    return { message: json.error?.message ?? res.statusText, param: json.error?.param ?? undefined };
+  } catch {
+    return { message: res.statusText };
   }
-  // Models in json_object/prompt mode sometimes return the bare list.
-  const result = SuggestionListSchema.safeParse(Array.isArray(data) ? { suggestions: data } : data);
-  if (!result.success) {
-    const issues = result.error.issues.map((i) => `${i.path.join('.') || '$'}: ${i.message}`);
-    return { ok: false, error: `schema mismatch (${issues.join('; ')})` };
-  }
-  return { ok: true, suggestions: result.data.suggestions };
-}
-
-function stripFences(text: string): string {
-  const t = text.trim();
-  const m = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(t);
-  return m ? m[1]! : t;
-}
-
-function withParseError(messages: ChatMessage[], error: string): ChatMessage[] {
-  const last = messages[messages.length - 1]!;
-  const note = `\n\nYour previous reply was rejected: ${error}. Reply again with only the JSON object described above.`;
-  return [...messages.slice(0, -1), { role: last.role, content: last.content + note }];
-}
-
-function finalize(suggestions: Suggestion[], req: SuggestRequest, eagerness: Eagerness, onUnderFloor?: (s: Suggestion) => void): Suggestion[] {
-  const knobs = EAGERNESS[eagerness];
-  const fillable = new Set(req.fields.filter((f) => !f.v).map((f) => f.i));
-  // Real context ids are never the few-shots' c1/c2/o1, so an unknown source
-  // means the model echoed an example. The orchestrator never lists the
-  // requesting tab's own text under `context`, so a same-site source here is
-  // another tab on the site: shut out below eager, allowed at eager.
-  const foreign = new Set(
-    req.context.filter((c) => knobs.sameOriginContext || !sameSite(c.origin, req.page.host)).map((c) => c.id),
-  );
-  // The page the user is looking at is a fill source too, guarded by `refusesFill` below.
-  const actionSources = new Set((req.own ?? []).map((c) => c.id));
-  const fillSources = new Set([...foreign, ...actionSources]);
-  const filled = req.filled ?? [];
-  const interactSources = new Set([...fillSources, ...filled]);
-  const fields = new Map(req.fields.map((f) => [f.i, f] as const));
-  const elements = new Map((req.elements ?? []).map((e) => [e.i, e] as const));
-  const here = `https://${req.page.host}${req.page.path}`;
-  const gate: ClickGate = { filled: filled.length > 0, flow: req.flow === true, eagerness, fillable: fillable.size > 0 };
-  // One winner per field, per element and per intent.
-  const best = new Map<string, Suggestion>();
-  for (const s of suggestions) {
-    if (s.kind === 'fill') {
-      if (!fillable.has(s.fieldId) || !fillSources.has(s.sourceContextId)) continue;
-      if (refusesFill(s.value, fields.get(s.fieldId) ?? {}, req.page, actionSources.has(s.sourceContextId))) continue;
-    }
-    if (s.kind === 'action' && (!actionSources.has(s.sourceContextId) || isIntentDestination(s.intent, here))) continue;
-    if (s.kind === 'interact' && !interactionAllowed(s, elements.get(s.elementId), interactSources, gate, req)) continue;
-    // Checked last, so what is counted here would have shown at a looser level.
-    if (s.confidence < knobs.minConfidence) {
-      onUnderFloor?.(s);
-      continue;
-    }
-    const key = s.kind === 'fill' ? `f:${s.fieldId}` : s.kind === 'interact' ? `e:${s.elementId || 'page'}` : `a:${s.intent}`;
-    const prev = best.get(key);
-    if (!prev || s.confidence > prev.confidence) best.set(key, { ...s, value: s.value.trim() });
-  }
-  // Every suggestion carries a value except a bare scroll. A page scroll yields to any surer fill or click on offer.
-  const kept = [...best.values()].filter((s) => s.value !== '' || (s.kind === 'interact' && s.verb === 'scroll'));
-  const better = kept.some((s) => !(s.kind === 'interact' && isPageScroll(s)) && s.kind !== 'action' && s.confidence >= weakBelow(eagerness));
-  return kept.filter((s) => !(s.kind === 'interact' && isPageScroll(s)) || !better).sort((a, b) => b.confidence - a.confidence);
 }
 
 /**
- * An interaction names a described element, a verb that fits its role and
- * state, and a source the user read. A click on a button or link only stands
- * once carat filled something on the page, when it is the primary action and
- * a flow or the level lets that through (`clickAllowed`), or when the page
- * state itself justifies it (a results page's link, a filled-in checkout's
- * Continue); the model does not get to press other buttons on a page it
- * merely looked at. A `page`-sourced suggestion has to pass that same test,
- * whatever it is. Destructive names never pass, even if the content script
- * somehow described one. A page scroll names no element and stands only while
- * the page has more below and was not just scrolled. The service worker
- * applies the money rule; the provider has no settings.
+ * Server-sent events from a chat completion, folded into the text so far. A
+ * server that answers a `stream: true` request with a whole completion (some
+ * proxies do) is read as one.
  */
-function interactionAllowed(
-  s: InteractSuggestion,
-  element: ElementDescriptor | undefined,
-  sources: Set<string>,
-  gate: ClickGate,
-  req: SuggestRequest,
-): boolean {
-  if (isPageScroll(s)) return pageJustifies('scroll', undefined, req.state, req.fields);
-  if (!element) return false;
-  if (isDestructiveName(element.nm)) return false;
-  if (!verbFits(element, s.verb, s.value.trim())) return false;
-  if (s.sourceContextId === PAGE_SOURCE) return pageJustifies(s.verb, element, req.state, req.fields);
-  if (!sources.has(s.sourceContextId)) return false;
-  // Not cited to the page, so the ordinary click gate decides; the page state is the last word either way.
-  if (s.verb === 'click' && !clickAllowed(element, gate)) return pageJustifies('click', element, req.state, req.fields);
-  return true;
+export async function readStream(res: Response, onDelta: (soFar: string) => void): Promise<string> {
+  const body = res.body;
+  if (!body) {
+    const whole = (await res.json()) as ChatCompletion;
+    const content = whole.choices?.[0]?.message?.content;
+    const text = typeof content === 'string' ? content : '';
+    if (text) onDelta(text);
+    return text;
+  }
+  const reader = body.pipeThrough(new TextDecoderStream()).getReader();
+  let buffer = '';
+  let text = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += value;
+    let sep: number;
+    while ((sep = buffer.indexOf('\n\n')) >= 0) {
+      const raw = buffer.slice(0, sep);
+      buffer = buffer.slice(sep + 2);
+      const data = raw
+        .split('\n')
+        .filter((l) => l.startsWith('data:'))
+        .map((l) => l.slice(5).trimStart())
+        .join('\n');
+      if (!data || data === '[DONE]') continue;
+      let event: { choices?: Array<{ delta?: { content?: unknown }; message?: { content?: unknown } }> };
+      try {
+        event = JSON.parse(data) as typeof event;
+      } catch {
+        continue;
+      }
+      const piece = event.choices?.[0]?.delta?.content ?? event.choices?.[0]?.message?.content;
+      if (typeof piece !== 'string' || piece === '') continue;
+      text += piece;
+      onDelta(text);
+    }
+  }
+  return text;
 }

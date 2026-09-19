@@ -1,9 +1,9 @@
-import type { ContextKind, SuggestRequest } from '@carat/shared';
+import type { ContextKind } from '@carat/shared';
 import { extractAddress, extractEmail, extractEvent, extractName, extractPhone, extractPlace } from './extract';
 
 export type CandidateKind = 'email' | 'phone' | 'address' | 'place' | 'plan' | 'event' | 'name';
 
-/** A value the regexes found in one context item. Nothing here is invented; every value is a substring or a fixed composition of one. */
+/** A value the regexes found in one note. Nothing here is invented; every value is a substring or a fixed composition of one. */
 export interface Candidate {
   kind: CandidateKind;
   value: string;
@@ -25,14 +25,18 @@ export const CANDIDATE_LABEL: Record<CandidateKind, string> = {
 // Activities that read naturally as a calendar title ("Dinner at X"); "see you at X" does not.
 const TITLE_ACTIVITIES = new Set(['dinner', 'lunch', 'brunch', 'breakfast', 'coffee', 'drinks', 'meeting', 'party', 'movie', 'game', 'practice']);
 
-type Ctx = SuggestRequest['context'][number];
-type Source = Pick<Ctx, 'id' | 'text'> & { kind?: ContextKind };
+/** One piece of text the regexes read: a note, a history line, or the page's own text. */
+export interface Source {
+  id: string;
+  text: string;
+  kind?: ContextKind;
+}
 
 /**
- * First match of each kind in one context item, in a fixed order. With
- * `loose` (the eager level) a lowercase quoted string counts as a place and
- * the most recent bare capitalised name is added last, so it only ever wins
- * when nothing with a cue around it did.
+ * First match of each kind in one source, in a fixed order. With `loose` (the
+ * eager level) a lowercase quoted string counts as a place and the most recent
+ * bare capitalised name is added last, so it only ever wins when nothing with
+ * a cue around it did.
  */
 export function candidatesFrom(ctx: Source, loose = false): Candidate[] {
   const out: Candidate[] = [];
@@ -58,7 +62,7 @@ export function candidatesFrom(ctx: Source, loose = false): Candidate[] {
   return out;
 }
 
-/** Candidates across all context items, in context order, with exact (kind, value) repeats dropped after their first source. */
+/** Candidates across all sources, in order, with exact (kind, value) repeats dropped after their first source. */
 export function extractCandidates(context: ReadonlyArray<Source>, loose = false): Candidate[] {
   const seen = new Set<string>();
   const out: Candidate[] = [];
@@ -71,4 +75,9 @@ export function extractCandidates(context: ReadonlyArray<Source>, loose = false)
     }
   }
   return out;
+}
+
+/** Every note as a source the regexes can read, newest first, as the request lists them. */
+export function notesAsSources(notes: readonly string[]): Source[] {
+  return notes.map((text, i) => ({ id: `note${i}`, text }));
 }
