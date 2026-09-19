@@ -51,8 +51,9 @@ export interface PerformedAction {
   host: string;
 }
 
-// Background handles every message but `forceSuggest`, which it sends to one
-// tab's content script when the keyboard shortcut fires.
+// Background handles every message but `forceSuggest` and `contextCleared`,
+// which it sends to one tab's content script when a keyboard shortcut fires or
+// the stores are wiped.
 export interface Protocol {
   capture(data: { url: string; title: string; text: string; kind: 'page' | 'selection'; leaving?: boolean }): void;
   /** What the user just did on the page: clicks and typing, for the per-tab timeline. */
@@ -64,10 +65,13 @@ export interface Protocol {
   /** Screenshot cues from a tab; see VisionCue. */
   vision(data: VisionCue): void;
   forceSuggest(): void;
+  /** The stores were just wiped; the tab drops its chip and everything it remembers about this page load. */
+  contextCleared(): void;
   feedback(data: FeedbackInput): void;
   /** Sent only from a Tab press on an `open` or `switch` chip; the background rebuilds the URL from the registry. */
   navigate(data: { kind: 'open' | 'switch'; value: string }): { ok: boolean };
   getKnown(): { items: KnownItem[]; pinned: boolean };
+  /** The popup's button. The keyboard shortcut runs the same routine in the background. */
   clearKnown(): void;
   setPinned(data: { pinned: boolean }): { pinned: boolean };
   getDiag(data: { tabId: number }): { diag: TabDiag | null };

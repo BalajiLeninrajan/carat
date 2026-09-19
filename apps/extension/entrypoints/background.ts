@@ -3,6 +3,9 @@ import { isDenylisted } from '@carat/shared';
 import { createVisionProvider } from '@carat/providers';
 import { onMessage, sendMessage } from '../src/messaging';
 import { ContextStore, ShotStore, createSettingsStore, isSiteOff, parseLocation } from '../src/store';
+// --- clear (balaji/engine-clear) ---
+import { clearAll, handleClearCommand } from '../src/background/clear';
+// --- end clear ---
 import {
   DiagLog,
   HistoryStore,
@@ -10,7 +13,6 @@ import {
   RefineQueue,
   chromeTabsApi,
   clearActionCache,
-  clearKnown,
   createKeepWarm,
   createNotes,
   createVisionPipeline,
@@ -165,8 +167,9 @@ export default defineBackground(() => {
   onMessage('getKnown', ({ sender }) => (trusted(sender) ? getKnown(store) : { items: [], pinned: false }));
   onMessage('clearKnown', async ({ sender }) => {
     if (!trusted(sender)) return;
-    clearActionCache();
-    await Promise.all([clearKnown(store), shots.clear(), history.clear(), notes.clear()]);
+    // --- clear (balaji/engine-clear) ---
+    await clearFromPopup();
+    // --- end clear ---
   });
   onMessage('setPinned', async ({ data, sender }) =>
     trusted(sender) ? setPinned(store, data.pinned) : { pinned: await store.isPinned() },
@@ -194,6 +197,26 @@ export default defineBackground(() => {
     if (command !== SUGGEST_COMMAND || tab?.id === undefined) return;
     sendMessage('forceSuggest', undefined, tab.id).catch(() => undefined);
   });
+
+  // --- clear (balaji/engine-clear) ---
+  // Alt+Shift+X, beside Alt+Shift+C: one wipe behind the shortcut and the
+  // popup's button, and the tab is told once the stores are empty.
+  const wipe = () => clearAll({ store, shots, history, notes });
+  const tellCleared = (tabId: number) => void sendMessage('contextCleared', undefined, tabId).catch(() => undefined);
+  chrome.commands?.onCommand.addListener((command, tab) => {
+    handleClearCommand(command, tab?.id, { clear: wipe, notify: tellCleared });
+  });
+  // The popup is its own page, so the tab whose chip should go is the active one.
+  async function clearFromPopup(): Promise<void> {
+    await wipe();
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab?.id !== undefined) tellCleared(tab.id);
+    } catch {
+      // No tab to tell: nothing else to do, the stores are already empty.
+    }
+  }
+  // --- end clear ---
 
   // Every minute rather than five: a screenshot must not outlive its three-minute TTL by much.
   void chrome.alarms.create(SWEEP_ALARM, { periodInMinutes: 1 });
