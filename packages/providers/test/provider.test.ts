@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from '@carat/shared';
 import { createProvider } from '../src/provider';
 import type { OpenAICompatProvider } from '../src/openai-compat';
+import { FastThenSmartProvider } from '../src/fast-then-smart';
+import { JevProvider } from '../src/jev';
+
+const cf = { cfAccountId: 'acct', cfApiToken: 'tok' };
 
 describe('createProvider', () => {
   it('falls back to local when there is no key', () => {
@@ -16,6 +20,28 @@ describe('createProvider', () => {
     expect(createProvider({ ...DEFAULT_SETTINGS, apiKey: 'sk-x' }).id).toBe('openai');
     expect(createProvider({ ...DEFAULT_SETTINGS, provider: 'baseten', apiKey: 'sk-x' }).id).toBe('baseten');
   });
+
+  it('runs Jev alone for cloudflare without a chat key, and Jev then the chat model with one', () => {
+    const alone = createProvider({ ...DEFAULT_SETTINGS, provider: 'cloudflare', ...cf });
+    expect(alone).toBeInstanceOf(JevProvider);
+    expect(alone.id).toBe('cloudflare');
+
+    const both = createProvider({ ...DEFAULT_SETTINGS, provider: 'cloudflare', ...cf, apiKey: 'sk-x' });
+    expect(both).toBeInstanceOf(FastThenSmartProvider);
+    expect(both.id).toBe('cloudflare');
+    const { fast, smart } = both as FastThenSmartProvider;
+    expect(fast).toBeInstanceOf(JevProvider);
+    expect((smart as OpenAICompatProvider).options.mode).toBe('json_schema');
+
+    const other = createProvider({ ...DEFAULT_SETTINGS, provider: 'cloudflare', ...cf, apiKey: 'sk-x', baseURL: 'https://model.api.baseten.co/sync/v1' });
+    expect(((other as FastThenSmartProvider).smart as OpenAICompatProvider).options.mode).toBe('json_object');
+  });
+
+  it('treats cloudflare without an account id or token like openai', () => {
+    expect(createProvider({ ...DEFAULT_SETTINGS, provider: 'cloudflare' }).id).toBe('local');
+    expect(createProvider({ ...DEFAULT_SETTINGS, provider: 'cloudflare', cfAccountId: 'acct' }).id).toBe('local');
+    expect(createProvider({ ...DEFAULT_SETTINGS, provider: 'cloudflare', apiKey: 'sk-x' }).id).toBe('openai');
+  });
 });
 
 describe('createProvider transport', () => {
@@ -26,5 +52,12 @@ describe('createProvider transport', () => {
     expect((openai as OpenAICompatProvider).fetchImpl).toBe(fetchImpl);
     expect((openai as OpenAICompatProvider).options.mode).toBe('json_schema');
     expect((baseten as OpenAICompatProvider).options.mode).toBe('json_object');
+  });
+
+  it('hands the injected fetch to Jev and to the chat model behind it', () => {
+    const fetchImpl = (() => Promise.reject(new Error('unused'))) as unknown as typeof fetch;
+    const both = createProvider({ ...DEFAULT_SETTINGS, provider: 'cloudflare', ...cf, apiKey: 'sk-x' }, fetchImpl) as FastThenSmartProvider;
+    expect((both.fast as JevProvider).fetchImpl).toBe(fetchImpl);
+    expect((both.smart as OpenAICompatProvider).fetchImpl).toBe(fetchImpl);
   });
 });

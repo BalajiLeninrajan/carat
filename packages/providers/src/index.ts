@@ -3,3 +3,8 @@ export { createProvider } from './provider';
 export { LocalProvider } from './local';
 export { OpenAICompatProvider } from './openai-compat';
 export type { OpenAICompatOptions, OutputMode } from './openai-compat';
+export { JevProvider, JEV_MODEL, GATE_MIN } from './jev';
+export type { JevOptions } from './jev';
+export { FastThenSmartProvider } from './fast-then-smart';
+export { extractCandidates, candidatesFrom } from './local/candidates';
+export type { Candidate, CandidateKind } from './local/candidates';
