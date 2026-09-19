@@ -1,4 +1,4 @@
 export { captureVisibleText, collectVisibleText } from './text';
-export { shouldCapture } from './should-capture';
+export { shouldCapture, hasVisiblePasswordField } from './should-capture';
 export type { CaptureLocation } from './should-capture';
 export { isVisible } from './visibility';
