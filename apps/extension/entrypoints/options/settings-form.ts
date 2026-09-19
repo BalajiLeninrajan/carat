@@ -6,6 +6,7 @@ export interface SettingsFormValues {
   baseURL: string;
   apiKey: string;
   model: string;
+  statusLine: boolean;
 }
 
 const PROVIDERS: ReadonlySet<Settings['provider']> = new Set(['openai', 'baseten', 'local']);
@@ -24,5 +25,6 @@ export function normalizeSettings(v: SettingsFormValues): Partial<Settings> {
     baseURL: baseURL === '' ? DEFAULT_SETTINGS.baseURL : baseURL,
     apiKey: v.apiKey.trim(),
     model: model === '' ? DEFAULT_SETTINGS.model : model,
+    statusLine: v.statusLine,
   };
 }

@@ -16,6 +16,7 @@ const provider = field<HTMLSelectElement>('provider');
 const baseURL = field<HTMLInputElement>('baseURL');
 const apiKey = field<HTMLInputElement>('apiKey');
 const model = field<HTMLInputElement>('model');
+const statusLine = field<HTMLInputElement>('statusLine');
 
 // A fresh service worker can take a moment to wake; a dead one never answers.
 // Cap the wait so the page can offer a retry instead of hanging.
@@ -32,6 +33,7 @@ function render(s: Settings): void {
   baseURL.value = s.baseURL;
   apiKey.value = s.apiKey;
   model.value = s.model;
+  statusLine.checked = s.statusLine;
 }
 
 function read(): Partial<Settings> {
@@ -41,6 +43,7 @@ function read(): Partial<Settings> {
     baseURL: baseURL.value,
     apiKey: apiKey.value,
     model: model.value,
+    statusLine: statusLine.checked,
   });
 }
 

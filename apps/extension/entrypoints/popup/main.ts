@@ -1,9 +1,62 @@
+import type { TabDiag } from '@/src/background/diag';
+import { relativeAge } from '@/src/format/age';
+import { describeCapture, describeSuggest } from '@/src/format/diag';
 import { sendMessage, type KnownItem } from '@/src/messaging';
+import { isSiteOff, siteHost, withSite } from '@/src/store/sites';
 
 const app = document.getElementById('app') as HTMLElement;
 const list = document.getElementById('list') as HTMLUListElement;
 const enabled = document.getElementById('enabled') as HTMLInputElement;
 const clearButton = document.getElementById('clear') as HTMLButtonElement;
+const pinButton = document.getElementById('pin') as HTMLButtonElement;
+const pinnedNote = document.getElementById('pinned-note') as HTMLElement;
+const siteRow = document.getElementById('site-row') as HTMLElement;
+const siteEnabled = document.getElementById('site-enabled') as HTMLInputElement;
+const siteHostLabel = document.getElementById('site-host') as HTMLElement;
+
+const diagCapture = document.getElementById('diag-capture') as HTMLElement;
+const diagSuggest = document.getElementById('diag-suggest') as HTMLElement;
+
+// The host of the tab the popup was opened over; undefined on chrome:// and friends.
+let activeHost: string | undefined;
+
+interface ActiveTab {
+  id: number | undefined;
+  host: string | undefined;
+}
+
+async function findActiveTab(): Promise<ActiveTab> {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    return { id: tab?.id, host: siteHost(tab?.url) };
+  } catch {
+    return { id: undefined, host: undefined };
+  }
+}
+
+// The debug line is a nicety; failing to get it must not take the popup offline.
+async function fetchDiag(tabId: number | undefined): Promise<TabDiag | null> {
+  if (tabId === undefined) return null;
+  try {
+    return (await withTimeout(sendMessage('getDiag', { tabId }))).diag ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function renderDiag(diag: TabDiag | null): void {
+  const now = Date.now();
+  diagCapture.textContent = diag?.capture ? describeCapture(diag.capture, now) : 'no capture from this tab yet';
+  diagSuggest.textContent = diag?.suggest ? describeSuggest(diag.suggest, now) : 'no check on this tab yet';
+}
+
+function renderSite(settings: { disabledHosts?: string[] }): void {
+  siteRow.hidden = activeHost === undefined;
+  if (activeHost === undefined) return;
+  siteHostLabel.textContent = activeHost;
+  // An older background answers without the list; nothing is off then.
+  siteEnabled.checked = !isSiteOff({ disabledHosts: settings.disabledHosts ?? [] }, activeHost);
+}
 const retryButton = document.getElementById('retry') as HTMLButtonElement;
 const optionsLink = document.getElementById('options') as HTMLAnchorElement;
 
@@ -14,16 +67,6 @@ function withTimeout<T>(p: Promise<T>, ms = 3000): Promise<T> {
     const t = setTimeout(() => reject(new Error('background timed out')), ms);
     p.then(resolve, reject).finally(() => clearTimeout(t));
   });
-}
-
-function relativeAge(ts: number, now = Date.now()): string {
-  const s = Math.max(0, Math.round((now - ts) / 1000));
-  if (s < 10) return 'just now';
-  if (s < 60) return `${s}s ago`;
-  const m = Math.round(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.round(m / 60);
-  return `${h}h ago`;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -57,16 +100,26 @@ function renderList(items: KnownItem[]): void {
   app.dataset.state = items.length === 0 ? 'empty' : 'ready';
 }
 
+function renderPinned(pinned: boolean): void {
+  pinButton.textContent = pinned ? 'Unpin' : 'Pin';
+  pinButton.setAttribute('aria-pressed', String(pinned));
+  pinnedNote.hidden = !pinned;
+}
+
 async function load(): Promise<void> {
   app.dataset.state = 'loading';
   // Locked while loading so a click cannot be overwritten by the stale reply.
   enabled.disabled = true;
   try {
-    const [settings, known] = await withTimeout(
-      Promise.all([sendMessage('getSettings', undefined), sendMessage('getKnown', undefined)]),
+    const [settings, known, tab] = await withTimeout(
+      Promise.all([sendMessage('getSettings', undefined), sendMessage('getKnown', undefined), findActiveTab()]),
     );
+    activeHost = tab.host;
     enabled.checked = settings.enabled;
+    renderSite(settings);
     renderList(known.items);
+    renderPinned(known.pinned === true);
+    renderDiag(await fetchDiag(tab.id));
   } catch {
     app.dataset.state = 'offline';
   } finally {
@@ -90,10 +143,42 @@ clearButton.addEventListener('click', async () => {
   try {
     await withTimeout(sendMessage('clearKnown', undefined));
     renderList([]);
+    // Clear wipes the whole session store, pin included.
+    renderPinned(false);
   } catch {
     app.dataset.state = 'offline';
   } finally {
     clearButton.disabled = false;
+  }
+});
+
+siteEnabled.addEventListener('change', async () => {
+  if (activeHost === undefined) return;
+  const next = siteEnabled.checked;
+  siteEnabled.disabled = true;
+  try {
+    // Read-modify-write against the latest list so two popups cannot clobber each other's hosts.
+    const current = await withTimeout(sendMessage('getSettings', undefined));
+    const saved = await withTimeout(sendMessage('setSettings', withSite(current, activeHost, next)));
+    renderSite(saved);
+  } catch {
+    siteEnabled.checked = !next;
+    app.dataset.state = 'offline';
+  } finally {
+    siteEnabled.disabled = false;
+  }
+});
+
+pinButton.addEventListener('click', async () => {
+  const next = pinButton.getAttribute('aria-pressed') !== 'true';
+  pinButton.disabled = true;
+  try {
+    const res = await withTimeout(sendMessage('setPinned', { pinned: next }));
+    renderPinned(res.pinned);
+  } catch {
+    app.dataset.state = 'offline';
+  } finally {
+    pinButton.disabled = false;
   }
 });
 

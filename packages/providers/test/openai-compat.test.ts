@@ -14,7 +14,26 @@ const req: SuggestRequest = {
   now: '2026-09-16T14:04:00-04:00',
 };
 
-const good = { fieldId: 'f0', value: 'Seven Shores Cafe', confidence: 0.92, reason: 'place', sourceContextId: 'c1' };
+const good = { kind: 'fill' as const, fieldId: 'f0', value: 'Seven Shores Cafe', confidence: 0.92, reason: 'place', sourceContextId: 'c1' };
+
+const discord: SuggestRequest = {
+  page: { host: 'discord.com', title: 'Discord', path: '/channels/1/2' },
+  fields: [{ i: 'f0', t: 'textbox', al: 'Message #general', f: 1 }],
+  context: [],
+  own: [{ id: 'o7', origin: 'https://discord.com', title: 'Discord', kind: 'page', text: 'dinner at Seven Shores Cafe, Friday at 6?', capturedAt: 1 }],
+  now: '2026-09-16T14:04:00-04:00',
+};
+const action = {
+  kind: 'action',
+  fieldId: '',
+  value: 'Seven Shores Cafe',
+  confidence: 0.9,
+  reason: 'place to look up',
+  sourceContextId: 'o7',
+  intent: 'maps',
+  when: '',
+  location: '',
+};
 
 function completion(content: string | null, status = 200): Response {
   return new Response(JSON.stringify({ choices: [{ message: { role: 'assistant', content } }] }), {
@@ -167,6 +186,73 @@ describe('OpenAICompatProvider', () => {
     } as unknown as typeof fetch;
 
     expect(await provider(strict).suggest(req, { signal: new AbortController().signal })).toEqual([good]);
+  });
+
+  it('keeps an action sourced from the page itself and drops one sourced from another tab or aimed at the current page', async () => {
+    const fetchImpl = vi.fn(async () =>
+      completion(
+        JSON.stringify({
+          suggestions: [
+            action,
+            { ...action, intent: 'calendar', value: 'Dinner at Seven Shores Cafe', when: '2026-09-18T18:00:00-04:00', location: 'Seven Shores Cafe', sourceContextId: 'c1' },
+            { ...action, intent: 'gmail', value: 'x@y.co', confidence: 0.5 },
+          ],
+        }),
+      ),
+    );
+    const out = await provider(fetchImpl).suggest(discord, { signal: new AbortController().signal });
+    expect(out).toEqual([
+      { kind: 'action', intent: 'maps', value: 'Seven Shores Cafe', when: '', location: '', confidence: 0.9, reason: 'place to look up', sourceContextId: 'o7' },
+    ]);
+
+    const onMaps: SuggestRequest = { ...discord, page: { host: 'www.google.com', title: 'Google Maps', path: '/maps' } };
+    expect(await provider(fetchImpl).suggest(onMaps, { signal: new AbortController().signal })).toEqual([]);
+  });
+
+  it('keeps an interaction on a described element with a fitting verb, and drops the rest', async () => {
+    const calendar: SuggestRequest = {
+      page: { host: 'calendar.google.com', title: 'Calendar', path: '/calendar/u/0/r/eventedit' },
+      fields: [],
+      elements: [
+        { i: 'e0', r: 'button', nm: 'Save', p: 1 },
+        { i: 'e1', r: 'checkbox', nm: 'All day', st: 'on' },
+        { i: 'e2', r: 'slider', nm: 'Volume', v: '80', min: 0, max: 100 },
+        { i: 'e3', r: 'button', nm: 'Delete event' },
+      ],
+      filled: ['c1'],
+      context: [{ id: 'c1', origin: 'https://discord.com', title: 'Discord', kind: 'page', text: 'dinner at Seven Shores Cafe, Friday at 6?', capturedAt: 1 }],
+      now: '2026-09-16T14:04:00-04:00',
+    };
+    const click = { kind: 'interact', fieldId: '', value: 'Save', confidence: 0.85, reason: 'commits the fills', sourceContextId: 'c1', intent: '', when: '', location: '', elementId: 'e0', verb: 'click' };
+    const fetchImpl = vi.fn(async () =>
+      completion(
+        JSON.stringify({
+          suggestions: [
+            click,
+            { ...click, elementId: 'e1', verb: 'check', value: 'All day' }, // already on
+            { ...click, elementId: 'e1', verb: 'uncheck', value: 'All day', confidence: 0.6 }, // too weak
+            { ...click, elementId: 'e2', verb: 'set', value: '140' }, // out of range
+            { ...click, elementId: 'e2', verb: 'set', value: '40', sourceContextId: 'o9' }, // unknown source
+            { ...click, elementId: 'e3', verb: 'click', value: 'Delete event' }, // destructive
+            { ...click, elementId: 'e9', verb: 'click', value: 'Ghost' }, // not described
+            { ...click, elementId: 'e0', verb: 'click', value: 'Save', confidence: 0.8 }, // duplicate, lower
+          ],
+        }),
+      ),
+    );
+    const out = await provider(fetchImpl).suggest(calendar, { signal: new AbortController().signal });
+    expect(out).toEqual([
+      { kind: 'interact', elementId: 'e0', verb: 'click', value: 'Save', confidence: 0.85, reason: 'commits the fills', sourceContextId: 'c1' },
+    ]);
+
+    // Without a fill behind it, a button click is not the model's to propose.
+    const { filled: _f, ...unfilled } = calendar;
+    expect(await provider(fetchImpl).suggest(unfilled, { signal: new AbortController().signal })).toEqual([]);
+  });
+
+  it('never turns text from the page itself into a fill', async () => {
+    const fetchImpl = vi.fn(async () => completion(JSON.stringify({ suggestions: [{ ...good, sourceContextId: 'o7' }] })));
+    expect(await provider(fetchImpl).suggest(discord, { signal: new AbortController().signal })).toEqual([]);
   });
 
   it('uses json_object for baseten-style servers and no response_format in prompt mode, tolerating fences', async () => {

@@ -11,9 +11,15 @@ export const CAPTURE_TIMING = {
   minSelectionChars: 3,
 } as const;
 
-export function startCapture(ctx: ScriptContext, doc: Document = document): void {
+export interface CaptureOptions {
+  /** Runs after a page or selection capture is sent; the suggest scheduler re-asks with the new own text. */
+  onCaptured?: () => void;
+}
+
+export function startCapture(ctx: ScriptContext, doc: Document = document, opts: CaptureOptions = {}): void {
   const win = doc.defaultView;
   if (!win) return;
+  const captured = opts.onCaptured ?? (() => undefined);
 
   let lastBody = '';
   let lastPageHash = -1;
@@ -35,7 +41,7 @@ export function startCapture(ctx: ScriptContext, doc: Document = document): void
     const hash = hashText(text);
     if (onlyIfChanged && hash === lastPageHash) return;
     lastPageHash = hash;
-    void send('capture', { url: doc.location.href, title: doc.title, text, kind: 'page' });
+    void send('capture', { url: doc.location.href, title: doc.title, text, kind: 'page' }).then(captured);
   };
 
   const captureSelection = (): void => {
@@ -47,7 +53,7 @@ export function startCapture(ctx: ScriptContext, doc: Document = document): void
     const hash = hashText(text);
     if (hash === lastSelectionHash) return;
     lastSelectionHash = hash;
-    void send('capture', { url: doc.location.href, title: doc.title, text, kind: 'selection' });
+    void send('capture', { url: doc.location.href, title: doc.title, text, kind: 'selection' }).then(captured);
   };
   const selectionSoon = debounce(ctx, captureSelection, CAPTURE_TIMING.selectionMs);
 

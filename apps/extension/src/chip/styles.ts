@@ -26,8 +26,22 @@ export const CHIP_CSS = `
   -webkit-user-select: none;
 }
 .chip:hover { background: #181825; }
+.text { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
 .label { overflow: hidden; text-overflow: ellipsis; }
+.sub { font-size: 11px; line-height: 1.2; color: #a6adc8; overflow: hidden; text-overflow: ellipsis; }
+.sub[hidden] { display: none; }
 .value { font-weight: 600; color: #f5e0dc; }
+/* The tab offer has no field to sit beside, so it reads as a banner: larger type, wider, centred. */
+.chip.is-banner {
+  max-width: min(640px, calc(100vw - 32px));
+  gap: 14px;
+  padding: 12px 14px 12px 20px;
+  border-radius: 16px;
+  font-size: 16px;
+  box-shadow: 0 10px 30px rgba(17, 17, 27, 0.45), 0 0 0 1px rgba(205, 214, 244, 0.1);
+}
+.chip.is-banner .sub { font-size: 12px; }
+.chip.is-banner kbd { padding: 5px 10px; font-size: 13px; }
 kbd {
   all: initial;
   display: inline-block;

@@ -1,7 +1,9 @@
 import { beforeAll, describe, expect, it } from 'vitest';
+import type { SuggestRequest } from '@carat/shared';
 import { LocalProvider } from '../src/local';
 import { classifyField } from '../src/local/fields';
-import { extractAddress, extractPhone, extractPlace } from '../src/local/extract';
+import { affirms, amountFor } from '../src/local/interact';
+import { extractAddress, extractEmailRequest, extractPhone, extractPlace, extractWhen } from '../src/local/extract';
 import { judge, loadFixtures, type Fixture } from '../eval/fixtures';
 
 const signal = new AbortController().signal;
@@ -22,21 +24,21 @@ describe('LocalProvider', () => {
   it('fills the Maps search box with the place from the Discord message', async () => {
     const out = await local.suggest(fixture('discord-maps-search').request, { signal });
     expect(out).toEqual([
-      expect.objectContaining({ fieldId: 'f0', value: 'Seven Shores Cafe', confidence: 0.75, sourceContextId: 'c1' }),
+      expect.objectContaining({ kind: 'fill', fieldId: 'f0', value: 'Seven Shores Cafe', confidence: 0.75, sourceContextId: 'c1' }),
     ]);
   });
 
   it('fills the Calendar location field with the street address from the Maps panel', async () => {
     const out = await local.suggest(fixture('maps-calendar-location').request, { signal });
-    const location = out.find((s) => s.fieldId === 'f1');
+    const location = out.find((s) => s.kind === 'fill' && s.fieldId === 'f1');
     expect(location?.value).toBe('10 Regina St N, Waterloo, ON N2J 2Z8');
     expect(location?.sourceContextId).toBe('c2');
-    expect(out.find((s) => s.fieldId === 'f0')?.value).toBe('Dinner at Seven Shores Cafe');
+    expect(out.find((s) => s.kind === 'fill' && s.fieldId === 'f0')?.value).toBe('Dinner at Seven Shores Cafe');
   });
 
   it('fills a Gmail To field with an email seen in Slack', async () => {
     const out = await local.suggest(fixture('slack-gmail-to').request, { signal });
-    expect(out).toEqual([expect.objectContaining({ fieldId: 'f0', value: 'maya.chen@northbrookstudio.com' })]);
+    expect(out).toEqual([expect.objectContaining({ kind: 'fill', fieldId: 'f0', value: 'maya.chen@northbrookstudio.com' })]);
   });
 
   it('returns [] on every negative fixture', async () => {
@@ -62,7 +64,7 @@ describe('LocalProvider', () => {
   it('prefers the street address for a location field whichever context item comes first', async () => {
     const req = fixture('maps-calendar-location').request;
     const out = await local.suggest({ ...req, context: [...req.context].reverse() }, { signal });
-    const location = out.find((s) => s.fieldId === 'f1');
+    const location = out.find((s) => s.kind === 'fill' && s.fieldId === 'f1');
     expect(location?.value).toBe('10 Regina St N, Waterloo, ON N2J 2Z8');
     expect(location?.sourceContextId).toBe('c2');
   });
@@ -71,6 +73,127 @@ describe('LocalProvider', () => {
     const login = fixture('neg-blank-login').request;
     const out = await local.suggest({ ...login, context: fixture('slack-gmail-to').request.context }, { signal });
     expect(out).toEqual([]);
+  });
+});
+
+describe('LocalProvider actions', () => {
+  it('offers Maps and Calendar for the invitation on the Discord page itself', async () => {
+    const out = await local.suggest(fixture('discord-open-maps').request, { signal });
+    expect(out).toEqual([
+      { kind: 'action', intent: 'maps', value: 'Seven Shores Cafe', when: '', location: '', confidence: 0.75, reason: expect.any(String), sourceContextId: 'o1' },
+      {
+        kind: 'action',
+        intent: 'calendar',
+        value: 'Dinner at Seven Shores Cafe',
+        when: '2026-09-18T18:00:00-04:00',
+        location: 'Seven Shores Cafe',
+        confidence: 0.75,
+        reason: expect.any(String),
+        sourceContextId: 'o1',
+      },
+    ]);
+  });
+
+  it('offers Gmail when the page asks the reader to email someone', async () => {
+    const out = await local.suggest(fixture('slack-compose-gmail').request, { signal });
+    expect(out).toEqual([expect.objectContaining({ kind: 'action', intent: 'gmail', value: 'maya.chen@northbrookstudio.com', sourceContextId: 'o1' })]);
+  });
+
+  it('takes actions only from the page being read, never from other tabs', async () => {
+    const discord = fixture('discord-open-maps').request;
+    const asContext: SuggestRequest = { ...discord, page: { host: 'news.ycombinator.com', title: 'HN', path: '/' }, context: discord.own!, own: [] };
+    expect(await local.suggest(asContext, { signal })).toEqual([]);
+  });
+
+  it('never offers the destination the user is already on', async () => {
+    const discord = fixture('discord-open-maps').request;
+    const onMaps: SuggestRequest = { ...discord, page: { host: 'www.google.com', title: 'Google Maps', path: '/maps' } };
+    const out = await local.suggest(onMaps, { signal });
+    expect(out.map((s) => s.kind === 'action' && s.intent)).toEqual(['calendar']);
+    const onCalendar: SuggestRequest = { ...discord, page: { host: 'calendar.google.com', title: 'Calendar', path: '/calendar/u/0/r' } };
+    expect((await local.suggest(onCalendar, { signal })).map((s) => s.kind === 'action' && s.intent)).toEqual(['maps']);
+  });
+
+  it('uses a street address as the Calendar location when the page has one', async () => {
+    const req = fixture('discord-open-maps').request;
+    const own = [{ ...req.own![0]!, text: `${req.own![0]!.text} alex 2:05 PM address is 10 Regina St N, Waterloo, ON N2J 2Z8` }];
+    const out = await local.suggest({ ...req, own }, { signal });
+    expect(out.find((s) => s.kind === 'action' && s.intent === 'calendar')).toMatchObject({ location: '10 Regina St N, Waterloo, ON N2J 2Z8' });
+  });
+});
+
+describe('LocalProvider interactions', () => {
+  it('offers the primary Save button after carat filled fields on the page, citing the fill source', async () => {
+    const out = await local.suggest(fixture('calendar-save-after-fills').request, { signal });
+    expect(out).toEqual([
+      { kind: 'interact', elementId: 'e0', verb: 'click', value: 'Save', confidence: 0.75, reason: expect.any(String), sourceContextId: 'c2' },
+    ]);
+  });
+
+  it('offers no button at all when carat filled nothing, whatever the text says', async () => {
+    const req = fixture('calendar-save-after-fills').request;
+    const { filled: _f, ...unfilled } = req;
+    expect(await local.suggest(unfilled, { signal })).toEqual([]);
+    expect(await local.suggest({ ...req, filled: [] }, { signal })).toEqual([]);
+  });
+
+  it('checks the box whose name a context sentence affirms, and only that one', async () => {
+    const out = await local.suggest(fixture('form-vegetarian-checkbox').request, { signal });
+    expect(out).toEqual([expect.objectContaining({ kind: 'interact', elementId: 'e0', verb: 'check', value: 'Vegetarian', sourceContextId: 'c1' })]);
+  });
+
+  it('sets the slider named with an amount, snapped to its step and range', async () => {
+    const out = await local.suggest(fixture('settings-volume-slider').request, { signal });
+    expect(out).toEqual([expect.objectContaining({ kind: 'interact', elementId: 'e0', verb: 'set', value: '40', sourceContextId: 'c1' })]);
+  });
+
+  it('never clicks a destructive name, even as the primary action after fills', async () => {
+    expect(await local.suggest(fixture('neg-delete-with-matching-text').request, { signal })).toEqual([]);
+    expect(await local.suggest(fixture('neg-gmail-send').request, { signal })).toEqual([]);
+  });
+
+  it('does not check a box on a generic name, a negated sentence, or a box already on', async () => {
+    const req = fixture('form-vegetarian-checkbox').request;
+    const ctx = req.context[0]!;
+    const withText = (text: string, elements = req.elements!) => ({ ...req, elements, context: [{ ...ctx, text }] });
+    const out = async (r: typeof req) => (await local.suggest(r, { signal })).map((s) => s.kind === 'interact' && `${s.elementId}.${s.verb}`);
+
+    expect(await out(withText("I'm not a vegetarian, but Sam is vegan"))).toEqual(['e1.check']);
+    expect(await out(withText('no vegetarian options there sadly'))).toEqual([]);
+    expect(await out(withText('vegetarian', [{ i: 'e0', r: 'checkbox', nm: 'Yes', st: 'off' }]))).toEqual([]);
+    expect(await out(withText('yes I am', [{ i: 'e0', r: 'checkbox', nm: 'Yes', st: 'off' }]))).toEqual([]);
+    expect(await out(withText("I'm a vegetarian", [{ i: 'e0', r: 'checkbox', nm: 'Vegetarian', st: 'on' }]))).toEqual([]);
+    expect(await out(withText('the vegetarianism debate', [{ i: 'e0', r: 'checkbox', nm: 'Vegetarian', st: 'off' }]))).toEqual([]);
+  });
+
+  it('takes interactions only from other tabs, never from the page itself', async () => {
+    const req = fixture('form-vegetarian-checkbox').request;
+    expect(await local.suggest({ ...req, context: [], own: req.context }, { signal })).toEqual([]);
+  });
+});
+
+describe('affirms and amountFor', () => {
+  it('matches whole words without negation nearby', () => {
+    expect(affirms("I'm a vegetarian", 'Vegetarian')).toBe(true);
+    expect(affirms('Gluten free please', 'Gluten free')).toBe(true);
+    expect(affirms('gluten-free please', 'Gluten free')).toBe(false);
+    expect(affirms("I don't need parking", 'Needs parking')).toBe(false);
+    expect(affirms('not vegetarian. vegan though', 'Vegan')).toBe(true);
+  });
+
+  it('reads an amount after or before the name and scales percentages to the range', () => {
+    const volume = { i: 'e0', r: 'slider' as const, nm: 'Volume', min: 0, max: 100, step: 1 };
+    expect(amountFor('turn the volume to 40%', volume)).toBe('40');
+    expect(amountFor('volume at 55 please', volume)).toBe('55');
+    expect(amountFor('set it to 40% volume', volume)).toBe('40');
+    expect(amountFor('volume up a bit', volume)).toBeNull();
+    expect(amountFor('the volume was fine. 40 people came', volume)).toBeNull();
+    expect(amountFor('volume to 140', volume)).toBe('100');
+    const balance = { i: 'e1', r: 'slider' as const, nm: 'Balance', min: -50, max: 50, step: 5 };
+    expect(amountFor('balance to 75%', balance)).toBe('25');
+    expect(amountFor('balance to 12', balance)).toBe('10');
+    const brightness = { i: 'e2', r: 'slider' as const, nm: 'Brightness', min: 0, max: 1, step: 0.1 };
+    expect(amountFor('brightness to 70%', brightness)).toBe('0.7');
   });
 });
 
@@ -114,6 +237,50 @@ describe('extract', () => {
     expect(extractAddress('1600 Pennsylvania Avenue NW, Washington, DC 20500')).toBe('1600 Pennsylvania Avenue NW, Washington, DC 20500');
     expect(extractAddress('turn onto 5th street then')).toBeNull();
     expect(extractAddress('voted 11-5 on Tuesday')).toBeNull();
+  });
+
+  it('only treats an email as a request when the text asks for a message', () => {
+    expect(extractEmailRequest('can you email them over? her address is maya.chen@northbrookstudio.com')).toBe('maya.chen@northbrookstudio.com');
+    expect(extractEmailRequest('send the deck to sam@example.com when done')).toBe('sam@example.com');
+    expect(extractEmailRequest('Contact the newsroom: tips@cbc.ca')).toBeNull();
+    expect(extractEmailRequest('Unsubscribe: no-reply@example.com')).toBeNull();
+  });
+});
+
+describe('extractWhen', () => {
+  // A Wednesday afternoon in Waterloo.
+  const now = '2026-09-16T14:04:00-04:00';
+
+  it('resolves a weekday and time to the coming one, in the offset of now', () => {
+    expect(extractWhen(', Friday at 6?', now, 'dinner')).toBe('2026-09-18T18:00:00-04:00');
+    expect(extractWhen('fri @ 6:30', now)).toBe('2026-09-18T18:30:00-04:00');
+    expect(extractWhen('Saturday 10am', now)).toBe('2026-09-19T10:00:00-04:00');
+    expect(extractWhen('Sat 8 p.m.', now)).toBe('2026-09-19T20:00:00-04:00');
+  });
+
+  it('handles today, tonight and tomorrow, and a weekday that already passed this week', () => {
+    expect(extractWhen('tonight at 9', now)).toBe('2026-09-16T21:00:00-04:00');
+    expect(extractWhen('tomorrow at 7', now)).toBe('2026-09-17T19:00:00-04:00');
+    expect(extractWhen('Monday at 12', now)).toBe('2026-09-21T12:00:00-04:00');
+    expect(extractWhen('Wednesday at 9', now)).toBe('2026-09-16T21:00:00-04:00');
+    expect(extractWhen('Wednesday at 1pm', now)).toBe('2026-09-23T13:00:00-04:00');
+  });
+
+  it('reads a bare hour as morning only for a morning activity', () => {
+    expect(extractWhen('Saturday at 9', now, 'coffee')).toBe('2026-09-19T09:00:00-04:00');
+    expect(extractWhen('Saturday at 9', now, 'drinks')).toBe('2026-09-19T21:00:00-04:00');
+    expect(extractWhen('Sunday at 11', now, 'brunch')).toBe('2026-09-20T11:00:00-04:00');
+  });
+
+  it('ignores a bare number after a day and anything without a day', () => {
+    expect(extractWhen('Friday 6 people', now)).toBeNull();
+    expect(extractWhen('at 6', now)).toBeNull();
+    expect(extractWhen('Friday at 25', now)).toBeNull();
+    expect(extractWhen('Friday at 6', 'not a time')).toBeNull();
+  });
+
+  it('keeps a UTC now in UTC', () => {
+    expect(extractWhen('Friday at 6', '2026-09-16T18:04:00Z')).toBe('2026-09-18T18:00:00+00:00');
   });
 });
 

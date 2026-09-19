@@ -1,19 +1,27 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { ContextItem, Settings, Suggestion, SuggestRequest } from '@carat/shared';
+import type { ActionSuggestion, ContextItem, ElementDescriptor, FillSuggestion, InteractSuggestion, NavSuggestion, Settings, Suggestion, SuggestRequest } from '@carat/shared';
 import { DEFAULT_SETTINGS } from '@carat/shared';
 import type { Provider } from '@carat/providers';
 import { createProvider } from '@carat/providers';
 import { ContextStore } from '../src/store';
 import type { StorageArea } from '../src/store';
+import type { SuggestDiag } from '../src/background';
 import {
+  DiagLog,
+  explainGate,
   fingerprintMatchesDescriptor,
   gate,
   handleFeedback,
+  hasWork,
   isExtensionPage,
   orchestrate,
+  ownContext,
+  performNavigation,
   redactSettings,
+  resolveNavigation,
   scoreAndPickContext,
 } from '../src/background';
+import type { TabsApi } from '../src/background';
 
 class FakeArea implements StorageArea {
   data: Record<string, unknown> = {};
@@ -61,14 +69,17 @@ describe('gate', () => {
     expect(gate(maps, [item()], enabled, requester, NOW)).toBe(true);
   });
 
-  it('needs a different tab AND a different origin', () => {
-    expect(gate(maps, [item({ tabId: 2 })], enabled, requester, NOW)).toBe(false);
+  it('needs a different tab AND a different origin for fills, or the requesting tab itself for actions', () => {
+    // Same origin from another tab is an echo of what the user is looking at.
     expect(gate(maps, [item({ origin: 'https://www.google.com' })], enabled, requester, NOW)).toBe(false);
+    // The requesting tab's own page is a source for navigation, so it clears the gate on its own.
+    expect(gate(maps, [item({ tabId: 2 })], enabled, requester, NOW)).toBe(true);
+    expect(gate(maps, [item({ tabId: 2, lastSeenAt: NOW - 31 * MIN })], enabled, requester, NOW)).toBe(false);
   });
 
-  it('ignores items older than 10 minutes', () => {
-    expect(gate(maps, [item({ lastSeenAt: NOW - 11 * MIN })], enabled, requester, NOW)).toBe(false);
-    expect(gate(maps, [item({ lastSeenAt: NOW - 9 * MIN })], enabled, requester, NOW)).toBe(true);
+  it('ignores items older than the store TTL', () => {
+    expect(gate(maps, [item({ lastSeenAt: NOW - 31 * MIN })], enabled, requester, NOW)).toBe(false);
+    expect(gate(maps, [item({ lastSeenAt: NOW - 29 * MIN })], enabled, requester, NOW)).toBe(true);
   });
 
   it('refuses denylisted hosts, disabled, and no fields', () => {
@@ -76,6 +87,54 @@ describe('gate', () => {
     expect(gate(bank, [item()], enabled, requester, NOW)).toBe(false);
     expect(gate(maps, [item()], { ...enabled, enabled: false }, requester, NOW)).toBe(false);
     expect(gate({ ...maps, fields: [] }, [item()], enabled, requester, NOW)).toBe(false);
+  });
+
+  it('refuses a host the user switched off, and only that host', () => {
+    const off = { ...enabled, disabledHosts: ['www.google.com'] };
+    expect(gate(maps, [item()], off, requester, NOW)).toBe(false);
+    const calendar = { ...maps, page: { ...maps.page, host: 'calendar.google.com' } };
+    expect(gate(calendar, [item()], off, requester, NOW)).toBe(true);
+  });
+});
+
+describe('explainGate', () => {
+  it('names the check that stopped the request', () => {
+    expect(explainGate(maps, [item()], enabled, requester, NOW)).toBe('ok');
+    expect(explainGate(maps, [item()], { ...enabled, enabled: false }, requester, NOW)).toBe('disabled');
+    expect(explainGate(maps, [item()], { ...enabled, disabledHosts: ['www.google.com'] }, requester, NOW)).toBe('site-off');
+    const bank = { ...maps, page: { ...maps.page, host: 'secure.chase.com' } };
+    expect(explainGate(bank, [item()], enabled, requester, NOW)).toBe('denylisted');
+    expect(explainGate({ ...maps, fields: [] }, [item()], enabled, requester, NOW)).toBe('no-fields');
+    expect(explainGate(maps, [], enabled, requester, NOW)).toBe('no-context');
+    // Another tab on the same site is an echo; the requesting tab's own text is a source for actions.
+    expect(explainGate(maps, [item({ origin: 'https://www.google.com' })], enabled, requester, NOW)).toBe('own-context');
+    expect(explainGate(maps, [item({ tabId: 2 })], enabled, requester, NOW)).toBe('ok');
+    expect(explainGate(maps, [item({ lastSeenAt: NOW - 31 * MIN })], enabled, requester, NOW)).toBe('stale-context');
+    expect(explainGate(maps, [item({ tabId: 2, lastSeenAt: NOW - 31 * MIN })], enabled, requester, NOW)).toBe('stale-context');
+    // A stale foreign item plus a fresh own one still passes: the own one can carry an action.
+    expect(explainGate(maps, [item({ lastSeenAt: NOW - 31 * MIN }), item({ tabId: 2 })], enabled, requester, NOW)).toBe('ok');
+  });
+});
+
+describe('DiagLog', () => {
+  it('keeps the last capture and check per tab, persists, and forgets the oldest tabs', async () => {
+    const area = new FakeArea();
+    const log = new DiagLog(area);
+    await log.recordCapture(1, { at: 1, host: 'discord.com', kind: 'page', verdict: 'stored' });
+    await log.recordSuggest(1, { at: 2, host: 'discord.com', fields: 1, gate: 'own-context' });
+    await log.recordSuggest(1, { at: 3, host: 'discord.com', fields: 2, gate: 'ok', cached: false, offered: 1 });
+    await log.flush();
+    const reloaded = new DiagLog(area);
+    expect(await reloaded.get(1)).toEqual({
+      capture: { at: 1, host: 'discord.com', kind: 'page', verdict: 'stored' },
+      suggest: { at: 3, host: 'discord.com', fields: 2, gate: 'ok', cached: false, offered: 1 },
+    });
+    expect(await reloaded.get(2)).toBeUndefined();
+
+    for (let t = 10; t < 40; t++) await log.recordCapture(t, { at: 100 + t, host: 'x', kind: 'page', verdict: 'empty' });
+    expect(await log.get(1)).toBeUndefined();
+    expect(await log.get(10)).toBeUndefined();
+    expect(await log.get(39)).toBeDefined();
   });
 });
 
@@ -144,7 +203,8 @@ function fakeProvider(
   return p;
 }
 
-const suggestion = (over: Partial<Suggestion> = {}): Suggestion => ({
+const suggestion = (over: Partial<FillSuggestion> = {}): FillSuggestion => ({
+  kind: 'fill',
   fieldId: 'f0',
   value: 'Seven Shores Cafe',
   confidence: 0.9,
@@ -190,12 +250,16 @@ describe('orchestrate', () => {
       ['f0', 'Better'],
       ['f1', 'Seven Shores Cafe'],
     ]);
+    // The chip can say where it came from, but never gets the text itself.
+    expect(res.suggestions[0]?.source).toEqual({ host: 'discord.com', capturedAt: NOW });
+    expect(Object.keys(res.suggestions[0]!)).not.toContain('text');
   });
 
   it('returns nothing when the gate fails and never calls the provider', async () => {
     const { store, now } = await seeded();
     const remote = fakeProvider('openai', async () => [suggestion()]);
-    const res = await orchestrate(maps, { tabId: 1, origin: 'https://discord.com' }, {
+    // Same origin as the only item, from a tab that has captured nothing of its own.
+    const res = await orchestrate(maps, { tabId: 9, origin: 'https://discord.com' }, {
       store,
       settings: async () => enabled,
       createProvider: () => remote,
@@ -287,6 +351,74 @@ describe('orchestrate', () => {
     expect(remote.calls).toBe(1);
   });
 
+  it('reports the gate verdict, each provider attempt and the cache hit', async () => {
+    const { store, ctxId, now } = await seeded();
+    const reports: SuggestDiag[] = [];
+    const flaky = fakeProvider('openai', async () => {
+      throw new Error('HTTP 503');
+    });
+    const local = fakeProvider('local', async () => [suggestion({ sourceContextId: ctxId, confidence: 0.75 })]);
+    const deps = {
+      store,
+      settings: async () => enabled,
+      createProvider: () => flaky,
+      localProvider: local,
+      now,
+      onDiag: (d: SuggestDiag) => void reports.push(d),
+    };
+    // A second Discord tab asking: the only context is the same site's, and not its own.
+    await orchestrate(maps, { tabId: 3, origin: 'https://discord.com' }, deps);
+    expect(reports[0]).toMatchObject({ at: NOW, host: 'www.google.com', fields: 1, gate: 'own-context' });
+
+    await orchestrate(maps, requester, deps);
+    expect(reports[1]).toMatchObject({ gate: 'ok', cached: false, offered: 1 });
+    expect(reports[1]?.attempts?.map((a) => [a.id, a.count, a.error])).toEqual([
+      ['openai', 0, 'HTTP 503'],
+      ['local', 1, undefined],
+    ]);
+
+    const steady = fakeProvider('openai', async () => [suggestion({ sourceContextId: ctxId })]);
+    const steadyDeps = { ...deps, createProvider: () => steady };
+    await orchestrate(maps, requester, steadyDeps);
+    await orchestrate(maps, requester, steadyDeps);
+    expect(reports[2]).toMatchObject({ gate: 'ok', cached: false, offered: 1 });
+    expect(reports[3]).toMatchObject({ gate: 'ok', cached: true, offered: 1 });
+    expect(reports[3]?.attempts).toBeUndefined();
+  });
+
+  it('keeps offering pinned context after it would have gone stale', async () => {
+    const { store, ctxId, now, tick } = await seeded();
+    const remote = fakeProvider('openai', async () => [suggestion({ sourceContextId: ctxId })]);
+    const deps = { store, settings: async () => enabled, createProvider: () => remote, now };
+    await store.pin();
+    tick(45 * MIN);
+    expect((await orchestrate(maps, requester, deps)).suggestions).toHaveLength(1);
+    await store.unpin();
+    expect((await orchestrate(maps, requester, deps)).suggestions).toEqual([]);
+  });
+
+  it('caches a genuine empty answer but never a failure', async () => {
+    const { store, ctxId, now } = await seeded();
+    const empty = fakeProvider('openai', async () => []);
+    const deps = { store, settings: async () => enabled, createProvider: () => empty, now };
+    await orchestrate(maps, requester, deps);
+    await orchestrate(maps, requester, deps);
+    expect(empty.calls).toBe(1);
+
+    let down = true;
+    const flaky = fakeProvider('openai', async () => {
+      if (down) throw new Error('HTTP 503');
+      return [suggestion({ sourceContextId: ctxId })];
+    });
+    const local = fakeProvider('local', async () => []);
+    const other = { ...maps, fields: [{ i: 'f0', t: 'input:text', nm: 'q' }] };
+    const flakyDeps = { store, settings: async () => enabled, createProvider: () => flaky, localProvider: local, now };
+    expect((await orchestrate(other, requester, flakyDeps)).suggestions).toEqual([]);
+    down = false;
+    expect((await orchestrate(other, requester, flakyDeps)).suggestions).toHaveLength(1);
+    expect(flaky.calls).toBe(2);
+  });
+
   it('filters suggestions the user already accepted for that field', async () => {
     const { store, ctxId, now } = await seeded();
     const remote = fakeProvider('openai', async () => [suggestion({ sourceContextId: ctxId })]);
@@ -306,6 +438,28 @@ describe('orchestrate', () => {
     // A different field on the same host is still eligible.
     const other = { ...maps, fields: [{ i: 'f0', t: 'input:text', nm: 'q' }] };
     expect((await orchestrate(other, requester, deps)).suggestions).toHaveLength(1);
+  });
+
+  it('a forced request skips the cache and shows what the user dismissed', async () => {
+    const { store, ctxId, now } = await seeded();
+    const remote = fakeProvider('openai', async () => [suggestion({ sourceContextId: ctxId })]);
+    const deps = { store, settings: async () => enabled, createProvider: () => remote, now };
+    expect((await orchestrate(maps, requester, deps)).suggestions).toHaveLength(1);
+    await handleFeedback(
+      {
+        fieldId: 'f0',
+        fingerprint: 'INPUT|text|searchboxinput|searchboxinput|Search Google Maps|Search Google Maps',
+        contextId: ctxId,
+        accepted: false,
+        host: 'www.google.com',
+      },
+      store,
+    );
+    expect((await orchestrate(maps, requester, deps)).suggestions).toEqual([]);
+    expect(remote.calls).toBe(1);
+
+    expect((await orchestrate({ ...maps, force: true }, requester, deps)).suggestions).toHaveLength(1);
+    expect(remote.calls).toBe(2);
   });
 
   it('never suggests into a field that already has a value', async () => {
@@ -377,4 +531,345 @@ describe('trusted senders', () => {
   });
 });
 
+describe('ownContext', () => {
+  it('returns the requesting tab\'s fresh page and its best selection, clipped to 2000 chars', () => {
+    const items = [
+      item({ id: 'page', tabId: 2, text: 'x'.repeat(3000), lastSeenAt: NOW }),
+      item({ id: 'old', tabId: 2, kind: 'selection', text: 'old', lastSeenAt: NOW - 8 * MIN }),
+      item({ id: 'new', tabId: 2, kind: 'selection', text: 'new', lastSeenAt: NOW - MIN }),
+      item({ id: 'stale', tabId: 2, kind: 'selection', text: 'stale', lastSeenAt: NOW - 31 * MIN }),
+      item({ id: 'other', tabId: 3, text: 'other tab', lastSeenAt: NOW }),
+    ];
+    const own = ownContext(items, requester, NOW);
+    expect(own.map((c) => c.id).sort()).toEqual(['new', 'page']);
+    expect(own.reduce((n, c) => n + c.text.length, 0)).toBeLessThanOrEqual(2000);
+  });
+
+  it('is empty without a tab id', () => {
+    expect(ownContext([item({ tabId: 2 })], { tabId: undefined, origin: 'https://x' }, NOW)).toEqual([]);
+  });
+});
+
+const action = (over: Partial<ActionSuggestion> = {}): ActionSuggestion => ({
+  kind: 'action',
+  intent: 'maps',
+  value: 'Seven Shores Cafe',
+  when: '',
+  location: '',
+  confidence: 0.9,
+  reason: 'r',
+  sourceContextId: 'o1',
+  ...over,
+});
+const discordPage = { host: 'discord.com', title: 'Discord', path: '/channels/1/2' };
+const onDiscord = { tabId: 1, origin: 'https://discord.com' };
+
+describe('resolveNavigation', () => {
+  it('opens a new tab when no tab shows the destination and focuses one that does', () => {
+    const [open] = resolveNavigation([action()], [{ id: 1, url: 'https://discord.com/channels/1/2' }], onDiscord, discordPage);
+    expect(open).toMatchObject({ kind: 'open', label: 'Open in Google Maps', url: 'https://www.google.com/maps/search/?api=1&query=Seven+Shores+Cafe' });
+    expect(open?.tabId).toBeUndefined();
+
+    const tabs = [{ id: 1, url: 'https://discord.com/channels/1/2' }, { id: 7, url: 'https://www.google.com/maps/@43.4,-80.5,12z' }];
+    const [focus] = resolveNavigation([action()], tabs, onDiscord, discordPage);
+    expect(focus).toMatchObject({ kind: 'focus', tabId: 7, label: 'Switch to Google Maps' });
+  });
+
+  it('never focuses the requesting tab, drops the destination the user is on, and drops what it cannot build', () => {
+    const onMaps = { tabId: 7, origin: 'https://www.google.com' };
+    const mapsPage = { host: 'www.google.com', title: 'Maps', path: '/maps' };
+    expect(resolveNavigation([action()], [{ id: 7, url: 'https://www.google.com/maps' }], onMaps, mapsPage)).toEqual([]);
+    const calendar = action({ intent: 'calendar', value: 'Dinner', when: '2026-09-18T18:00:00-04:00', location: 'Seven Shores Cafe' });
+    const [nav] = resolveNavigation([calendar], [{ id: 7, url: 'https://www.google.com/maps' }], onMaps, mapsPage);
+    expect(nav?.url).toContain('dates=20260918T180000%2F20260918T190000');
+    expect(resolveNavigation([action({ intent: 'gmail', value: 'not an email' })], [], onDiscord, discordPage)).toEqual([]);
+  });
+});
+
+function fakeTabs(existing?: { id: number; url: string; windowId?: number }) {
+  const api = {
+    get: vi.fn(async (id: number) => (existing && existing.id === id ? existing : undefined)),
+    update: vi.fn(async () => undefined),
+    create: vi.fn(async () => undefined),
+    focusWindow: vi.fn(async () => undefined),
+  } satisfies TabsApi;
+  return api;
+}
+
+const navOf = (over: Partial<NavSuggestion> = {}): NavSuggestion => ({
+  kind: 'open',
+  intent: 'maps',
+  label: 'Open in Google Maps',
+  value: 'Seven Shores Cafe',
+  when: '',
+  location: '',
+  url: 'https://www.google.com/maps/search/?api=1&query=Seven+Shores+Cafe',
+  confidence: 0.9,
+  reason: 'r',
+  sourceContextId: 'o1',
+  ...over,
+});
+const fromTab = { tab: { id: 1 } };
+
+describe('performNavigation', () => {
+  it('opens a tab next to the sender with a URL rebuilt from the registry, never the one in the message', async () => {
+    const tabs = fakeTabs();
+    expect(await performNavigation(navOf({ url: 'https://evil.test/' }), fromTab, tabs)).toEqual({ ok: true });
+    expect(tabs.create).toHaveBeenCalledWith({ url: 'https://www.google.com/maps/search/?api=1&query=Seven+Shores+Cafe', openerTabId: 1 });
+    expect(tabs.update).not.toHaveBeenCalled();
+  });
+
+  it('focuses an existing destination tab, navigates it, and raises its window', async () => {
+    const tabs = fakeTabs({ id: 7, url: 'https://www.google.com/maps', windowId: 3 });
+    expect(await performNavigation(navOf({ kind: 'focus', tabId: 7 }), fromTab, tabs)).toEqual({ ok: true });
+    expect(tabs.update).toHaveBeenCalledWith(7, { url: 'https://www.google.com/maps/search/?api=1&query=Seven+Shores+Cafe', active: true });
+    expect(tabs.focusWindow).toHaveBeenCalledWith(3);
+    expect(tabs.create).not.toHaveBeenCalled();
+  });
+
+  it('falls back to a new tab when the focus target is gone, has left the destination, or is the sender', async () => {
+    for (const [tabs, tabId] of [
+      [fakeTabs(), 7],
+      [fakeTabs({ id: 7, url: 'https://news.ycombinator.com/' }), 7],
+      [fakeTabs({ id: 1, url: 'https://www.google.com/maps' }), 1],
+    ] as const) {
+      expect(await performNavigation(navOf({ kind: 'focus', tabId }), fromTab, tabs)).toEqual({ ok: true });
+      expect(tabs.update).not.toHaveBeenCalled();
+      expect(tabs.create).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it('refuses a sender that is not a tab, an unknown intent, and an entity the registry cannot use', async () => {
+    const tabs = fakeTabs();
+    expect(await performNavigation(navOf(), {}, tabs)).toEqual({ ok: false });
+    expect(await performNavigation(navOf({ intent: 'uber' as NavSuggestion['intent'] }), fromTab, tabs)).toEqual({ ok: false });
+    expect(await performNavigation(navOf({ intent: 'gmail', value: 'nobody' }), fromTab, tabs)).toEqual({ ok: false });
+    expect(tabs.create).not.toHaveBeenCalled();
+    expect(tabs.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('orchestrate navigation', () => {
+  const composer = { ...discordPage, fields: [{ i: 'f0', t: 'textbox', al: 'Message #general', f: 1 as const }] };
+  const input = { page: discordPage, fields: composer.fields };
+  const local: Settings = { ...DEFAULT_SETTINGS, provider: 'local', apiKey: '' };
+
+  it('offers Maps and Calendar from the page being read, focusing an open Maps tab, and never touches tabs itself', async () => {
+    const { store, now } = await seeded();
+    const tabs = vi.fn(async () => [{ id: 1, url: 'https://discord.com/channels/1/2' }, { id: 7, url: 'https://maps.google.com/' }]);
+    const res = await orchestrate(input, onDiscord, { store, settings: async () => local, now, tabs });
+    expect(res.suggestions).toEqual([]);
+    expect(res.navigation.map((n) => [n.intent, n.kind, n.tabId])).toEqual([
+      ['maps', 'focus', 7],
+      ['calendar', 'open', undefined],
+    ]);
+    expect(res.navigation[0]?.label).toBe('Switch to Google Maps');
+    expect(res.navigation[1]?.url).toContain('calendar.google.com');
+    expect(tabs).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops an action the provider sourced from another tab and a fill sourced from the page itself', async () => {
+    const { store, ctxId, now } = await seeded();
+    await store.upsertPage({ tabId: 3, url: 'https://app.slack.com/c/1', title: 'Slack', text: 'lunch at Vincenzos tomorrow at 12?' });
+    const slackId = (await store.items()).find((i) => i.tabId === 3)!.id;
+    const remote = fakeProvider('openai', async () => [
+      action({ sourceContextId: slackId }),
+      action({ sourceContextId: ctxId, intent: 'calendar', value: 'Dinner' }),
+      suggestion({ sourceContextId: ctxId }),
+    ]);
+    const res = await orchestrate(input, onDiscord, { store, settings: async () => enabled, createProvider: () => remote, now });
+    expect(res.suggestions).toEqual([]);
+    expect(res.navigation.map((n) => n.intent)).toEqual(['calendar']);
+  });
+
+  it('remembers a dismissed or accepted navigation by destination and entity, across page changes', async () => {
+    const { store, now } = await seeded();
+    const deps = { store, settings: async () => local, now };
+    expect((await orchestrate(input, onDiscord, deps)).navigation.map((n) => n.intent)).toEqual(['maps', 'calendar']);
+    await handleFeedback({ kind: 'nav', intent: 'maps', value: 'seven shores  cafe', accepted: false }, store);
+    expect((await orchestrate(input, onDiscord, deps)).navigation.map((n) => n.intent)).toEqual(['calendar']);
+    // The chat scrolls: a new page item, a new context id, the same errand.
+    await store.upsertPage({ tabId: 1, url: 'https://discord.com/channels/1', title: 'Discord', text: 'alex: dinner at Seven Shores Cafe, Friday at 6? sam: in' });
+    expect((await orchestrate(input, onDiscord, deps)).navigation.map((n) => n.intent)).toEqual(['calendar']);
+    await handleFeedback({ kind: 'nav', intent: 'calendar', value: 'Dinner at Seven Shores Cafe', accepted: true }, store);
+    expect((await orchestrate(input, onDiscord, deps)).navigation).toEqual([]);
+  });
+
+  it('says which of the page\'s own captures a tab offer came from, counts it for the popup, and brings a dismissed one back when forced', async () => {
+    const { store, now } = await seeded();
+    const reports: SuggestDiag[] = [];
+    const deps = { store, settings: async () => local, now, onDiag: (d: SuggestDiag) => void reports.push(d) };
+    const first = await orchestrate(input, onDiscord, deps);
+    expect(first.navigation.map((n) => n.source)).toEqual([
+      { host: 'discord.com', capturedAt: NOW },
+      { host: 'discord.com', capturedAt: NOW },
+    ]);
+    expect(reports[0]).toMatchObject({ gate: 'ok', offered: 0, navigation: 2 });
+
+    await handleFeedback({ kind: 'nav', intent: 'maps', value: 'Seven Shores Cafe', accepted: false }, store);
+    expect((await orchestrate(input, onDiscord, deps)).navigation.map((n) => n.intent)).toEqual(['calendar']);
+    expect((await orchestrate({ ...input, force: true }, onDiscord, deps)).navigation.map((n) => n.intent)).toEqual(['maps', 'calendar']);
+    expect(reports[2]).toMatchObject({ cached: false, navigation: 2 });
+  });
+
+  it('does not ask for tabs when there is nothing to navigate to', async () => {
+    const { store, ctxId, now } = await seeded();
+    const tabs = vi.fn(async () => []);
+    const remote = fakeProvider('openai', async () => [suggestion({ sourceContextId: ctxId })]);
+    const res = await orchestrate(maps, requester, { store, settings: async () => enabled, createProvider: () => remote, now, tabs });
+    expect(res.suggestions).toHaveLength(1);
+    expect(res.navigation).toEqual([]);
+    expect(tabs).not.toHaveBeenCalled();
+  });
+});
+
 vi.stubGlobal('navigator', { language: 'en-CA' });
+
+const interact = (over: Partial<InteractSuggestion> = {}): InteractSuggestion => ({
+  kind: 'interact',
+  elementId: 'e0',
+  verb: 'click',
+  value: 'Save',
+  confidence: 0.85,
+  reason: 'r',
+  sourceContextId: 'c1',
+  ...over,
+});
+const calendarPage = { host: 'calendar.google.com', title: 'Calendar', path: '/calendar/u/0/r/eventedit' };
+const onCalendar = { tabId: 2, origin: 'https://calendar.google.com' };
+const elements: ElementDescriptor[] = [
+  { i: 'e0', r: 'button', nm: 'Save', p: 1 },
+  { i: 'e1', r: 'checkbox', nm: 'All day', st: 'off' },
+  { i: 'e2', r: 'slider', nm: 'Volume', v: '80', min: 0, max: 100, step: 1 },
+  { i: 'e3', r: 'button', nm: 'Delete event' },
+];
+
+describe('hasWork and gate for elements', () => {
+  const page = calendarPage;
+  it('counts a field, a control, or buttons after a fill; never buttons alone', () => {
+    expect(hasWork({ page, fields: [] })).toBe(false);
+    expect(hasWork({ page, fields: [], elements: [elements[0]!] })).toBe(false);
+    expect(hasWork({ page, fields: [], elements: [elements[0]!], filled: ['c1'] })).toBe(true);
+    expect(hasWork({ page, fields: [], elements: [elements[1]!] })).toBe(true);
+    expect(hasWork({ page, fields: [], elements: [elements[2]!] })).toBe(true);
+    expect(hasWork({ page, fields: [{ i: 'f0', t: 'input:text' }] })).toBe(true);
+  });
+
+  it('still needs fresh text from somewhere', () => {
+    const input = { page, fields: [], elements: [elements[1]!] };
+    expect(gate(input, [item()], enabled, onCalendar, NOW)).toBe(true);
+    expect(gate(input, [item({ lastSeenAt: NOW - 31 * MIN })], enabled, onCalendar, NOW)).toBe(false);
+  });
+});
+
+describe('orchestrate interactions', () => {
+  const input = { page: calendarPage, fields: [], elements };
+  const local: Settings = { ...DEFAULT_SETTINGS, provider: 'local', apiKey: '' };
+
+  it('offers the Save button only once carat filled a field on that tab, and remembers that for a minute', async () => {
+    const { store, ctxId, now, tick } = await seeded();
+    const deps = { store, settings: async () => local, now };
+    expect((await orchestrate(input, onCalendar, deps)).interactions).toEqual([]);
+
+    await handleFeedback({ fieldId: 'f0', fingerprint: 'input|text|||Add title|', contextId: ctxId, accepted: true, host: 'calendar.google.com' }, store, 2);
+    const res = await orchestrate(input, onCalendar, deps);
+    expect(res.interactions).toEqual([
+      {
+        kind: 'interact',
+        elementId: 'e0',
+        verb: 'click',
+        value: 'Save',
+        confidence: 0.75,
+        reason: expect.any(String),
+        sourceContextId: ctxId,
+        source: { host: 'discord.com', capturedAt: expect.any(Number) },
+      },
+    ]);
+    // Another tab's fill says nothing about this one.
+    expect((await orchestrate(input, { ...onCalendar, tabId: 5 }, deps)).interactions).toEqual([]);
+    tick(61 * 1000);
+    expect((await orchestrate(input, onCalendar, deps)).interactions).toEqual([]);
+  });
+
+  it('keeps only interactions that name a described element, fit its state and range, cite a real source, and are not destructive', async () => {
+    const { store, ctxId, now } = await seeded();
+    await handleFeedback({ fieldId: 'f0', fingerprint: 'input|text|||Add title|', contextId: ctxId, accepted: true, host: 'calendar.google.com' }, store, 2);
+    const remote = fakeProvider('openai', async () => [
+      interact({ sourceContextId: ctxId }),
+      interact({ sourceContextId: ctxId, elementId: 'e0', confidence: 0.9, reason: 'better' }),
+      interact({ sourceContextId: ctxId, elementId: 'e1', verb: 'uncheck', value: 'All day' }), // already off
+      interact({ sourceContextId: ctxId, elementId: 'e1', verb: 'check', value: 'All day', confidence: 0.5 }), // too weak
+      interact({ sourceContextId: ctxId, elementId: 'e2', verb: 'set', value: '140' }), // out of range
+      interact({ sourceContextId: ctxId, elementId: 'e2', verb: 'set', value: '40' }),
+      interact({ sourceContextId: 'nope', elementId: 'e2', verb: 'set', value: '30' }), // unknown source
+      interact({ sourceContextId: ctxId, elementId: 'e3', value: 'Delete event' }), // destructive
+      interact({ sourceContextId: ctxId, elementId: 'e9', value: 'Ghost' }), // not described
+      interact({ sourceContextId: ctxId, elementId: 'e0', verb: 'set', value: '1' }), // wrong verb for a button
+    ]);
+    const res = await orchestrate(input, onCalendar, { store, settings: async () => enabled, createProvider: () => remote, now });
+    expect(res.interactions.map((s) => [s.elementId, s.verb, s.value, s.reason])).toEqual([
+      ['e0', 'click', 'Save', 'better'],
+      ['e2', 'set', '40', 'r'],
+    ]);
+  });
+
+  it('never lets the model click a button on a page carat filled nothing on', async () => {
+    const { store, ctxId, now } = await seeded();
+    const remote = fakeProvider('openai', async () => [interact({ sourceContextId: ctxId }), interact({ sourceContextId: ctxId, elementId: 'e2', verb: 'set', value: '40' })]);
+    const res = await orchestrate(input, onCalendar, { store, settings: async () => enabled, createProvider: () => remote, now });
+    expect(res.interactions.map((s) => s.elementId)).toEqual(['e2']);
+  });
+
+  it('suppresses an element for 10 minutes after Esc and not at all after an accept', async () => {
+    const { store, ctxId, now, tick } = await seeded();
+    const remote = fakeProvider('openai', async () => [interact({ sourceContextId: ctxId, elementId: 'e2', verb: 'set', value: '40' })]);
+    const deps = { store, settings: async () => enabled, createProvider: () => remote, now };
+    expect((await orchestrate(input, onCalendar, deps)).interactions).toHaveLength(1);
+
+    await handleFeedback({ kind: 'interact', host: 'calendar.google.com', role: 'slider', name: 'VOLUME ', accepted: false }, store, 2);
+    expect((await orchestrate(input, onCalendar, deps)).interactions).toEqual([]);
+    tick(10 * MIN + 1);
+    // The Discord tab is still open and fresh; only the dismissal has aged out.
+    await store.upsertPage({ tabId: 1, url: 'https://discord.com/channels/1', title: 'Discord', text: 'alex: dinner at Seven Shores Cafe, Friday at 6?' });
+    expect((await orchestrate(input, onCalendar, deps)).interactions).toHaveLength(1);
+
+    await handleFeedback({ kind: 'interact', host: 'calendar.google.com', role: 'slider', name: 'Volume', accepted: true }, store, 2);
+    expect((await orchestrate(input, onCalendar, deps)).interactions).toHaveLength(1);
+    expect(await store.suppressedKeys()).toEqual([]);
+  });
+
+  it('caps interactions at two, one per element, best first', async () => {
+    const { store, ctxId, now } = await seeded();
+    await handleFeedback({ fieldId: 'f0', fingerprint: 'input|text|||Add title|', contextId: ctxId, accepted: true, host: 'calendar.google.com' }, store, 2);
+    const many = { ...input, elements: [...elements, { i: 'e4', r: 'checkbox' as const, nm: 'Vegetarian', st: 'off' as const }] };
+    const remote = fakeProvider('openai', async () => [
+      interact({ sourceContextId: ctxId, confidence: 0.8 }),
+      interact({ sourceContextId: ctxId, elementId: 'e1', verb: 'check', value: 'All day', confidence: 0.9 }),
+      interact({ sourceContextId: ctxId, elementId: 'e4', verb: 'check', value: 'Vegetarian', confidence: 0.95 }),
+      interact({ sourceContextId: ctxId, elementId: 'e4', verb: 'check', value: 'Vegetarian', confidence: 0.75 }),
+    ]);
+    const res = await orchestrate(many, onCalendar, { store, settings: async () => enabled, createProvider: () => remote, now });
+    expect(res.interactions.map((s) => [s.elementId, s.confidence])).toEqual([
+      ['e4', 0.95],
+      ['e1', 0.9],
+    ]);
+  });
+
+  it('counts elements and interactions for the popup, stops at the site switch, and brings a dismissed one back when forced', async () => {
+    const { store, ctxId, now } = await seeded();
+    const reports: SuggestDiag[] = [];
+    const remote = fakeProvider('openai', async () => [interact({ sourceContextId: ctxId, elementId: 'e2', verb: 'set', value: '40' })]);
+    const deps = { store, settings: async () => enabled, createProvider: () => remote, now, onDiag: (d: SuggestDiag) => void reports.push(d) };
+    expect((await orchestrate(input, onCalendar, deps)).interactions).toHaveLength(1);
+    expect(reports[0]).toMatchObject({ gate: 'ok', fields: 0, elements: 4, offered: 0, navigation: 0, interactions: 1 });
+
+    const off = { ...enabled, disabledHosts: ['calendar.google.com'] };
+    expect((await orchestrate(input, onCalendar, { ...deps, settings: async () => off })).interactions).toEqual([]);
+    expect(reports[1]).toMatchObject({ gate: 'site-off' });
+
+    await handleFeedback({ kind: 'interact', host: 'calendar.google.com', role: 'slider', name: 'Volume', accepted: false }, store, 2);
+    expect((await orchestrate(input, onCalendar, deps)).interactions).toEqual([]);
+    expect((await orchestrate({ ...input, force: true }, onCalendar, deps)).interactions).toHaveLength(1);
+    expect(reports[3]).toMatchObject({ cached: false, interactions: 1 });
+  });
+});

@@ -5,4 +5,5 @@ export type { SettingsStore } from './settings';
 export { STORE_KEYS, STORE_LIMITS } from './limits';
 export type { StoreKey } from './limits';
 export type { StorageArea } from './storage-area';
-export { suppressionKey, suppressionPrefix } from './suppression';
+export { interactSuppressionKey, navSuppressionKey, suppressionKey, suppressionPrefix } from './suppression';
+export { isSiteOff, withSite, siteHost } from './sites';

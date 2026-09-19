@@ -89,8 +89,18 @@ describe('shouldCapture', () => {
     expect(shouldCapture(document, HTTPS)).toBe(true);
   });
 
-  it('refuses pages with a password input', () => {
+  it('refuses pages with a visible password input', () => {
     document.body.innerHTML = `<p>${LONG}</p><input type="Password">`;
+    expect(shouldCapture(document, HTTPS)).toBe(false);
+  });
+
+  it('ignores password inputs the user cannot see', () => {
+    document.body.innerHTML = `<p>${LONG}</p>
+      <div style="display:none"><input type="password"></div>
+      <div hidden><input type="password"></div>
+      <input type="password" style="visibility:hidden">`;
+    expect(shouldCapture(document, HTTPS)).toBe(true);
+    document.body.insertAdjacentHTML('beforeend', '<input type="password">');
     expect(shouldCapture(document, HTTPS)).toBe(false);
   });
 

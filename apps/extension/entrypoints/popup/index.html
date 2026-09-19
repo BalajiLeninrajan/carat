@@ -37,6 +37,9 @@
       header h1 { font-size: 14px; font-weight: 600; margin: 0; flex: 1; }
       .toggle { display: flex; align-items: center; gap: 6px; color: var(--subtext0); cursor: pointer; }
       .toggle input { width: 14px; height: 14px; margin: 0; accent-color: var(--blue); }
+      .site { padding: 6px 12px; border-bottom: 1px solid var(--surface0); font-size: 12px; }
+      .site[hidden] { display: none; }
+      #site-host { color: var(--text); }
       #list { list-style: none; margin: 0; padding: 4px 0; max-height: 420px; overflow-y: auto; }
       #list li { padding: 8px 12px; border-bottom: 1px solid var(--surface0); }
       #list li:last-child { border-bottom: 0; }
@@ -76,6 +79,25 @@
         cursor: pointer;
       }
       button:disabled { opacity: 0.5; cursor: default; }
+      button[aria-pressed="true"] { background: var(--mauve); border-color: var(--mauve); color: var(--mantle); font-weight: 600; }
+      .actions { display: flex; gap: 6px; }
+      #pinned-note {
+        margin: 0;
+        padding: 6px 12px;
+        font-size: 11px;
+        color: var(--mauve);
+        background: var(--mantle);
+        border-bottom: 1px solid var(--surface0);
+      }
+      #pinned-note[hidden] { display: none; }
+      #diag {
+        padding: 6px 12px;
+        border-top: 1px solid var(--surface0);
+        font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        color: var(--subtext0);
+      }
+      #diag p { margin: 0; overflow-wrap: anywhere; }
+      main[data-state="offline"] #diag { display: none; }
       button:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
       #offline, .empty { display: none; }
       main[data-state="offline"] #offline { display: block; }
@@ -98,12 +120,27 @@
         <button type="button" id="retry">Retry</button>
       </div>
 
+      <label class="toggle site" id="site-row" hidden>
+        <input type="checkbox" id="site-enabled" />
+        <span>On for <span id="site-host"></span></span>
+      </label>
+
+      <p id="pinned-note" hidden>Pinned: nothing new is read and nothing expires until you unpin.</p>
+
       <p class="empty">Carat has not read anything yet</p>
       <ul id="list"></ul>
 
+      <section id="diag" aria-label="Last activity on this tab">
+        <p id="diag-capture">no capture from this tab yet</p>
+        <p id="diag-suggest">no check on this tab yet</p>
+      </section>
+
       <footer>
         <a href="#" id="options">Settings</a>
-        <button type="button" id="clear">Clear</button>
+        <span class="actions">
+          <button type="button" id="pin" aria-pressed="false">Pin</button>
+          <button type="button" id="clear">Clear</button>
+        </span>
       </footer>
     </main>
     <script type="module" src="./main.ts"></script>

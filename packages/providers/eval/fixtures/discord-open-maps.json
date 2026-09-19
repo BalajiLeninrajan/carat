@@ -1,0 +1,26 @@
+{
+  "name": "discord-open-maps",
+  "request": {
+    "page": { "host": "discord.com", "title": "Discord | #general | Waterloo Friends", "path": "/channels/1/2" },
+    "fields": [
+      { "i": "f0", "t": "textbox", "al": "Message #general", "f": 1, "w": "l" }
+    ],
+    "context": [],
+    "own": [
+      {
+        "id": "o1",
+        "origin": "https://discord.com",
+        "title": "Discord | #general | Waterloo Friends",
+        "kind": "page",
+        "text": "Discord | #general | Waterloo Friends discord.com #general Today alex 1:52 PM ok so who's around this weekend sam 1:55 PM me, free after work fri priya 1:58 PM same alex 2:01 PM dinner at Seven Shores Cafe, Friday at 6? sam 2:02 PM sounds good, see you there priya 2:03 PM in. can someone send the address later alex 2:03 PM will do Message #general",
+        "capturedAt": 1758046800000
+      }
+    ],
+    "now": "2026-09-16T14:02:00-04:00",
+    "locale": "en-CA"
+  },
+  "expect": [
+    { "intent": "maps", "valueIncludes": "Seven Shores Cafe" },
+    { "intent": "calendar", "valueIncludes": "Seven Shores Cafe", "whenStartsWith": "2026-09-18T18:00" }
+  ]
+}

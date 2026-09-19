@@ -112,6 +112,12 @@
           <input type="text" name="model" placeholder="gpt-5.6-luna" autocomplete="off" spellcheck="false" />
         </label>
 
+        <label class="row">
+          <input type="checkbox" name="statusLine" />
+          <span class="name">Show status line</span>
+        </label>
+        <span class="hint">A small line in the bottom-left corner of every page: whether Carat is running there and which model answers. Off by default.</span>
+
         <div class="actions">
           <button type="submit" class="primary" id="save">Save</button>
           <span id="status" role="status" aria-live="polite"></span>

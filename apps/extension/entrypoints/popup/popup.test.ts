@@ -26,7 +26,10 @@ describe('popup', () => {
     document.body.innerHTML = body;
     sendMessage.mockReset();
     vi.resetModules();
-    vi.stubGlobal('chrome', { runtime: { openOptionsPage: vi.fn(async () => undefined) } });
+    vi.stubGlobal('chrome', {
+      runtime: { openOptionsPage: vi.fn(async () => undefined) },
+      tabs: { query: vi.fn(async () => [{ id: 7, url: 'https://calendar.google.com/calendar/u/0/r' }]) },
+    });
   });
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -117,6 +120,112 @@ describe('popup', () => {
     await flush();
     expect(toggle.checked).toBe(true);
     expect(sendMessage).toHaveBeenCalledWith('setSettings', { enabled: false });
+  });
+
+  it('switches carat off and on for the active tab host', async () => {
+    let settings = { enabled: true, disabledHosts: ['discord.com'] };
+    sendMessage.mockImplementation(async (type: string, data?: Partial<typeof settings>) => {
+      if (type === 'getSettings') return settings;
+      if (type === 'getKnown') return { items: [], pinned: false };
+      if (type === 'setSettings') {
+        settings = { ...settings, ...data };
+        return settings;
+      }
+      return undefined;
+    });
+    await import('./main');
+    await flush();
+    const row = document.getElementById('site-row') as HTMLElement;
+    const box = document.getElementById('site-enabled') as HTMLInputElement;
+    expect(row.hidden).toBe(false);
+    expect(document.getElementById('site-host')?.textContent).toBe('calendar.google.com');
+    expect(box.checked).toBe(true);
+
+    box.click();
+    await flush();
+    expect(sendMessage).toHaveBeenCalledWith('setSettings', { disabledHosts: ['discord.com', 'calendar.google.com'] });
+    expect(box.checked).toBe(false);
+
+    box.click();
+    await flush();
+    expect(sendMessage).toHaveBeenLastCalledWith('setSettings', { disabledHosts: ['discord.com'] });
+    expect(box.checked).toBe(true);
+  });
+
+  it('shows the last capture and check for the active tab', async () => {
+    const now = Date.now();
+    sendMessage.mockImplementation(async (type: string, data?: { tabId?: number }) => {
+      if (type === 'getSettings') return { enabled: true, disabledHosts: [] };
+      if (type === 'getKnown') return { items: [], pinned: false };
+      if (type === 'getDiag' && data?.tabId === 7) {
+        return {
+          diag: {
+            capture: { at: now - 12_000, host: 'calendar.google.com', kind: 'page', verdict: 'stored' },
+            suggest: { at: now - 15_000, host: 'calendar.google.com', fields: 3, gate: 'own-context' },
+          },
+        };
+      }
+      return undefined;
+    });
+    await import('./main');
+    await flush();
+    expect(document.getElementById('diag-capture')?.textContent).toBe('page from calendar.google.com 12s ago: stored');
+    expect(document.getElementById('diag-suggest')?.textContent).toBe(
+      'checked 15s ago: no request, the only context is from another tab on this site',
+    );
+  });
+
+  it('keeps the popup up when the debug line cannot be fetched', async () => {
+    sendMessage.mockImplementation(async (type: string) => {
+      if (type === 'getSettings') return { enabled: true, disabledHosts: [] };
+      if (type === 'getKnown') return { items: [], pinned: false };
+      throw new Error('no diag');
+    });
+    await import('./main');
+    await flush();
+    expect((document.getElementById('app') as HTMLElement).dataset.state).toBe('empty');
+    expect(document.getElementById('diag-suggest')?.textContent).toBe('no check on this tab yet');
+  });
+
+  it('hides the site switch over a page carat cannot run on', async () => {
+    (chrome.tabs.query as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([{ url: 'chrome://extensions' }]);
+    sendMessage.mockImplementation(async (type: string) =>
+      type === 'getSettings' ? { enabled: true, disabledHosts: [] } : { items: [], pinned: false },
+    );
+    await import('./main');
+    await flush();
+    expect((document.getElementById('site-row') as HTMLElement).hidden).toBe(true);
+  });
+
+  it('pins and unpins the store from the footer, and Clear unpins', async () => {
+    let pinned = false;
+    sendMessage.mockImplementation(async (type: string, data?: { pinned?: boolean }) => {
+      if (type === 'getSettings') return { enabled: true };
+      if (type === 'getKnown') return { items: [], pinned };
+      if (type === 'setPinned') {
+        pinned = data!.pinned!;
+        return { pinned };
+      }
+      return undefined;
+    });
+    await import('./main');
+    await flush();
+    const pin = document.getElementById('pin') as HTMLButtonElement;
+    const note = document.getElementById('pinned-note') as HTMLElement;
+    expect(pin.textContent).toBe('Pin');
+    expect(note.hidden).toBe(true);
+
+    pin.click();
+    await flush();
+    expect(sendMessage).toHaveBeenCalledWith('setPinned', { pinned: true });
+    expect(pin.textContent).toBe('Unpin');
+    expect(pin.getAttribute('aria-pressed')).toBe('true');
+    expect(note.hidden).toBe(false);
+
+    (document.getElementById('clear') as HTMLButtonElement).click();
+    await flush();
+    expect(pin.textContent).toBe('Pin');
+    expect(note.hidden).toBe(true);
   });
 
   it('opens the options page from the Settings link', async () => {

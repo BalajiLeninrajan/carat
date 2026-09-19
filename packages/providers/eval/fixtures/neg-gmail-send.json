@@ -1,0 +1,31 @@
+{
+  "name": "neg-gmail-send",
+  "request": {
+    "page": { "host": "mail.google.com", "title": "New Message - Gmail", "path": "/mail/u/0/" },
+    "fields": [
+      { "i": "f0", "t": "input:text", "nm": "subjectbox", "ph": "Subject", "al": "Subject", "w": "l" },
+      { "i": "f1", "t": "ce", "al": "Message Body", "w": "l" }
+    ],
+    "elements": [
+      { "i": "e0", "r": "button", "nm": "Send", "p": 1 },
+      { "i": "e1", "r": "button", "nm": "Send ‪(Ctrl-Enter)‬" },
+      { "i": "e2", "r": "button", "nm": "Attach files" },
+      { "i": "e3", "r": "button", "nm": "Save & close" },
+      { "i": "e4", "r": "button", "nm": "Discard draft" }
+    ],
+    "filled": ["c1"],
+    "context": [
+      {
+        "id": "c1",
+        "origin": "https://app.slack.com",
+        "title": "Slack | #design",
+        "kind": "page",
+        "text": "Slack app.slack.com #design Maya Chen 3:12 PM can you email the deck to maya.chen@northbrookstudio.com and send it today please? you 3:13 PM sure, sending now",
+        "capturedAt": 1758050000000
+      }
+    ],
+    "now": "2026-09-16T15:14:00-04:00",
+    "locale": "en-CA"
+  },
+  "expect": []
+}

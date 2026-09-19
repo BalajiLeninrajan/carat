@@ -1,0 +1,81 @@
+import type { ElementDescriptor, ElementRole, InteractVerb } from './types';
+
+/** Verbs the content script can perform on each role. Anything else is dropped before it reaches a chip. */
+export const VERBS_BY_ROLE: Record<ElementRole, readonly InteractVerb[]> = {
+  button: ['click'],
+  link: ['click'],
+  tab: ['click'],
+  menuitem: ['click'],
+  disclosure: ['click'],
+  checkbox: ['check', 'uncheck'],
+  switch: ['check', 'uncheck'],
+  radio: ['check'],
+  slider: ['set'],
+  select: ['choose'],
+};
+
+export const ELEMENT_ROLES = Object.keys(VERBS_BY_ROLE) as ElementRole[];
+
+/** Roles whose value or state another tab's text can name; a plain button only gets a chip after carat filled something. */
+export const CONTROL_ROLES: ReadonlySet<ElementRole> = new Set(['checkbox', 'switch', 'radio', 'slider', 'select']);
+
+export function isElementRole(v: unknown): v is ElementRole {
+  return typeof v === 'string' && v in VERBS_BY_ROLE;
+}
+
+export function isInteractVerb(v: unknown): v is InteractVerb {
+  return v === 'click' || v === 'check' || v === 'uncheck' || v === 'set' || v === 'choose';
+}
+
+/**
+ * Whether `verb` with `value` makes sense for the element as described: the
+ * role allows it, a toggle is not already in the target state, a slider value
+ * is a number inside the range, a select value is one of the options listed.
+ */
+export function verbFits(d: ElementDescriptor, verb: InteractVerb, value: string): boolean {
+  if (!VERBS_BY_ROLE[d.r].includes(verb)) return false;
+  switch (verb) {
+    case 'check':
+      return d.st !== 'on';
+    case 'uncheck':
+      return d.st !== 'off';
+    case 'set': {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return false;
+      if (d.min !== undefined && n < d.min) return false;
+      if (d.max !== undefined && n > d.max) return false;
+      return true;
+    }
+    case 'choose':
+      return d.op === undefined || d.op.some((o) => o.toLowerCase() === value.trim().toLowerCase());
+    case 'click':
+      return true;
+  }
+}
+
+export interface ChipText {
+  verb: string; // "Set"
+  value: string; // what goes in quotes: the element name, or the option for a select
+  tail: string; // " to 40", or ""
+}
+
+/** The words on the chip: `Click "Save"`, `Check "Vegetarian"`, `Set "Volume" to 40`, `Choose "Canada"`. */
+export function interactionChipText(verb: InteractVerb, name: string, value: string): ChipText {
+  switch (verb) {
+    case 'click':
+      return { verb: 'Click', value: name, tail: '' };
+    case 'check':
+      return { verb: 'Check', value: name, tail: '' };
+    case 'uncheck':
+      return { verb: 'Uncheck', value: name, tail: '' };
+    case 'set':
+      return { verb: 'Set', value: name, tail: ` to ${value}` };
+    case 'choose':
+      return { verb: 'Choose', value, tail: '' };
+  }
+}
+
+/** Identity of an element for suppression: what the descriptor carries, so the background can build the same key. */
+export function elementKey(role: string, name: string): string {
+  return `${role}|${name.replace(/\s+/g, ' ').trim().toLowerCase()}`;
+}
