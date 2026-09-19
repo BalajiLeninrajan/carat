@@ -1,5 +1,6 @@
 import type { Eagerness, Settings } from '@carat/shared';
 import type { StorageArea } from '../store';
+import type { PrewarmDiag } from './prewarm';
 
 /** Why the last suggestion request on a tab did or did not reach a provider. */
 export type GateVerdict =
@@ -58,6 +59,13 @@ export interface CaptureDiag {
   verdict: CaptureVerdict;
 }
 
+/**
+ * Where the answer the chip showed first came from: entities predicted at
+ * capture time, a pre-warmed call made on navigation, the regex pass, Jev,
+ * the chat model, or the 60s cache.
+ */
+export type AnswerOrigin = 'entities' | 'prewarm' | 'local' | 'jev' | 'chat' | 'cache';
+
 export interface SuggestDiag {
   at: number;
   host: string;
@@ -67,6 +75,11 @@ export interface SuggestDiag {
   gate: GateVerdict;
   /** Set once the gate passed. */
   cached?: boolean;
+  /** The answer came from the cache the navigation pre-warmed. */
+  prewarmed?: boolean;
+  /** What produced the first answer, and how long the content script waited for it. */
+  source?: AnswerOrigin;
+  ms?: number;
   attempts?: ProviderAttempt[];
   /** The level the request ran at; names the floor when candidates fell under it. */
   eagerness?: Eagerness;
@@ -78,14 +91,19 @@ export interface SuggestDiag {
   navigation?: number;
   /** Element interactions (click, check, set, choose) handed over alongside them. */
   interactions?: number;
-  /** A smart second pass was started; the content script polls for it. */
+  /** A better answer may still come; the content script polls for it. */
   refine?: boolean;
+  /** The smart model was asked for a second opinion. */
+  smart?: boolean;
+  /** Later answers handed to the content script through the ticket. */
+  refined?: number;
 }
 
 export interface TabDiag {
   capture?: CaptureDiag;
   suggest?: SuggestDiag;
   vision?: VisionDiag;
+  prewarm?: PrewarmDiag;
 }
 
 const KEY = 'diag';
@@ -109,9 +127,18 @@ export class DiagLog {
     this.write(tabId);
   }
 
+  /** A request reports once when it replies and again when its ticket closes; a newer check's line is never overwritten by an older one's. */
   async recordSuggest(tabId: number, suggest: SuggestDiag): Promise<void> {
     const state = await this.load();
+    const current = state[tabId]?.suggest;
+    if (current && current.at > suggest.at) return;
     state[tabId] = { ...state[tabId], suggest };
+    this.write(tabId);
+  }
+
+  async recordPrewarm(tabId: number, prewarm: PrewarmDiag): Promise<void> {
+    const state = await this.load();
+    state[tabId] = { ...state[tabId], prewarm };
     this.write(tabId);
   }
 
@@ -148,5 +175,5 @@ export class DiagLog {
 }
 
 function latest(d: TabDiag): number {
-  return Math.max(d.capture?.at ?? 0, d.suggest?.at ?? 0, d.vision?.at ?? 0);
+  return Math.max(d.capture?.at ?? 0, d.suggest?.at ?? 0, d.vision?.at ?? 0, d.prewarm?.at ?? 0);
 }

@@ -1,7 +1,5 @@
-import type { FieldDescriptor, FillSuggestion, PageMeta, RequestContext, Settings, SuggestRequest, Suggestion } from '@carat/shared';
-import { LIMITS, fnv1a } from '@carat/shared';
-import type { KnownPage, KnownPageId } from '@carat/shared/src/known-fields';
-import { KNOWN_PAGES, knownPageFor, knownPageForUrl, matchesKnownField } from '@carat/shared/src/known-fields';
+import type { FieldDescriptor, FillSuggestion, KnownPage, KnownPageId, PageMeta, RequestContext, Settings, SuggestRequest, Suggestion } from '@carat/shared';
+import { KNOWN_PAGES, LIMITS, fnv1a, knownPageFor, knownPageForUrl, matchesKnownField } from '@carat/shared';
 import type { Provider } from '@carat/providers';
 import { createProvider } from '@carat/providers';
 import type { ContextStore } from '../store';

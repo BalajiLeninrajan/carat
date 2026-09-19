@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { FillSuggestion, Settings, SuggestRequest, Suggestion } from '@carat/shared';
 import { DEFAULT_SETTINGS } from '@carat/shared';
-import { KNOWN_PAGES, knownPageFor, knownPageForUrl, matchesKnownField } from '@carat/shared/src/known-fields';
-import type { KnownPage } from '@carat/shared/src/known-fields';
+import { KNOWN_PAGES, knownPageFor, knownPageForUrl, matchesKnownField } from '@carat/shared';
+import type { KnownPage } from '@carat/shared';
 import type { Provider } from '@carat/providers';
 import { ContextStore } from '../src/store';
 import type { StorageArea } from '../src/store';

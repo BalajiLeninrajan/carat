@@ -1,9 +1,11 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { ActionSuggestion, ContextItem, ElementDescriptor, FillSuggestion, InteractSuggestion, NavSuggestion, Settings, Suggestion, SuggestRequest } from '@carat/shared';
 import { DEFAULT_SETTINGS } from '@carat/shared';
 import type { Provider } from '@carat/providers';
-import { createProvider } from '@carat/providers';
-import { ContextStore } from '../src/store';
+import { LocalProvider, RaceProvider, createProvider } from '@carat/providers';
+import { ContextStore, EntityStore } from '../src/store';
 import type { StorageArea } from '../src/store';
 import type { SuggestDiag } from '../src/background';
 import {
@@ -18,6 +20,7 @@ import {
   orchestrate,
   ownContext,
   performNavigation,
+  prewarmKey,
   redactSettings,
   resolveNavigation,
   scoreAndPickContext,
@@ -679,42 +682,41 @@ describe('orchestrate smart path', () => {
     expect(order).toEqual(['fast', 'smart']);
   });
 
-  it('lets a surer smart answer replace the fast one, and serves the merged answer from cache afterwards', async () => {
+  it('shows the regex answer first, hands over a surer fast answer and then a surer smart one, and serves the merged answer from cache afterwards', async () => {
     const { store, ctxId, now } = await seeded();
-    const fast = fakeProvider('openai', async () => [suggestion({ sourceContextId: ctxId, confidence: 0.75, value: 'Seven Shores' })]);
+    const fast = fakeProvider('openai', async () => [suggestion({ sourceContextId: ctxId, confidence: 0.8, value: 'Seven Shores' })]);
     const smart = fakeProvider('openai', async () => [suggestion({ sourceContextId: ctxId, confidence: 0.92, value: 'Seven Shores Cafe' })]);
     const refine = new RefineQueue(() => undefined);
     const deps = { store, settings: async () => smartOn, createProvider: () => fast, createSmartProvider: () => smart, refine, vision: idle, now };
 
     const first = await orchestrate(maps, requester, deps);
-    expect(first.suggestions.map((s) => s.value)).toEqual(['Seven Shores']);
-    expect(await refine.claim(first.ticket!, requester.tabId)).toEqual({
-      suggestions: [expect.objectContaining({ value: 'Seven Shores Cafe', confidence: 0.92 })],
-      interactions: [],
-    });
+    expect(first.suggestions.map((s) => [s.value, s.confidence])).toEqual([['Seven Shores Cafe', 0.75]]);
+    expect(await drain(refine, first.ticket!, requester.tabId)).toEqual([
+      [expect.objectContaining({ value: 'Seven Shores', confidence: 0.8 })],
+      [expect.objectContaining({ value: 'Seven Shores Cafe', confidence: 0.92 })],
+    ]);
 
     const second = await orchestrate(maps, requester, deps);
-    expect(second.suggestions.map((s) => s.value)).toEqual(['Seven Shores Cafe']);
+    expect(second.suggestions.map((s) => [s.value, s.confidence])).toEqual([['Seven Shores Cafe', 0.92]]);
     expect(second.ticket).toBeUndefined();
     expect(fast.calls).toBe(1);
     expect(smart.calls).toBe(1);
   });
 
-  it('keeps the fast answer when the smart one is no surer', async () => {
+  it('hands nothing over when the later answers change no chip, and caches the surest of them', async () => {
     const { store, ctxId, now } = await seeded();
     const fast = fakeProvider('openai', async () => [suggestion({ sourceContextId: ctxId, confidence: 0.8, value: 'Seven Shores Cafe' })]);
     const smart = fakeProvider('openai', async () => [suggestion({ sourceContextId: ctxId, confidence: 0.8, value: 'Other' })]);
     const refine = new RefineQueue(() => undefined);
-    const res = await orchestrate(maps, requester, {
-      store,
-      settings: async () => smartOn,
-      createProvider: () => fast,
-      createSmartProvider: () => smart,
-      refine,
-      vision: idle,
-      now,
-    });
-    expect((await refine.claim(res.ticket!, requester.tabId)).suggestions.map((s) => s.value)).toEqual(['Seven Shores Cafe']);
+    const deps = { store, settings: async () => smartOn, createProvider: () => fast, createSmartProvider: () => smart, refine, vision: idle, now };
+    const res = await orchestrate(maps, requester, deps);
+    expect(res.suggestions.map((s) => [s.value, s.confidence])).toEqual([['Seven Shores Cafe', 0.75]]);
+    // The fast model agreed with the regex value and the smart model was no surer: the chip is left alone.
+    expect(await drain(refine, res.ticket!, requester.tabId)).toEqual([]);
+    expect(smart.calls).toBe(1);
+    const again = await orchestrate(maps, requester, deps);
+    expect(again.suggestions.map((s) => [s.value, s.confidence])).toEqual([['Seven Shores Cafe', 0.8]]);
+    expect(again.ticket).toBeUndefined();
   });
 
   it('answers from a screenshot the fast path could not wait for', async () => {
@@ -779,6 +781,148 @@ describe('orchestrate smart path', () => {
     });
     expect(smart.calls).toBe(0);
     await tick();
+  });
+});
+
+/** Every answer a ticket gives, polled as the content script polls it: again while `more`, until it says nothing. */
+async function drain(refine: RefineQueue, ticket: string, tabId: number): Promise<Suggestion[][]> {
+  const out: Suggestion[][] = [];
+  for (;;) {
+    const res = await refine.claim(ticket, tabId);
+    const got = [...res.suggestions, ...res.interactions];
+    if (got.length === 0 && !res.more) return out;
+    if (got.length > 0) out.push(got);
+    if (!res.more) return out;
+  }
+}
+
+// vitest runs each package from its own directory.
+const FIXTURES = resolve(process.cwd(), '../../packages/providers/eval/fixtures');
+
+describe('orchestrate first answer', () => {
+  it('answers Discord to Maps from the regex pass in under 50 ms while a 2s chat model runs on, then hands the chat answer over', async () => {
+    const fixture = JSON.parse(readFileSync(resolve(FIXTURES, 'discord-maps-search.json'), 'utf8')) as { request: SuggestRequest };
+    const source = fixture.request.context[0]!;
+    let clock = NOW;
+    const store = new ContextStore(new FakeArea(), { now: () => clock });
+    await store.upsertPage({ tabId: 1, url: `${source.origin}/channels/1`, title: source.title, text: source.text });
+    const [ctx] = await store.items();
+    const chat = fakeProvider(
+      'openai',
+      (_req, signal) =>
+        new Promise((resolve, reject) => {
+          const t = setTimeout(() => resolve([suggestion({ sourceContextId: ctx!.id, confidence: 0.93, value: 'Seven Shores Cafe, Waterloo' })]), 2000);
+          signal.addEventListener('abort', () => {
+            clearTimeout(t);
+            reject(signal.reason);
+          });
+        }),
+    );
+    const refine = new RefineQueue(() => undefined);
+    const reports: SuggestDiag[] = [];
+    const deps = {
+      store,
+      settings: async () => enabled,
+      refine,
+      createProvider: () => new RaceProvider([new LocalProvider(), chat], { id: 'openai' as const }),
+      now: () => clock,
+      onDiag: (d: SuggestDiag) => void reports.push(structuredClone(d)),
+    };
+    const input = { page: fixture.request.page, fields: fixture.request.fields };
+
+    const started = performance.now();
+    const res = await orchestrate(input, requester, deps);
+    const firstMs = performance.now() - started;
+    expect(res.suggestions.map((s) => [s.fieldId, s.value, s.confidence])).toEqual([['f0', 'Seven Shores Cafe', 0.75]]);
+    expect(firstMs).toBeLessThan(50);
+    expect(typeof res.ticket).toBe('string');
+    expect(chat.calls).toBe(1);
+    expect(reports[0]).toMatchObject({ source: 'local', refine: true });
+
+    const answers = await drain(refine, res.ticket!, requester.tabId);
+    const chatMs = performance.now() - started;
+    expect(answers).toEqual([[expect.objectContaining({ fieldId: 'f0', value: 'Seven Shores Cafe, Waterloo', confidence: 0.93 })]]);
+    expect(chatMs).toBeGreaterThanOrEqual(1900);
+    expect(reports.at(-1)).toMatchObject({ refined: 1 });
+    expect(reports.at(-1)?.attempts?.map((a) => [a.id, a.count])).toEqual([['local', 1], ['openai', 1]]);
+
+    // The merged answer is what the next request gets from cache, with no call.
+    const again = await orchestrate(input, requester, deps);
+    expect(again.suggestions.map((s) => [s.value, s.confidence])).toEqual([['Seven Shores Cafe, Waterloo', 0.93]]);
+    expect(again.ticket).toBeUndefined();
+    expect(chat.calls).toBe(1);
+  }, 10_000);
+
+  it('answers from entities predicted at capture time with no call, then lets the chat model refine', async () => {
+    const { store, ctxId, now } = await seeded();
+    const entities = new EntityStore(new FakeArea());
+    const [item] = await store.items();
+    await entities.set(item!, [{ value: 'Seven Shores Cafe', kind: 'place', fieldHints: ['search'], confidence: 0.92 }], 'model');
+    const chat = fakeProvider('openai', async () => [suggestion({ sourceContextId: ctxId, confidence: 0.95, value: 'Seven Shores Cafe, Waterloo' })]);
+    const refine = new RefineQueue(() => undefined);
+    const reports: SuggestDiag[] = [];
+    const res = await orchestrate(maps, requester, {
+      store,
+      entities,
+      refine,
+      settings: async () => enabled,
+      createProvider: () => chat,
+      now,
+      onDiag: (d) => void reports.push(structuredClone(d)),
+    });
+    expect(res.suggestions.map((s) => [s.value, s.confidence])).toEqual([['Seven Shores Cafe', 0.92]]);
+    expect(reports[0]).toMatchObject({ source: 'entities', refine: true, cached: false });
+    expect(await drain(refine, res.ticket!, requester.tabId)).toEqual([[expect.objectContaining({ value: 'Seven Shores Cafe, Waterloo', confidence: 0.95 })]]);
+    expect(reports.at(-1)).toMatchObject({ refined: 1, attempts: [expect.objectContaining({ id: 'openai', count: 1 })] });
+  });
+
+  it('shows the regex answer but leaves the cache alone when the chat model fails, so the next request asks again', async () => {
+    const { store, now } = await seeded();
+    const chat = fakeProvider('openai', async () => {
+      throw new Error('HTTP 503');
+    });
+    const refine = new RefineQueue(() => undefined);
+    const deps = { store, refine, settings: async () => enabled, createProvider: () => new RaceProvider([new LocalProvider(), chat], { id: 'openai' as const }), now };
+    const res = await orchestrate(maps, requester, deps);
+    expect(res.suggestions.map((s) => s.value)).toEqual(['Seven Shores Cafe']);
+    expect(await drain(refine, res.ticket!, requester.tabId)).toEqual([]);
+    await orchestrate(maps, requester, deps);
+    expect(chat.calls).toBe(2);
+  });
+
+  it('answers from the cache a navigation pre-warmed, adopted onto the live field, with no call', async () => {
+    const { store, ctxId, now } = await seeded();
+    const context = scoreAndPickContext(await store.items(), requester, NOW);
+    await store.setCached(prewarmKey('maps', context), [suggestion({ sourceContextId: ctxId, confidence: 0.9 })]);
+    const chat = fakeProvider('openai', async () => [suggestion({ sourceContextId: ctxId, confidence: 0.95, value: 'Other' })]);
+    const reports: SuggestDiag[] = [];
+    // The live page numbered the box f3.
+    const live = { ...maps, fields: [{ i: 'f3', t: 'input:text', nm: 'searchboxinput', ph: 'Search Google Maps', f: 1 as const }] };
+    const res = await orchestrate(live, requester, {
+      store,
+      refine: new RefineQueue(() => undefined),
+      settings: async () => enabled,
+      createProvider: () => chat,
+      now,
+      onDiag: (d) => void reports.push(structuredClone(d)),
+    });
+    expect(res.suggestions.map((s) => [s.fieldId, s.value, s.confidence])).toEqual([['f3', 'Seven Shores Cafe', 0.9]]);
+    expect(res.ticket).toBeUndefined();
+    expect(chat.calls).toBe(0);
+    expect(reports[0]).toMatchObject({ source: 'prewarm', prewarmed: true, cached: false });
+  });
+
+  it('waits for the provider as before when there is no queue to hand later answers through', async () => {
+    const { store, ctxId, now } = await seeded();
+    const chat = fakeProvider('openai', async () => [suggestion({ sourceContextId: ctxId, confidence: 0.95, value: 'From the model' })]);
+    const res = await orchestrate(maps, requester, {
+      store,
+      settings: async () => enabled,
+      createProvider: () => new RaceProvider([new LocalProvider(), chat], { id: 'openai' as const }),
+      now,
+    });
+    expect(res.suggestions.map((s) => s.value)).toEqual(['From the model']);
+    expect(res.ticket).toBeUndefined();
   });
 });
 

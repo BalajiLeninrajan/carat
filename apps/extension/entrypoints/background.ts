@@ -1,12 +1,14 @@
 import { defineBackground } from 'wxt/utils/define-background';
 import { isDenylisted } from '@carat/shared';
 import { onMessage, sendMessage } from '../src/messaging';
-import { ContextStore, ShotStore, createSettingsStore, isSiteOff, parseLocation } from '../src/store';
+import { ContextStore, EntityStore, ShotStore, createSettingsStore, isSiteOff, parseLocation } from '../src/store';
 import {
   DiagLog,
   RefineQueue,
   chromeTabsApi,
   clearKnown,
+  createPredictPipeline,
+  createPrewarmer,
   createVisionPipeline,
   describeStatus,
   getKnown,
@@ -34,13 +36,25 @@ export default defineBackground(() => {
   const trusted = (sender: chrome.runtime.MessageSender) => isExtensionPage(sender, extensionBase);
   const tabs = chromeTabsApi();
   const refine = new RefineQueue();
+  // Entities are predicted as text is captured, so a suggest request can be answered from them with no call.
+  const entities = new EntityStore(chrome.storage.session);
+  const predict = createPredictPipeline({ store, entities, settings: () => settings.get() });
   const vision = createVisionPipeline({
     store,
     shots,
     settings: () => settings.get(),
     tabs: screenApi(),
     onDiag: (tabId, d) => void diag.recordVision(tabId, d),
+    predict,
   });
+  // A navigation onto Maps, Calendar, Gmail or Google search starts the fast call before the page has a DOM.
+  // Attached here, at worker start, so the event wakes the worker.
+  const prewarm = createPrewarmer({
+    store,
+    settings: () => settings.get(),
+    onDiag: (tabId, d) => void diag.recordPrewarm(tabId, d),
+  });
+  prewarm.attach(chrome.webNavigation);
 
   onMessage('capture', async ({ data, sender }) => {
     const tabId = sender.tab?.id;
@@ -58,6 +72,7 @@ export default defineBackground(() => {
     if (await store.isPinned()) return note('pinned');
     const input = { tabId, url: data.url, title: data.title, text: data.text };
     const item = data.kind === 'selection' ? await store.upsertSelection(input) : await store.upsertPage(input);
+    if (item) predict.onCapture(item);
     return note(item ? 'stored' : 'empty');
   });
 
@@ -72,6 +87,7 @@ export default defineBackground(() => {
     try {
       return await orchestrate(data, requesterFromSender(sender, data.page), {
         store,
+        entities,
         settings: () => settings.get(),
         tabs: openTabs,
         refine,
@@ -110,7 +126,7 @@ export default defineBackground(() => {
   onMessage('getKnown', ({ sender }) => (trusted(sender) ? getKnown(store) : { items: [], pinned: false }));
   onMessage('clearKnown', async ({ sender }) => {
     if (!trusted(sender)) return;
-    await Promise.all([clearKnown(store), shots.clear()]);
+    await Promise.all([clearKnown(store), shots.clear(), entities.clear()]);
   });
   onMessage('setPinned', async ({ data, sender }) =>
     trusted(sender) ? setPinned(store, data.pinned) : { pinned: await store.isPinned() },
@@ -144,6 +160,7 @@ export default defineBackground(() => {
     if (alarm.name !== SWEEP_ALARM) return;
     void store.sweep();
     void shots.sweep();
+    void predict.sweep();
   });
 });
 
