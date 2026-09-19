@@ -60,7 +60,6 @@ const request = (over: Partial<NextActionRequest> = {}): NextActionRequest => ({
   tabs: [{ id: 8, host: 'discord.com', title: 'Discord' }],
   now: '2026-09-16T14:04:00-04:00',
   eagerness: 'eager',
-  allowPayments: false,
   ...over,
 });
 
@@ -124,6 +123,19 @@ describe('one action per page', () => {
     expect(res.ticket).toBeUndefined();
   });
 
+  it('offers a Pay now control with a second Tab instead of refusing it', async () => {
+    const diags: Array<{ refused?: string; irreversible?: boolean }> = [];
+    const res = await nextAction(snapshot(), { tabId: 1, origin: 'x' }, {
+      settings: async () => settings(),
+      localProvider: nothing,
+      createProvider: () => new Fixed(action({ target: 3, label: 'Click "Pay now"' })),
+      onDiag: (d) => diags.push(d),
+    });
+    expect(res.action?.target).toBe(3);
+    expect(res.action?.irreversible).toBe(true);
+    expect(diags.every((d) => d.refused === undefined)).toBe(true);
+  });
+
   it('answers a second identical page from the cache, and not after a force', async () => {
     const provider = vi.fn(() => new Fixed(action()));
     const deps = { settings: async () => settings(), localProvider: nothing, createProvider: provider };
@@ -144,10 +156,12 @@ describe('validation is safety only', () => {
     expect(validate(action({ target: 4 }), request({ controls: disabled }), s)).toBeNull();
   });
 
-  it('refuses money without the setting and allows it with one', () => {
-    const pay = action({ target: 3, label: 'Click "Pay $312.40"', irreversible: true });
-    expect(validate(pay, request(), s)).toBeNull();
-    expect(validate(pay, request(), settings({ allowPayments: true }))?.irreversible).toBe(true);
+  it('flags a money control instead of refusing it', () => {
+    const pay = action({ target: 3, label: 'Click "Pay $312.40"' });
+    const checked = validate(pay, request(), s);
+    expect(checked).not.toBeNull();
+    expect(checked?.irreversible).toBe(true);
+    expect(checked?.label).toBe('Click "Pay $312.40"');
   });
 
   it('marks an action irreversible from the model, the label or the control', () => {

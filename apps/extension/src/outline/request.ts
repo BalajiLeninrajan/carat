@@ -5,7 +5,7 @@ import type { FrameOutline, OutlineTarget } from './build';
 import { buildOutline, snapshotHash } from './build';
 
 /** The half of the request the page itself answers; the background fills in the rest. */
-export type PageEvidence = Omit<NextActionRequest, 'history' | 'notes' | 'tabs' | 'now' | 'eagerness' | 'allowPayments'>;
+export type PageEvidence = Omit<NextActionRequest, 'history' | 'notes' | 'tabs' | 'now' | 'eagerness'>;
 
 export interface RequestMeta {
   /** Defaults to the document's own location; jsdom will not let a test move the real one. */

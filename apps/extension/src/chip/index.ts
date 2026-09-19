@@ -223,7 +223,7 @@ export function createChip(doc: Document = document): Chip {
     const s = session;
     if (!s) return;
     label.textContent = armed ? `Press Tab again to ${lower(s.label)}` : s.label;
-    pill.classList.toggle('is-money', armed);
+    pill.classList.toggle('is-armed', armed);
   }
 
   function mount(opts: ChipText): SessionBase {

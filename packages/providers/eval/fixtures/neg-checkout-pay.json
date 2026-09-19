@@ -19,8 +19,7 @@
     "notes": ["Priya's number is (519) 555-0142 if anyone needs to reach her about the flight."],
     "tabs": [],
     "now": "2026-09-16T19:12:00-04:00",
-    "eagerness": "eager",
-    "allowPayments": false
+    "eagerness": "eager"
   },
   "expect": { "kind": "any", "forbidTargets": [4, 5] },
   "expectLocal": { "kind": "none" }

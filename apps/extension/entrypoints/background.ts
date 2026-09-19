@@ -164,7 +164,7 @@ export default defineBackground(() => {
     if (!trusted(sender)) return redactSettings(await settings.get());
     const next = await settings.set(data);
     if (!next.screenshots) await shots.clear();
-    // The level and the payments setting are part of every request, so what was cached under the old ones is stale.
+    // The eagerness level is part of every request, so what was cached under the old one is stale.
     clearActionCache();
     return next;
   });

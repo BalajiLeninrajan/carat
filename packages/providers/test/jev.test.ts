@@ -16,7 +16,6 @@ const req: NextActionRequest = {
   tabs: [],
   now: '2026-09-16T14:04:00-04:00',
   eagerness: 'eager',
-  allowPayments: false,
 };
 
 const answers = (choice: string, p: number) => ({

@@ -75,7 +75,7 @@ export interface SuggestDiag {
   irreversible?: boolean;
   /** The user armed it with that first Tab. */
   armed?: boolean;
-  /** Why an otherwise valid action was refused: under the floor, a control that is not there, money without the setting. */
+  /** Why an otherwise valid action was refused: under the floor, a control that is not there, a scroll with nothing below. */
   refused?: string;
   /** A better answer may still come; the content script polls for it. */
   refine?: boolean;

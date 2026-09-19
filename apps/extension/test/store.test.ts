@@ -259,16 +259,13 @@ describe('settings store', () => {
       screenshots: false,
       smartModel: '',
       eagerness: 'eager',
-      allowPayments: false,
     });
   });
 
-  it('keeps payments off unless a real true was stored', async () => {
-    const area = new FakeArea();
-    const settings = createSettingsStore(area);
-    expect((await settings.set({ allowPayments: true })).allowPayments).toBe(true);
-    expect((await settings.set({ allowPayments: 'true' as unknown as boolean })).allowPayments).toBe(false);
-    expect((await settings.set({ allowPayments: undefined })).allowPayments).toBe(false);
+  it('has no payments setting to store', async () => {
+    const settings = createSettingsStore(new FakeArea());
+    const saved = await settings.set({ allowPayments: true } as never);
+    expect('allowPayments' in saved).toBe(false);
   });
 
   it('keeps eagerness to the three levels and defaults it to eager', async () => {

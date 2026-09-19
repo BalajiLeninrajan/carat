@@ -47,11 +47,6 @@ export interface Settings {
    * `conservative` only when the model is sure. See EAGERNESS.
    */
   eagerness: Eagerness;
-  /**
-   * Controls that pay, buy or book may be acted on. Off by default. The chip
-   * arms on the first Tab and acts on the second either way.
-   */
-  allowPayments: boolean;
 }
 
 /**
@@ -85,7 +80,6 @@ export const DEFAULT_SETTINGS: Settings = {
   screenshots: false,
   smartModel: '',
   eagerness: DEFAULT_EAGERNESS,
-  allowPayments: false,
 };
 
 export const LIMITS = {

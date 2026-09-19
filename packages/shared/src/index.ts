@@ -2,12 +2,10 @@ export type { ContextItem, ContextKind, ImageCue, ImageInput, PageMeta, Settings
 export { DEFAULT_SETTINGS, LIMITS } from './types';
 export {
   IRREVERSIBLE_LABEL,
-  MONEY_LABEL,
   NEXT_ACTION_JSON_SCHEMA,
   NEXT_ACTION_RESPONSE_FORMAT,
   NextActionSchema,
   isIrreversibleLabel,
-  isMoneyLabel,
   parseNextAction,
   partialTarget,
   salvageNextAction,

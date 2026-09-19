@@ -7,7 +7,7 @@ notes, the open tabs — and the one action it should be answered with.
 ```json
 {
   "name": "discord-maps-search",
-  "request": { "page": {...}, "outline": "...", "controls": [...], "history": [], "notes": [], "tabs": [], "now": "...", "eagerness": "eager", "allowPayments": false },
+  "request": { "page": {...}, "outline": "...", "controls": [...], "history": [], "notes": [], "tabs": [], "now": "...", "eagerness": "eager" },
   "expect": { "kind": "fill", "target": 1, "valueIncludes": "Seven Shores Cafe" },
   "expectLocal": { "kind": "fill", "target": 1, "valueIncludes": "Seven Shores Cafe" }
 }

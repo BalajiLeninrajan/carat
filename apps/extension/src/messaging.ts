@@ -14,8 +14,8 @@ export type KnownItem = Pick<ContextItem, 'id' | 'origin' | 'title' | 'kind' | '
 /**
  * What the content script knows: the page, its outline, the numbered controls
  * and which one has focus. The background adds the history, the notes, the
- * open tabs, the time, the eagerness level and the payments setting before
- * the request reaches a provider.
+ * open tabs, the time and the eagerness level before the request reaches a
+ * provider.
  */
 export type PageSnapshot = Pick<NextActionRequest, 'page' | 'outline' | 'controls' | 'focused'> & {
   /** The page has a visible password field: never read, never acted on. */

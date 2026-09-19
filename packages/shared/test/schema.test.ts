@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   NEXT_ACTION_JSON_SCHEMA,
   isIrreversibleLabel,
-  isMoneyLabel,
   parseNextAction,
   partialTarget,
   salvageNextAction,
@@ -81,12 +80,12 @@ describe('the next-action schema', () => {
     expect(parsed.ok && parsed.action.target).toBe(5);
   });
 
-  it('knows the labels that cannot be undone and the ones that move money', () => {
+  it('knows the labels that cannot be undone, paying and booking among them', () => {
     expect(isIrreversibleLabel('Send reply')).toBe(true);
     expect(isIrreversibleLabel('Place order')).toBe(true);
+    expect(isIrreversibleLabel('Pay $312.40')).toBe(true);
+    expect(isIrreversibleLabel('Book now')).toBe(true);
     expect(isIrreversibleLabel('Open "Seven Shores Cafe menu"')).toBe(false);
-    expect(isMoneyLabel('Pay $312.40')).toBe(true);
-    expect(isMoneyLabel('Book now')).toBe(true);
-    expect(isMoneyLabel('Save')).toBe(false);
+    expect(isIrreversibleLabel('Save')).toBe(false);
   });
 });

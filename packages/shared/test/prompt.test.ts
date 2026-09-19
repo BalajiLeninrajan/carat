@@ -13,7 +13,6 @@ const req: NextActionRequest = {
   tabs: [{ id: 8, host: 'discord.com', title: 'Discord' }],
   now: '2026-09-16T14:04:00-04:00',
   eagerness: 'eager',
-  allowPayments: false,
 };
 
 describe('buildNextActionMessages', () => {

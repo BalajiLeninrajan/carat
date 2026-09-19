@@ -22,8 +22,7 @@
     "notes": ["Alex proposed dinner at Seven Shores Cafe on Friday at 6, and asked everyone to order ahead."],
     "tabs": [{ "id": 8, "host": "discord.com", "title": "Discord | #general | Waterloo Friends" }],
     "now": "2026-09-16T14:06:00-04:00",
-    "eagerness": "eager",
-    "allowPayments": false
+    "eagerness": "eager"
   },
   "expect": { "kind": "click", "target": 3, "forbidTargets": [4, 5] },
   "expectLocal": { "kind": "none" }

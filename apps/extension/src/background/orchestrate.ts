@@ -4,7 +4,6 @@ import {
   LIMITS,
   fnv1a,
   isIrreversibleLabel,
-  isMoneyLabel,
   normalizeWhitespace,
   resolveIntentValue,
 } from '@carat/shared';
@@ -52,9 +51,9 @@ const cache = new Map<string, CacheEntry>();
  * model is still writing; the model's answer replaces it through the ticket
  * unless the placeholder was a fill backed by something the user read and the
  * model is less sure. Everything the engine refuses is refused for safety, not
- * taste: a control that is not on the page, money without the setting, a
- * field filled with its own name, a scroll with nothing below, an `open` the
- * intent registry cannot build and a `switch` to a tab that is not open.
+ * taste: a control that is not on the page, a field filled with its own name,
+ * a scroll with nothing below, an `open` the intent registry cannot build and
+ * a `switch` to a tab that is not open.
  */
 export async function nextAction(input: PageSnapshot, requester: Requester, deps: NextActionDeps): Promise<NextActionResponse> {
   const now = deps.now ?? (() => Date.now());
@@ -87,7 +86,6 @@ export async function nextAction(input: PageSnapshot, requester: Requester, deps
     tabs: tabs.filter((t: OpenTab) => t.id !== requester.tabId),
     now: new Date(started).toISOString(),
     eagerness: settings.eagerness,
-    allowPayments: settings.allowPayments,
   };
 
   const key = cacheKeyFor(req);
@@ -209,10 +207,8 @@ export function validate(action: NextAction | null, req: NextActionRequest, sett
     if (/\bdisabled\b/.test(control.state ?? '')) return refuse('the control is disabled');
   }
 
+  // Paying, sending, deleting: flagged, never refused. The chip asks for a second Tab.
   const irreversible = action.irreversible || control?.risky === true || isIrreversibleLabel(action.label);
-  // A control that pays, buys or books needs the setting, however the model labelled it.
-  const money = isMoneyLabel(action.label) || (control ? isMoneyLabel(control.name) : false);
-  if (money && !settings.allowPayments) return refuse('money control, payments are off');
 
   switch (action.kind) {
     case 'fill': {

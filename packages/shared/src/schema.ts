@@ -126,20 +126,15 @@ function quoted(raw: string | undefined): string {
 }
 
 /**
- * Labels that mean "this cannot be undone", whatever the model said. The
- * model's own `irreversible` flag is the first word; this is the backstop,
- * and the outline's `risky` flag on a control is the other one.
+ * Labels that mean "this cannot be undone", whatever the model said: paying
+ * and booking are on it too, because money leaving an account is exactly the
+ * thing a second Tab is for. The model's own `irreversible` flag is the first
+ * word; this is the backstop, and the outline's `risky` flag on a control is
+ * the other one.
  */
 export const IRREVERSIBLE_LABEL =
-  /\b(send|submit|pay|paying|purchase|buy|order|place|checkout|check ?out|delete|remove|discard|publish|post|confirm|transfer|sign ?out|log ?out|unsubscribe|cancel)\b/i;
-
-/** Names that move money; acting on one needs the payments setting. */
-export const MONEY_LABEL = /\b(pay|payment|buy|purchase|order|checkout|check ?out|book|subscribe|donate|tip|charge)\b/i;
+  /\b(send|submit|pay|paying|purchase|buy|book|order|place|checkout|check ?out|delete|remove|discard|publish|post|confirm|transfer|sign ?out|log ?out|unsubscribe|cancel)\b/i;
 
 export function isIrreversibleLabel(text: string): boolean {
   return IRREVERSIBLE_LABEL.test(text);
-}
-
-export function isMoneyLabel(text: string): boolean {
-  return MONEY_LABEL.test(text);
 }

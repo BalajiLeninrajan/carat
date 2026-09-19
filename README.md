@@ -46,7 +46,6 @@ There are no hand-written priors any more. The page kind, the results-page rule,
 Validation in the service worker is about safety, not taste. It never overrules the model's choice of step, only its right to carry one out.
 
 - The target must be a control the page actually described, and not a disabled one.
-- Anything that pays, buys or books needs "Offer buttons that pay, buy or book" in the options, off by default. The model's own label and the control's name are both checked.
 - A field is never filled with its own name or its current value.
 - A `scroll` needs something below the fold.
 - An `open` only goes through the intent registry in `packages/shared/src/intents.ts`: the model names a destination and an entity (`maps:Seven Shores Cafe`), and the service worker builds the URL. Neither the model nor the page ever supplies one.
@@ -55,7 +54,7 @@ Validation in the service worker is about safety, not taste. It never overrules 
 
 ### Sending, paying, deleting
 
-There is no denylist of destructive names. The model returns an `irreversible` flag, and a regex over the label and the control's name is the backstop. An irreversible chip arms on the first Tab: it turns amber and says `Press Tab again to click "Send reply"`. The second Tab within four seconds does it; any other key, or the four seconds, stands it down. Money controls take the same two Tabs, plus the payments setting.
+There is no denylist of destructive names. The model returns an `irreversible` flag, and a regex over the label and the control's name is the backstop. An irreversible chip arms on the first Tab: it turns amber and says `Press Tab again to click "Send reply"`. The second Tab within four seconds does it; any other key, or the four seconds, stands it down. Paying, buying and booking are irreversible actions like any other: two Tabs, and no setting hides them.
 
 ## How readily it offers
 

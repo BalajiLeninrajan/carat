@@ -52,8 +52,6 @@ export interface NextActionRequest {
   tabs: OpenTab[];
   now: string;
   eagerness: Eagerness;
-  /** Money controls may be acted on (the setting). */
-  allowPayments: boolean;
 }
 
 export type NextActionKind = 'fill' | 'click' | 'select' | 'scroll' | 'open' | 'switch' | 'none';
