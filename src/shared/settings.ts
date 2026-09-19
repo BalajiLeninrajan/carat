@@ -11,6 +11,12 @@ export interface Settings {
   serviceTier: "auto" | "default" | "priority";
   textEnabled: boolean;
   actionsEnabled: boolean;
+  /**
+   * Reading memory: when you leave a page, a model call notes the facts on it
+   * you might act on elsewhere, and later prompts include them. Opt-in, since
+   * distilled page content is sent to the API.
+   */
+  memoryEnabled: boolean;
   /** Hostnames Carat never touches (suffix match). */
   blocklist: string[];
 }
@@ -27,6 +33,7 @@ export const DEFAULT_SETTINGS: Settings = {
   serviceTier: "auto",
   textEnabled: true,
   actionsEnabled: true,
+  memoryEnabled: false,
   blocklist: [],
 };
 

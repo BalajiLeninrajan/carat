@@ -1,5 +1,5 @@
-import { PORT_NAME, TARGET_EVENT, type ContentToWorker, type FieldInfo, type WorkerToContent } from "../shared/protocol.js";
-import { isSensitiveField } from "../shared/redact.js";
+import { PORT_NAME, TARGET_EVENT, type ActionKind, type ContentToWorker, type FieldInfo, type WorkerToContent } from "../shared/protocol.js";
+import { isSensitiveField, maskSensitive } from "../shared/redact.js";
 import { Ghost } from "./ghost.js";
 import { Ring } from "./ring.js";
 
@@ -39,6 +39,7 @@ function post(msg: ContentToWorker): void {
 // force-close it on the way into the back/forward cache. post() reconnects if
 // the page is restored.
 addEventListener("pagehide", () => {
+  sendSeen();
   port?.disconnect();
   port = null;
 });
@@ -202,8 +203,10 @@ const ring = new Ring();
 interface Suggestion {
   reqId: number;
   el: Element;
-  /** Kind/label/irreversible have arrived; Tab can accept. */
+  /** Kind/label/irreversible have arrived; it can be accepted. */
   ready: boolean;
+  kind: ActionKind;
+  value: string;
   irreversible: boolean;
   armed: boolean;
   /** Tab while the target was offscreen scrolled it into view instead of acting. */
@@ -316,14 +319,16 @@ function onWorkerMessage(msg: WorkerToContent): void {
   switch (msg.type) {
     case "target":
       if (!lastTarget?.isConnected) return;
-      suggestion = { reqId: msg.reqId, el: lastTarget, ready: false, irreversible: false, armed: false, scrolled: false };
+      suggestion = { reqId: msg.reqId, el: lastTarget, ready: false, kind: "click", value: "", irreversible: false, armed: false, scrolled: false };
       ring.show(lastTarget);
       break;
     case "action":
       if (!suggestion || suggestion.reqId !== msg.reqId) return;
       suggestion.ready = true;
+      suggestion.kind = msg.kind;
+      suggestion.value = msg.value;
       suggestion.irreversible = msg.irreversible;
-      ring.setAction({ kind: msg.kind, label: msg.label, irreversible: msg.irreversible });
+      ring.setAction({ kind: msg.kind, label: msg.label, value: msg.value, irreversible: msg.irreversible });
       break;
     case "clear":
       if (suggestion?.reqId === msg.reqId) clearSuggestion();
@@ -388,7 +393,31 @@ function acceptCurrent(): boolean {
     return true;
   }
   clearTimeout(disarmTimer);
+  if (s.kind === "fill" && fillLocally(s)) return true;
   post({ type: "accept", reqId: s.reqId });
+  return true;
+}
+
+/**
+ * "fill": jump to the field and offer the value as ghost text, so accepting
+ * it is one more tap (and the user sees it before it goes in). Returns false
+ * for targets that are not plain text fields; the worker focuses those.
+ */
+function fillLocally(s: Suggestion): boolean {
+  const f = asTextField(s.el);
+  if (!f) return false;
+  clearSuggestion();
+  f.focus(); // fires focusin, which counts as activity: set the ghost up after it
+  try {
+    f.setSelectionRange(f.value.length, f.value.length);
+  } catch {}
+  log(`jumped to ${describe(f)}`);
+  const current = f.value;
+  if (current && !s.value.toLowerCase().startsWith(current.toLowerCase())) return true;
+  const text = s.value.slice(current.length);
+  if (!text) return true;
+  ghostState = { reqId: activity, el: f, base: current, text, consumed: 0, done: true };
+  renderGhost();
   return true;
 }
 
@@ -543,3 +572,55 @@ new MutationObserver((records) => {
 // prediction without waiting for you to touch it. The worker ignores this
 // unless you interacted in this tab (or its opener) within the last minute.
 schedule("load");
+
+// ---------------------------------------------------------------------------
+// Reading memory: when the user leaves the page (switches tab, navigates away),
+// send what was on screen. The worker decides whether to use it (the feature
+// is opt-in) and distills it into a few notes.
+
+/** Only pages looked at for at least this long count as read. */
+const MIN_DWELL_MS = 3000;
+const MAX_SEEN_CHARS = 6000;
+let visibleSince = document.visibilityState === "visible" ? Date.now() : 0;
+
+/** Text currently in the viewport, in document order, one line per element. */
+function visibleText(): string {
+  const lines: string[] = [];
+  let size = 0;
+  let lastParent: Element | null = null;
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+    acceptNode(n) {
+      if (!n.nodeValue?.trim()) return NodeFilter.FILTER_REJECT;
+      const p = n.parentElement;
+      if (!p || p.closest("script, style, noscript, template, textarea, [aria-hidden=true]")) return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+  const range = document.createRange();
+  for (let n = walker.nextNode(); n && size < MAX_SEEN_CHARS; n = walker.nextNode()) {
+    range.selectNodeContents(n);
+    const r = range.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0 || r.bottom < 0 || r.top > innerHeight || r.right < 0 || r.left > innerWidth) continue;
+    const text = n.nodeValue!.replace(/\s+/g, " ").trim();
+    const parent = n.parentElement;
+    if (parent === lastParent && lines.length) lines[lines.length - 1] += " " + text;
+    else lines.push(text);
+    lastParent = parent;
+    size += text.length + 1;
+  }
+  return maskSensitive(lines.join("\n")).slice(0, MAX_SEEN_CHARS);
+}
+
+function sendSeen(): void {
+  if (!visibleSince || Date.now() - visibleSince < MIN_DWELL_MS) return;
+  visibleSince = 0;
+  // A page asking for a password is not one to remember.
+  if (document.querySelector("input[type=password]")) return;
+  const text = visibleText();
+  if (text.length >= 40) post({ type: "seen", url: location.href, title: document.title, text });
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") sendSeen();
+  else visibleSince = Date.now();
+});

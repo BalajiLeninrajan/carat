@@ -80,6 +80,7 @@ Rules:
 - Output ONLY the continuation text. No quotes, no preamble, no explanation. Never repeat anything already in <typed>.
 - If <typed> ends mid-word, finish that word first (no leading space). If it ends with a space, do not start with another space.
 - Ground the suggestion in the page: names, numbers, products, dates and facts that appear in <page> are fair game. Do not invent specifics that are not there.
+- <notes> are facts from pages the user read recently in other tabs. When the field is clearly asking for one of them, use it.
 - Match what the field is for and the tone of the page: a search box wants a query, a subject line wants a short title, a message body wants natural prose in the user's own voice.
 - Single-line fields: one line, never a newline. Multi-line fields: at most one sentence or clause past the caret.
 - Short and likely beats long and speculative. If there is no confident continuation, output nothing at all.`;
@@ -98,6 +99,9 @@ main:
   heading(1) "Hiking Boots"
   text: Waterproof · Gore-Tex · Wide fit available
 </page>
+<notes>
+(none)
+</notes>
 <field role="searchbox" name="Search TrailGear" type="search" multiline="false"/>
 <typed>waterproof hiking boots wi</typed>`,
   },
@@ -111,6 +115,9 @@ dialog "New message":
   >> FOCUSED textbox "Subject"
   textbox "Message body" = "Hi Dana, attaching the Q3 vendor invoices you asked for on Friday."
 </page>
+<notes>
+(none)
+</notes>
 <field role="textbox" name="Subject" type="text" multiline="false"/>
 <typed>Q3 vendor </typed>`,
   },
@@ -131,6 +138,9 @@ main:
     >> FOCUSED textbox "Reply body"
     button "Send reply"
 </page>
+<notes>
+(none)
+</notes>
 <field role="textbox" name="Reply body" type="textarea" multiline="true"/>
 <typed>Thanks for confirming. Since all three are on 3.2.0.4711, </typed>`,
   },
@@ -144,6 +154,7 @@ export function buildTextRequest(opts: {
   settings: Settings;
   url: string;
   outline: string;
+  notes: string;
   field: FieldInfo;
   axName?: string;
   axRole?: string;
@@ -152,6 +163,9 @@ export function buildTextRequest(opts: {
   const content = `<page>
 ${outline}
 </page>
+<notes>
+${opts.notes}
+</notes>
 ${fieldTag(field, opts.axName, opts.axRole)}
 <typed>${field.typed}</typed>`;
   return {
@@ -165,17 +179,18 @@ ${fieldTag(field, opts.axName, opts.axRole)}
 // ---------------------------------------------------------------------------
 // Next action
 
-export const ACTION_INSTRUCTIONS = `You are Carat's next-action predictor, running inside a web browser. You see the current page as an accessibility outline in which every control the user could operate is numbered [n], plus a log of what the user just did. Predict the single action the user is most likely to take next, so they can accept it with one keypress.
+export const ACTION_INSTRUCTIONS = `You are Carat's next-action predictor, running inside a web browser. You see the current page as an accessibility outline in which every control the user could operate is numbered [n], notes about what the user recently read on other pages, and a log of what the user just did. Predict the single action the user is most likely to take next, so they can accept it with one keypress.
 
 Kinds:
 - "click": press button / link / checkbox / radio / tab / menu item [n].
-- "fill": move to text field [n] and type "value". Only when the value is clearly implied by the page or the history (e.g. a quantity, a search term, a reply the context makes obvious). Never invent personal data such as names, addresses, emails, phone numbers, passwords or card numbers.
+- "fill": move to text field [n] and type "value". Only when the value is clearly implied by the page, the notes or the history (e.g. a quantity, a search term, a reference number the user just read). Never invent personal data such as names, addresses, emails, phone numbers, passwords or card numbers.
 - "select": choose the option whose exact text is "value" in combobox [n].
 
 You must always suggest an action. There is no "nothing" answer: even when the next step is uncertain, pick the single most likely one.
 
 How to decide:
 - Follow the flow the user is in. Read the history as a sequence: what were they trying to get done, and what step comes next? A filled-in form wants its submit button; an opened dialog wants its primary action; a just-added cart item wants checkout.
+- <notes> often explain why the user came to this page: if the page is where they would act on a note, the next step is usually to put the note's details into the page (fill the matching field, select the matching option) or to press the control that acts on it.
 - The focused control and the controls near it are the strongest signal. "(required)" fields that are still empty come before submitting.
 - Only use numbers that appear in the outline. Never target a disabled control.
 - Do not repeat the action the user just took, and never propose something the history shows they dismissed.
@@ -185,7 +200,7 @@ How to decide:
 Output fields:
 - target: the [n] of the control. Always a number from the outline.
 - kind: one of the kinds above.
-- value: the text to type or the option to select; "" for click.
+- value: the text to type or the option to select; "" for click. Keep it short, at most about 300 characters: for long free-text fields (descriptions, messages, essays) give only the opening sentence or two, and the user continues from there with autocomplete.
 - label: 1 to 4 words for the Tab hint, e.g. "Send reply", "Checkout", "Status: Resolved", "Quantity 2".
 - irreversible: true if the action sends, submits, posts, publishes, pays, buys, deletes, or otherwise cannot be undone.`;
 
@@ -207,6 +222,32 @@ const ACTION_SHOTS: InputMessage[] = [
   {
     role: "user",
     content: `<page>
+PAGE: Start a return — Northwind Outfitters (https://northwind.example/returns/new)
+main:
+  heading(1) "Start a return"
+  form "Return request":
+    [1] textbox "Order number" (required)
+    [2] textbox "Email used for the order" (required)
+    [3] combobox "Reason" = "Choose a reason"
+      option "Wrong size"
+      option "Arrived damaged"
+      option "Changed my mind"
+    [4] button "Continue"
+</page>
+<notes>
+- Northwind order NW-55821 (trail jacket) arrived with a torn sleeve; support said to open a return and pick "damaged" as the reason. (read 3m ago on mail.example.com, "Re: Your order NW-55821")
+</notes>
+<history>
+- 40s ago: opened northwind.example/returns/new (typed in the address bar)
+</history>`,
+  },
+  {
+    role: "assistant",
+    content: `{"target":1,"kind":"fill","value":"NW-55821","label":"Order number","irreversible":false}`,
+  },
+  {
+    role: "user",
+    content: `<page>
 PAGE: Your cart — ShopCo (https://shop.example/cart)
 banner:
   [1] link "ShopCo home"
@@ -221,6 +262,9 @@ main:
 contentinfo:
   [6] link "Careers"
 </page>
+<notes>
+(none)
+</notes>
 <history>
 - 12s ago: clicked button "Add to cart" [on shop.example/p/pour-over-set]
 - 3s ago: clicked link "Cart (1)" [on shop.example/p/pour-over-set]
@@ -244,6 +288,9 @@ main:
     >> FOCUSED [2] textbox "Reply body" = "Glad the rollback fixed it! I'll close this ticket now, just reply here if it comes back."
     [3] button "Send reply"
 </page>
+<notes>
+(none)
+</notes>
 <history>
 - 40s ago: typed into textbox "Reply body"
 </history>`,
@@ -266,6 +313,9 @@ main:
   heading(2) "Local team wins opener"
   [5] link "Read more"
 </page>
+<notes>
+(none)
+</notes>
 <history>
 (nothing yet)
 </history>`,
@@ -280,12 +330,16 @@ export function buildActionRequest(opts: {
   settings: Settings;
   url: string;
   outline: string;
+  notes: string;
   history: string;
 }): ResponsesRequest {
-  const { settings, url, outline, history } = opts;
+  const { settings, url, outline, notes, history } = opts;
   const content = `<page>
 ${outline}
 </page>
+<notes>
+${notes}
+</notes>
 <history>
 ${history}
 </history>`;
@@ -293,7 +347,8 @@ ${history}
     ...common(settings, settings.actionModel, url, "action"),
     instructions: ACTION_INSTRUCTIONS,
     input: [...ACTION_SHOTS, { role: "user", content }],
-    max_output_tokens: 80,
+    // Clicks need ~30 tokens; a fill value can need more. Only generated tokens cost anything.
+    max_output_tokens: 400,
     text: { format: { type: "json_schema", name: "next_action", strict: true, schema: ACTION_SCHEMA } },
   };
 }

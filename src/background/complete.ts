@@ -56,13 +56,14 @@ export async function complete(opts: {
   url: string;
   settings: Settings;
   outline: Outline;
+  notes: string;
   field: FieldInfo;
   post: (msg: WorkerToContent) => void;
 }): Promise<string | null> {
-  const { tabId, reqId, url, settings, outline, field, post } = opts;
+  const { tabId, reqId, url, settings, outline, notes, field, post } = opts;
   cancelCompletion(tabId);
   const base = field.typed;
-  const key = `${url}|${hash(outline.text)}|${base}`;
+  const key = `${url}|${hash(outline.text + notes)}|${base}`;
 
   const hit = cache.get(key);
   if (hit != null) {
@@ -77,6 +78,7 @@ export async function complete(opts: {
     settings,
     url,
     outline: outline.text,
+    notes,
     field,
     axName: outline.focused?.name,
     axRole: outline.focused?.role,

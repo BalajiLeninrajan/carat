@@ -56,7 +56,16 @@ export interface DismissMessage {
   reqId: number;
 }
 
-export type ContentToWorker = IdleMessage | LogMessage | AcceptMessage | DismissMessage;
+/** What was on screen when the user left a page (tab switch or navigation), for reading memory. */
+export interface SeenMessage {
+  type: "seen";
+  url: string;
+  title: string;
+  /** Visible text, sensitive values already masked. */
+  text: string;
+}
+
+export type ContentToWorker = IdleMessage | LogMessage | AcceptMessage | DismissMessage | SeenMessage;
 
 // ---------------------------------------------------------------------------
 // Worker → content

@@ -25,6 +25,45 @@ interface Pending {
   label: string;
 }
 
+interface ParsedAction {
+  target: number;
+  kind: string;
+  value: string;
+  label: string;
+  irreversible: boolean;
+}
+
+/**
+ * Recover an action from JSON that was cut off (the output limit hit in the
+ * middle of a long fill value). target and kind come first in the schema, so
+ * they are almost always complete; a truncated value is trimmed back to its
+ * last full sentence (or word) so it never ends mid-word.
+ */
+export function salvage(json: string): ParsedAction | null {
+  const target = /"target"\s*:\s*(\d+)/.exec(json);
+  const kind = /"kind"\s*:\s*"(click|fill|select)"/.exec(json);
+  if (!target || !kind) return null;
+
+  let value = "";
+  const v = /"value"\s*:\s*"((?:[^"\\]|\\.)*)("?)/.exec(json);
+  if (v) {
+    const raw = v[1].replace(/\\u[0-9a-fA-F]{0,3}$|\\$/, ""); // drop a half-written escape
+    try {
+      value = JSON.parse(`"${raw}"`);
+    } catch {
+      value = "";
+    }
+    if (!v[2]) {
+      // Cut off inside the value: back up to the last sentence end, else the last space.
+      const sentence = /^[\s\S]*[.!?](?=\s|$)/.exec(value)?.[0];
+      value = sentence ?? value.replace(/\s+\S*$/, "");
+    }
+  }
+  const label = /"label"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(json)?.[1] ?? "";
+  const irreversible = /"irreversible"\s*:\s*true/.test(json);
+  return { target: Number(target[1]), kind: kind[1], value: value.trim(), label, irreversible };
+}
+
 const inflight = new Map<number, AbortController>();
 const pending = new Map<number, Pending>();
 /** `${url}|${backendNodeId}` pairs the user dismissed with Esc: never suggested again on that page. */
@@ -41,16 +80,17 @@ export async function predictAction(opts: {
   url: string;
   settings: Settings;
   outline: Outline;
+  notes: string;
   history: string;
   post: (msg: WorkerToContent) => void;
 }): Promise<void> {
-  const { tabId, reqId, url, settings, outline, history, post } = opts;
+  const { tabId, reqId, url, settings, outline, notes, history, post } = opts;
   cancelPrediction(tabId);
   pending.delete(tabId);
   const controller = new AbortController();
   inflight.set(tabId, controller);
 
-  const request = buildActionRequest({ settings, url, outline: outline.text, history });
+  const request = buildActionRequest({ settings, url, outline: outline.text, notes, history });
   let shown: Candidate | null = null;
   /** The early target's announce + "target" message, which must land before "action". */
   let announced: Promise<void> = Promise.resolve();
@@ -82,13 +122,18 @@ export async function predictAction(opts: {
       controller.signal,
     );
 
-    let parsed: { target: number; kind: string; value: string; label: string; irreversible: boolean };
+    let parsed: ParsedAction;
     try {
       parsed = JSON.parse(result.text);
     } catch {
-      console.warn("[carat] action: unparseable output", result.text);
-      post({ type: "clear", reqId });
-      return;
+      const salvaged = salvage(result.text);
+      if (!salvaged) {
+        console.warn("[carat] action: unparseable output", result.text);
+        post({ type: "clear", reqId });
+        return;
+      }
+      parsed = salvaged;
+      console.warn(`[carat] action: output was cut off; salvaged ${parsed.kind} [${parsed.target}] with a ${parsed.value.length}-char value`);
     }
 
     const c = candidateFor(parsed.target);
@@ -139,7 +184,8 @@ export async function acceptAction(tabId: number, reqId: number): Promise<Actuat
         return result;
       }
       case "fill":
-        // Jump for now; the value arrives as ghost text once text mode lands.
+        // Plain text fields are filled by the content script (jump + ghost text);
+        // this is for anything else it could not handle, which just gets focus.
         return await focus(tabId, id);
       case "select":
         return (await select(tabId, id, p.value)) ?? (await click(tabId, id));

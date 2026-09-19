@@ -3,6 +3,7 @@ import { isBlocked, loadSettings } from "../shared/settings.js";
 import { getTree } from "./axmirror.js";
 import { CdpPausedError, isPaused, resume } from "./cdp.js";
 import { appendHistory, historyFor, sinceLastInteraction } from "./history.js";
+import { notesFor, recordSeen } from "./notes.js";
 import { buildOutline } from "./outline.js";
 import { cancelCompletion, complete } from "./complete.js";
 import { acceptAction, cancelPrediction, dismissAction, predictAction } from "./predict.js";
@@ -57,6 +58,12 @@ chrome.runtime.onConnect.addListener((port) => {
       case "dismiss":
         dismissAction(tabId, msg.reqId);
         break;
+      case "seen": {
+        const settings = await loadSettings();
+        if (!settings.enabled || !settings.memoryEnabled || !settings.apiKey || isBlocked(settings, msg.url)) break;
+        recordSeen(msg, settings).catch((e) => console.error("[carat] noting failed:", e));
+        break;
+      }
     }
   });
 });
@@ -95,6 +102,7 @@ async function onIdle(tabId: number, msg: IdleMessage, post: (msg: WorkerToConte
   const textOutline = buildOutline(snapshot.nodes, { ...common, mode: "text" });
   const actionOutline = buildOutline(snapshot.nodes, { ...common, mode: "action", focusedValue });
   const history = await historyFor(tabId, msg.url);
+  const notes = settings.memoryEnabled ? await notesFor(msg.url) : "(none)";
   if (idleSeq.get(tabId) !== seq) return;
   const buildMs = Math.round(performance.now() - started);
 
@@ -107,18 +115,21 @@ async function onIdle(tabId: number, msg: IdleMessage, post: (msg: WorkerToConte
   console.log("AX tree (raw nodes):", snapshot.nodes);
   console.log(`Text outline (${textOutline.stats.chars} chars):\n${textOutline.text}`);
   console.table(actionOutline.candidates);
+  console.log(`Notes:
+${notes}`);
   if (typing && !field!.redacted) {
     const textRequest = buildTextRequest({
       settings,
       url: msg.url,
       outline: textOutline.text,
+      notes,
       field: field!,
       axName: textOutline.focused?.name,
       axRole: textOutline.focused?.role,
     });
     console.log(`Text prompt (user turn):\n${textRequest.input[textRequest.input.length - 1].content}`);
   } else {
-    const actionRequest = buildActionRequest({ settings, url: msg.url, outline: actionOutline.text, history });
+    const actionRequest = buildActionRequest({ settings, url: msg.url, outline: actionOutline.text, notes, history });
     console.log(`Action prompt (user turn):\n${actionRequest.input[actionRequest.input.length - 1].content}`);
     console.log("Action request body:", actionRequest);
   }
@@ -130,12 +141,12 @@ async function onIdle(tabId: number, msg: IdleMessage, post: (msg: WorkerToConte
   }
   const predict = () =>
     settings.actionsEnabled &&
-    predictAction({ tabId, reqId: msg.reqId, url: msg.url, settings, outline: actionOutline, history, post });
+    predictAction({ tabId, reqId: msg.reqId, url: msg.url, settings, outline: actionOutline, notes, history, post });
 
   // Mid-sentence it is the text model's turn. If it has nothing to add, the
   // user has finished the thought: predict what they do next instead.
   if (typing && !field!.redacted && settings.textEnabled) {
-    const text = await complete({ tabId, reqId: msg.reqId, url: msg.url, settings, outline: textOutline, field: field!, post });
+    const text = await complete({ tabId, reqId: msg.reqId, url: msg.url, settings, outline: textOutline, notes, field: field!, post });
     if (text === "" && idleSeq.get(tabId) === seq) predict();
     return;
   }

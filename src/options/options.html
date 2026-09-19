@@ -55,6 +55,12 @@
   <label class="check"><input type="checkbox" id="textEnabled" /> Ghost text in fields</label>
   <label class="check"><input type="checkbox" id="actionsEnabled" /> Next-action prediction (tap right Shift to click / jump)</label>
 
+  <label class="check"><input type="checkbox" id="memoryEnabled" /> Reading memory</label>
+  <p class="hint" style="margin:2px 0 0 24px">When you leave a page, Carat asks the model to note the facts on it you might act on
+    elsewhere, keeps them for an hour, and includes them in later prompts. The page's visible text is sent to the API to do this.
+    Skipped on blocklisted sites and pages with password fields.
+    <button id="forget" type="button" style="margin:6px 0 0;padding:4px 10px;font-weight:500;background:#6b7280">Forget what Carat has read</button></p>
+
   <label for="blocklist">Blocklist <span class="hint">(one hostname per line; subdomains included)</span></label>
   <textarea id="blocklist"></textarea>
 

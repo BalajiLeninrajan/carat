@@ -3,7 +3,7 @@ import { loadSettings, saveSettings, type Settings } from "../shared/settings.js
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
 const textKeys = ["apiKey", "baseUrl", "textModel", "actionModel", "serviceTier"] as const;
-const boolKeys = ["enabled", "textEnabled", "actionsEnabled"] as const;
+const boolKeys = ["enabled", "textEnabled", "actionsEnabled", "memoryEnabled"] as const;
 
 async function init() {
   const s = await loadSettings();
@@ -27,4 +27,9 @@ async function save() {
 }
 
 $("save").addEventListener("click", save);
+$("forget").addEventListener("click", async () => {
+  await chrome.storage.session.remove("notes");
+  $("status").textContent = "Forgotten.";
+  setTimeout(() => ($("status").textContent = ""), 1500);
+});
 init();

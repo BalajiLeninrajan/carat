@@ -38,6 +38,7 @@ const CSS = `
 export interface RingAction {
   kind: ActionKind;
   label: string;
+  value: string;
   irreversible: boolean;
 }
 
@@ -144,8 +145,9 @@ export class Ring {
     }
     add("kbd", "R⇧");
     if (a!.irreversible && !this.armed) add("kbd", "R⇧");
-    const verb = a!.kind === "fill" ? "Go to " : "";
-    add("span", this.armed ? `again to ${a!.label}` : verb + a!.label, "label");
+    const value = a!.value && !a!.label.includes(a!.value) ? `: ${a!.value}` : "";
+    const text = (a!.kind === "fill" || a!.kind === "select") ? a!.label + value : a!.label;
+    add("span", this.armed ? `again to ${a!.label}` : text, "label");
   }
 
   private position(): void {
