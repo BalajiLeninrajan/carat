@@ -36,6 +36,10 @@ Field fills only use text from other tabs; the page being filled is never its ow
 
 If a tab already shows the destination, the chip says "Switch to" instead of "Open in" and reuses that tab.
 
+## Fast path and smart path
+
+Every chip comes from the fast path first: text captured from other tabs, the small model, a 6s budget. The smart path is opt-in ("Screenshots of tabs with little text" on the options page, off by default) and never delays the chip. When it is on and a tab you are reading is mostly an image, a pasted screenshot or a canvas app, Carat takes one picture of that tab while it is in front and keeps it in session storage for at most three minutes (two pictures at most, one per tab). When you switch away, the picture goes to the smart model, which writes down the text it can see; the picture is deleted and the text joins the context store as a `vision` item, so the fast path can use it from then on. On pages where the fast answer was empty or unsure, the smart model also gets a slower second try; if its answer arrives before you act and it is more confident, the chip's value changes in place. A chip never moves to another field or comes back after you dismissed it because of a smart answer. No picture is ever taken of a page Carat has offered to fill, of a page with a password field, or of a denylisted host.
+
 ## Running it
 
 ```
