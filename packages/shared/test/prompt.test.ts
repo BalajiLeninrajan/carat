@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { SuggestionListSchema } from '../src/schema';
-import { FEW_SHOTS, SYSTEM_PROMPT, buildMessages } from '../src/prompt';
+import { FEW_SHOTS, SYSTEM_PROMPT, buildMessages, systemPrompt } from '../src/prompt';
+import { EAGERNESS_LEVELS } from '../src/eagerness';
 import type { SuggestRequest } from '../src/types';
 
 const req: SuggestRequest = {
@@ -39,6 +40,34 @@ describe('buildMessages', () => {
   it('keeps the system prompt identical across different requests', () => {
     const other = buildMessages({ ...req, now: '2027-01-01T00:00:00Z', context: [] });
     expect(other[0]!.content).toBe(buildMessages(req)[0]!.content);
+  });
+
+  it('changes only the last rule with the level, and keeps each level byte-identical across requests', () => {
+    const prompts = EAGERNESS_LEVELS.map((l) => systemPrompt(l));
+    expect(new Set(prompts).size).toBe(3);
+    const head = (p: string) => p.slice(0, p.lastIndexOf('\n12. '));
+    expect(new Set(prompts.map(head)).size).toBe(1);
+    expect(head(prompts[0]!)).toContain('10. A context item with `kind` "vision"');
+    expect(head(prompts[0]!)).toContain('11. Propose `scroll` only');
+    for (const l of EAGERNESS_LEVELS) {
+      expect(buildMessages(req, l)[0]!.content).toBe(systemPrompt(l));
+      expect(buildMessages({ ...req, context: [] }, l)[0]!.content).toBe(systemPrompt(l));
+      expect(buildMessages(req, l).slice(1, -1)).toEqual(FEW_SHOTS);
+    }
+    expect(SYSTEM_PROMPT).toBe(systemPrompt('eager'));
+  });
+
+  it('tells the conservative model to stay quiet and the eager one to propose, with the invariant rules in both', () => {
+    expect(systemPrompt('conservative')).toMatch(/12\. When unsure, return an empty list\. No suggestion beats a wrong one\./);
+    expect(systemPrompt('eager')).toMatch(/12\. Lean toward proposing/);
+    expect(systemPrompt('eager')).toMatch(/Return an empty list only when nothing in the context relates/);
+    expect(systemPrompt('balanced')).toMatch(/propose the likelier one/);
+    for (const l of EAGERNESS_LEVELS) {
+      const p = systemPrompt(l);
+      expect(p).toContain('5. An address belongs in a location field.');
+      expect(p).toContain('7. Fills and interactions never use `own`');
+      expect(p).toContain('Never propose generic words.');
+    }
   });
 
   it('ships few-shot answers that satisfy the output schema', () => {

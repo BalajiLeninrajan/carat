@@ -26,7 +26,9 @@ export {
   SUGGESTION_RESPONSE_FORMAT,
 } from './schema';
 export type { SuggestionList } from './schema';
-export { buildMessages, SYSTEM_PROMPT, TRANSCRIBE_PROMPT, FEW_SHOTS } from './prompt';
+export { buildMessages, systemPrompt, SYSTEM_PROMPT, TRANSCRIBE_PROMPT, FEW_SHOTS } from './prompt';
+export { DEFAULT_EAGERNESS, EAGERNESS, EAGERNESS_HELP, EAGERNESS_LEVELS, isEagerness, weakBelow } from './eagerness';
+export type { Eagerness, EagernessKnobs } from './eagerness';
 export type { ChatMessage, ChatRole } from './prompt';
 export { INTENT_REGISTRY, buildIntentUrl, calendarDates, intentLabel, isIntentDestination } from './intents';
 export type { IntentEntity, IntentSpec } from './intents';

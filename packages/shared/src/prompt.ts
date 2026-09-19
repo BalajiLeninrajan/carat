@@ -1,5 +1,7 @@
 import type { SuggestRequest } from './types';
 import type { SuggestionList } from './schema';
+import type { Eagerness } from './eagerness';
+import { DEFAULT_EAGERNESS, EAGERNESS_LEVELS } from './eagerness';
 
 export type ChatRole = 'system' | 'user' | 'assistant';
 export interface ChatMessage {
@@ -7,8 +9,11 @@ export interface ChatMessage {
   content: string;
 }
 
-// Byte-identical across calls so the provider's prompt cache hits.
-export const SYSTEM_PROMPT = [
+// Rules 1 to 11 are the same at every eagerness level; rule 12 says how to
+// act when unsure, and that is the one thing the level changes. Each level's
+// prompt is built once below and never varies per request, so the provider's
+// prompt cache hits.
+const SYSTEM_PROMPT_HEAD = [
   'You are Carat, a browser assistant. You propose values for form fields on the current page using text the user recently read in other tabs, you propose one interaction with one control on the current page when that text calls for it, and you propose the next site the user may want to open based on what they are reading now.',
   '',
   'Input: JSON with `page` (the current page), `fields` (candidate fields with short descriptors), `elements` (interactive controls: `r` role, `nm` accessible name, `st` state on/off/open/closed/selected, `v` current value, `min`/`max`/`step` for sliders, `op` options for selects, `nb` nearby text, `p` when it is the page\'s primary action), `o: 1` on a field or element that is currently scrolled out of view, `filled` (ids of the context items behind fields Carat itself filled on this page in the last minute), `context` (recent text from other tabs, newest first), `own` (text from the current tab itself, when present) and `now` (current ISO time with offset).',
@@ -31,8 +36,31 @@ export const SYSTEM_PROMPT = [
   '9. Only `click` a button or link when `filled` is non-empty and the element commits what was filled (Save, Create, Done, Apply, Next); cite an id from `filled`. Only `check`, `set` or `choose` when a sentence in `context` states the user\'s own preference or an amount for that named control ("I\'m a vegetarian", "turn the volume to 40%"). Never propose an interaction with anything that deletes, sends, pays, orders, signs out or otherwise cannot be undone. One interaction at most, and never one that repeats a state the control already has.',
   '10. A context item with `kind` "vision" is text read off a screenshot of that tab. Treat it like page text, allowing for transcription errors in names and numbers. Dates and times under its `Facts:` were already resolved against the time of the screenshot; prefer them over re-reading a relative phrase.',
   '11. Propose `scroll` only for an element marked `o: 1` that the context clearly calls for and that takes no other verb from you. When the element is on-screen, or when a fill, click, check, set or choose is what the context calls for, propose that instead, on-screen or not: Carat scrolls to it by itself before acting.',
-  '12. When unsure, return an empty list. No suggestion beats a wrong one.',
 ].join('\n');
+
+// The user dismisses a chip with one Esc, and a missing chip costs them a
+// retype, so the default leans toward proposing. Rules 1 to 11 still hold at
+// every level: nothing is invented, an address never goes in a title field,
+// and the page's own text is never proposed back into it.
+const UNSURE_RULE: Record<Eagerness, string> = {
+  conservative: '12. When unsure, return an empty list. No suggestion beats a wrong one.',
+  balanced:
+    '12. When unsure between values for a field, propose the likelier one with a confidence that says so. When nothing specific matches, return an empty list.',
+  eager:
+    '12. Lean toward proposing. A wrong chip costs the user one keypress; a missing one costs them a retype. When a value in `context` plausibly fits a field but does not clearly match it, still propose the best one, with a confidence that says how sure you are (0.4 to 0.6 for a guess). Return an empty list only when nothing in the context relates to any field, control or plan.',
+};
+
+const SYSTEM_PROMPTS: Record<Eagerness, string> = Object.fromEntries(
+  EAGERNESS_LEVELS.map((level) => [level, `${SYSTEM_PROMPT_HEAD}\n${UNSURE_RULE[level]}`]),
+) as Record<Eagerness, string>;
+
+/** The system prompt for one eagerness level. The same string every call, so it caches. */
+export function systemPrompt(eagerness: Eagerness): string {
+  return SYSTEM_PROMPTS[eagerness];
+}
+
+/** The prompt at the default level. */
+export const SYSTEM_PROMPT = SYSTEM_PROMPTS[DEFAULT_EAGERNESS];
 
 // Text-only output so the reading drops straight into the context store. The
 // user turn names the tab and carries `now`, so relative dates in the picture
@@ -266,9 +294,9 @@ export const FEW_SHOTS: readonly ChatMessage[] = [
   { role: 'assistant', content: wire(FEW_SHOT_INTERACT_RESPONSE) },
 ];
 
-export function buildMessages(req: SuggestRequest): ChatMessage[] {
+export function buildMessages(req: SuggestRequest, eagerness: Eagerness = DEFAULT_EAGERNESS): ChatMessage[] {
   return [
-    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'system', content: systemPrompt(eagerness) },
     ...FEW_SHOTS,
     { role: 'user', content: JSON.stringify(req) },
   ];

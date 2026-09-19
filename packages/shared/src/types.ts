@@ -1,3 +1,6 @@
+import type { Eagerness } from './eagerness';
+import { DEFAULT_EAGERNESS } from './eagerness';
+
 /** `vision` is text a model read off a screenshot of the tab; it is stored and scored like `page`. */
 export type ContextKind = 'page' | 'selection' | 'vision';
 
@@ -181,6 +184,11 @@ export interface Settings {
    * must accept images.
    */
   smartModel: string;
+  /**
+   * How readily a chip is offered. `eager` (the default) shows any plausible
+   * value; `conservative` only sure ones. See EAGERNESS for what each moves.
+   */
+  eagerness: Eagerness;
 }
 
 /**
@@ -213,14 +221,14 @@ export const DEFAULT_SETTINGS: Settings = {
   statusLine: false,
   screenshots: false,
   smartModel: '',
+  eagerness: DEFAULT_EAGERNESS,
 };
 
 export const LIMITS = {
   titleChars: 80,
   pageTextChars: 4000,
   selectionTextChars: 1000,
-  minConfidence: 0.7,
-  maxSuggestions: 2,
+  /** The confidence floor and the per-answer cap depend on the eagerness setting; see EAGERNESS. */
   maxNavigations: 2,
   providerTimeoutMs: 6000,
   /** Body text under this many chars marks a source tab as thin enough to screenshot. */
