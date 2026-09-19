@@ -12,6 +12,7 @@ import type {
 } from '@carat/shared';
 import type { TabDiag } from './background/diag';
 import type { FeedbackInput } from './background/feedback';
+import type { StatusInfo } from './background/status';
 
 export type KnownItem = Pick<ContextItem, 'id' | 'origin' | 'title' | 'kind' | 'capturedAt'> & {
   preview: string;
@@ -49,6 +50,8 @@ export interface Protocol {
   clearKnown(): void;
   setPinned(data: { pinned: boolean }): { pinned: boolean };
   getDiag(data: { tabId: number }): { diag: TabDiag | null };
+  /** What the status line on a page may show: running or not, and the model in use. Never the key. */
+  getStatus(): StatusInfo;
   getSettings(): Settings;
   setSettings(s: Partial<Settings>): Settings;
 }

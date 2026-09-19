@@ -5,3 +5,5 @@ export type { SuggestionsHandle } from './suggest-scheduler';
 export { send } from './send';
 export { pageMeta } from './page-meta';
 export type { ScriptContext } from './context';
+export { startStatus, STATUS_TIMING } from './status-poller';
+export type { StatusHandle } from './status-poller';

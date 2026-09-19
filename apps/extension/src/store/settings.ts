@@ -39,6 +39,7 @@ function sanitize(raw: unknown): Settings {
     apiKey: str(r.apiKey, DEFAULT_SETTINGS.apiKey).trim(),
     model: str(r.model, DEFAULT_SETTINGS.model).trim() || DEFAULT_SETTINGS.model,
     disabledHosts: hosts(r.disabledHosts),
+    statusLine: typeof r.statusLine === 'boolean' ? r.statusLine : DEFAULT_SETTINGS.statusLine,
   };
 }
 

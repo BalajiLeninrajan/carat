@@ -47,7 +47,18 @@ export interface SuggestionsHandle {
 
 const NO_HANDLE: SuggestionsHandle = { refresh: () => undefined, force: () => undefined };
 
-export function startSuggestions(ctx: ScriptContext, chip: Chip, doc: Document = document): SuggestionsHandle {
+/** Told when a request leaves and when its answer is in; the status line pulses in between. */
+export interface RequestObserver {
+  onRequest?(): void;
+  onAnswer?(): void;
+}
+
+export function startSuggestions(
+  ctx: ScriptContext,
+  chip: Chip,
+  doc: Document = document,
+  observer: RequestObserver = {},
+): SuggestionsHandle {
   const win = doc.defaultView;
   if (!win) return NO_HANDLE;
 
@@ -75,12 +86,14 @@ export function startSuggestions(ctx: ScriptContext, chip: Chip, doc: Document =
       return;
     }
     const mine = ++seq;
+    observer.onRequest?.();
     const res = await send('suggestRequest', {
       page: pageMeta(doc),
       fields: descriptors,
       ...(elements.descriptors.length > 0 ? { elements: elements.descriptors } : {}),
       ...(force ? { force: true } : {}),
     });
+    observer.onAnswer?.();
     // A newer snapshot owns the chip now; this answer describes fields that may be gone.
     if (mine !== seq || !ctx.isValid) return;
     last = { key, at: now, suggestions: res?.suggestions ?? [], navigation: res?.navigation ?? [], interactions: res?.interactions ?? [] };

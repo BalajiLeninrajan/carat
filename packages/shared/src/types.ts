@@ -163,6 +163,7 @@ export interface Settings {
   apiKey: string; // may be ''
   model: string; // default gpt-5.6-luna
   disabledHosts: string[]; // exact hosts (with port) where carat neither reads nor suggests
+  statusLine: boolean; // small bottom-right line on every page: running or not, and which model
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -172,6 +173,7 @@ export const DEFAULT_SETTINGS: Settings = {
   apiKey: '',
   model: 'gpt-5.6-luna',
   disabledHosts: [],
+  statusLine: false,
 };
 
 export const LIMITS = {

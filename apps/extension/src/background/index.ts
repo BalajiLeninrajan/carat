@@ -15,3 +15,5 @@ export { requesterFromSender } from './requester';
 export type { Requester } from './requester';
 export { fingerprintMatchesDescriptor } from './fingerprint';
 export { isExtensionPage, redactSettings } from './trusted';
+export { describeStatus } from './status';
+export type { StatusInfo, StatusReason } from './status';

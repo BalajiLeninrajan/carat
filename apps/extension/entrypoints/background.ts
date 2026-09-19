@@ -6,6 +6,7 @@ import {
   DiagLog,
   chromeTabsApi,
   clearKnown,
+  describeStatus,
   getKnown,
   handleFeedback,
   isExtensionPage,
@@ -87,6 +88,8 @@ export default defineBackground(() => {
   onMessage('getDiag', async ({ data, sender }) =>
     trusted(sender) ? { diag: (await diag.get(data.tabId)) ?? null } : { diag: null },
   );
+  // The status line is the one thing a page may learn about settings beyond the redacted view: a verdict and a model name.
+  onMessage('getStatus', async ({ sender }) => describeStatus(await settings.get(), sender.tab?.url ?? sender.url));
   onMessage('getSettings', async ({ sender }) => {
     const s = await settings.get();
     return trusted(sender) ? s : redactSettings(s);

@@ -263,6 +263,7 @@ describe('settings store', () => {
       apiKey: '',
       model: 'gpt-5.6-luna',
       disabledHosts: [],
+      statusLine: false,
     });
   });
 
