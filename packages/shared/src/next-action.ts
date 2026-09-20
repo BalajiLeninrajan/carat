@@ -78,4 +78,13 @@ export interface NextAction {
   confidence: number;
   /** One short clause for the tooltip. */
   reason: string;
+  /**
+   * Where a fill's value came from, worded for the chip's hover preview:
+   * `from discord.com: dinner at Seven Shores Cafe, Friday at 6?`. The
+   * service worker derives it from the notes and the timeline; the model
+   * never writes it.
+   */
+  source?: string;
+  /** Where an `open` or a `switch` leads, for the same preview. */
+  destination?: { host: string; title?: string };
 }

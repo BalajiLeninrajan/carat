@@ -1,12 +1,15 @@
 import type { NextAction, NextActionRequest, OpenTab, OutlineControl, Settings } from '@carat/shared';
 import {
   EAGERNESS,
+  INTENT_REGISTRY,
   LIMITS,
   fnv1a,
+  isIntentDestination,
   isIrreversibleLabel,
   normalizeWhitespace,
   resolveIntentValue,
   scrollLabel,
+  truncate,
 } from '@carat/shared';
 import type { Provider } from '@carat/providers';
 import { LocalProvider, RaceProvider, cacheKey as promptCacheKey, createProvider } from '@carat/providers';
@@ -140,7 +143,10 @@ export async function nextAction(input: PageSnapshot, requester: Requester, deps
 
   diag.warmed = deps.warmed?.(requester.tabId, req) ?? false;
   // No network behind it, so this is the first tick: the chip is up while the model is still reading.
-  const placeholder = checked('placeholder', await answer(deps.localProvider ?? new LocalProvider(), req, deps), req, settings, diag, validations);
+  const placeholder = enrich(
+    checked('placeholder', await answer(deps.localProvider ?? new LocalProvider(), req, deps), req, settings, diag, validations),
+    req,
+  );
   diag.placeholderMs = now() - started;
   const provider = (deps.createProvider ?? ((s: Settings) => createProvider(s)))(settings);
   // With no ticket there is nowhere to put a later answer, so the reply waits for the model itself.
@@ -167,7 +173,7 @@ export async function nextAction(input: PageSnapshot, requester: Requester, deps
     diag.source = first === placeholder && placeholder !== null ? 'placeholder' : 'model';
     if (provider instanceof RaceProvider) diag.attempts = [...provider.attempts];
     // Eager owes the user a chip: nothing here is an answer, it is a reason to ask again.
-    const chosen = await insist(first, provider, req, settings, deps, diag, validations);
+    const chosen = enrich(await insist(first, provider, req, settings, deps, diag, validations), req);
     diag.ms = now() - started;
     void cache.set(key, { at: started, action: chosen });
     report(diag, chosen);
@@ -208,7 +214,7 @@ export async function nextAction(input: PageSnapshot, requester: Requester, deps
       diag.finalMs = now() - started;
       if (provider instanceof RaceProvider) diag.attempts = [...provider.attempts];
       // Eager owes the user a chip: nothing here is a reason to ask again, not an answer.
-      const chosen = await insist(pick(placeholder, model), provider, req, settings, deps, diag, validations);
+      const chosen = enrich(await insist(pick(placeholder, model), provider, req, settings, deps, diag, validations), req);
       settled = chosen;
       void cache.set(key, { at: now(), action: chosen });
       if (chosen !== placeholder) {
@@ -413,6 +419,81 @@ export function validate(action: NextAction | null, req: NextActionRequest, sett
       break;
   }
   return { ...action, target: control?.n ?? null, irreversible, label: action.label || fallbackLabel(action, control, req) };
+}
+
+/** How long the line under a chip may run before it is clipped. */
+export const SOURCE_CHARS = 80;
+
+/**
+ * What the chip's hover preview needs and the model was never asked for:
+ * where a fill's value was read, and where an `open` or a `switch` lands. All
+ * of it is already in the request the worker assembled, so it costs nothing;
+ * the model's own `reason` is left alone, because that is the tooltip.
+ */
+export function enrich(action: NextAction | null, req: NextActionRequest): NextAction | null {
+  if (!action) return null;
+  // The placeholder is enriched once and may come back through here as the
+  // chosen answer. Same object out, or the refine path would read it as the
+  // model having replaced itself.
+  if (action.source !== undefined || action.destination !== undefined) return action;
+  if (action.kind === 'fill' || action.kind === 'select') {
+    const source = sourceOf(action.value, req);
+    return source ? { ...action, source } : action;
+  }
+  if (action.kind === 'open') {
+    const destination = openDestination(action.value, req.tabs);
+    return destination ? { ...action, destination } : action;
+  }
+  if (action.kind === 'switch') {
+    const tab = req.tabs.find((t) => String(t.id) === action.value);
+    return tab ? { ...action, destination: { host: tab.host, title: tab.title } } : action;
+  }
+  return action;
+}
+
+/**
+ * The note or timeline line the value came from, worded for one line under
+ * the chip. A note wins over the timeline: "from discord.com: dinner at Seven
+ * Shores Cafe, Friday at 6?" says more than "from this tab: 40s ago: typed…".
+ * A value of one or two characters matches too much to be evidence of
+ * anything, so it is left without a source.
+ */
+function sourceOf(value: string, req: NextActionRequest): string | undefined {
+  const needle = normalizeWhitespace(value).toLowerCase();
+  if (needle.length < 3) return undefined;
+  const note = req.notes.find((n) => normalizeWhitespace(n).toLowerCase().includes(needle));
+  if (note) return truncate(`from ${noteOrigin(note)}: ${noteFact(note)}`, SOURCE_CHARS);
+  const line = req.history.find((h) => normalizeWhitespace(h).toLowerCase().includes(needle));
+  return line ? truncate(`from this tab: ${normalizeWhitespace(line)}`, SOURCE_CHARS) : undefined;
+}
+
+/** What a note renders as: the fact, then `(read on discord.com, 2m ago)`. */
+const NOTE_TAIL = /\s*\((?:read on ([^,()]+)|this tab), [^()]*\)\s*$/;
+
+function noteFact(note: string): string {
+  return normalizeWhitespace(note.replace(NOTE_TAIL, ''));
+}
+
+function noteOrigin(note: string): string {
+  return NOTE_TAIL.exec(note)?.[1]?.trim() ?? 'this tab';
+}
+
+/**
+ * Where an `open` would land. A tab already showing that destination names it
+ * better than the built URL does, so it is preferred; otherwise the host the
+ * registry built and what it would look up.
+ */
+function openDestination(value: string, tabs: OpenTab[]): { host: string; title?: string } | undefined {
+  const resolved = resolveIntentValue(value);
+  if (!resolved) return undefined;
+  let host: string;
+  try {
+    host = new URL(resolved.url).host;
+  } catch {
+    return undefined;
+  }
+  const open = tabs.find((t) => isIntentDestination(resolved.intent, `https://${t.host}/`));
+  return { host: open?.host ?? host, title: open?.title || `${INTENT_REGISTRY[resolved.intent].site}: ${resolved.entity.value}` };
 }
 
 function echoes(value: string, control: OutlineControl): boolean {
