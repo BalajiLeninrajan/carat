@@ -1,0 +1,780 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="description" content="Carat reads the page as Chrome's accessibility tree, works out the one thing you are most likely to do next, and offers it. Elasticsearch is the memory underneath.">
+<title>Carat</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Public+Sans:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;700&display=swap">
+<style>
+  :root {
+    color-scheme: light dark;
+    /* Catppuccin Latte */
+    --ground: #eff1f5;
+    --raised: #e6e9ef;
+    --sunk: #dce0e8;
+    --ink: #4c4f69;
+    --muted: #6c6f85;
+    --faint: #9ca0b0;
+    --mauve: #8839ef;
+    --blue: #1e66f5;
+    --green: #40a02b;
+    --peach: #fe640b;
+    --red: #d20f39;
+    --teal: #179299;
+    --yellow: #df8e1d;
+    --on-accent: #eff1f5;
+    --shadow: var(--ink);
+
+    --slab: 3px;
+    --drop: 6px;
+    --display: "Bricolage Grotesque", "Trebuchet MS", sans-serif;
+    --body: "Public Sans", system-ui, -apple-system, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      /* Catppuccin Mocha */
+      --ground: #1e1e2e;
+      --raised: #181825;
+      --sunk: #11111b;
+      --ink: #cdd6f4;
+      --muted: #a6adc8;
+      --faint: #6c7086;
+      --mauve: #cba6f7;
+      --blue: #89b4fa;
+      --green: #a6e3a1;
+      --peach: #fab387;
+      --red: #f38ba8;
+      --teal: #94e2d5;
+      --yellow: #f9e2af;
+      --on-accent: #11111b;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground: #1e1e2e;
+    --raised: #181825;
+    --sunk: #11111b;
+    --ink: #cdd6f4;
+    --muted: #a6adc8;
+    --faint: #6c7086;
+    --mauve: #cba6f7;
+    --blue: #89b4fa;
+    --green: #a6e3a1;
+    --peach: #fab387;
+    --red: #f38ba8;
+    --teal: #94e2d5;
+    --yellow: #f9e2af;
+    --on-accent: #11111b;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body { margin: 0; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 16px;
+    line-height: 1.6;
+    padding-inline: 20px;
+    padding-block: env(safe-area-inset-top, 0px) env(safe-area-inset-bottom, 0px);
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 1020px; margin-inline: auto; }
+
+  h1, h2, h3 {
+    font-family: var(--display);
+    font-weight: 800;
+    line-height: 1.02;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+    margin: 0;
+  }
+
+  h1 { font-size: clamp(2.6rem, 8.5vw, 5.2rem); }
+  h2 { font-size: clamp(1.85rem, 5vw, 2.9rem); }
+  h3 { font-size: 1.1rem; letter-spacing: -0.01em; }
+
+  p { margin: 0; }
+  a { color: var(--mauve); }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: var(--muted);
+  }
+
+  .lede { font-size: clamp(1.04rem, 2.2vw, 1.28rem); color: var(--muted); max-width: 62ch; }
+  .tint { color: var(--mauve); }
+
+  .slab {
+    border: var(--slab) solid var(--ink);
+    background: var(--raised);
+    box-shadow: var(--drop) var(--drop) 0 var(--shadow);
+    border-radius: 4px;
+  }
+
+  .lift { transition: transform 160ms ease, box-shadow 160ms ease; }
+  .lift:hover { transform: translate(-3px, -3px); box-shadow: calc(var(--drop) + 3px) calc(var(--drop) + 3px) 0 var(--shadow); }
+
+  .masthead { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding-block: 28px 0; }
+  .brand { display: flex; align-items: center; gap: 12px; font-family: var(--display); font-weight: 800; font-size: 1.3rem; }
+  .gem { width: 30px; height: 30px; border: 3px solid var(--ink); background: var(--mauve); transform: rotate(45deg); border-radius: 3px; animation: bob 3.4s ease-in-out infinite; }
+  @keyframes bob { 0%, 100% { transform: rotate(45deg) translateY(0); } 50% { transform: rotate(45deg) translateY(-4px); } }
+
+  .themer {
+    font-family: var(--mono); font-size: 0.75rem; font-weight: 700;
+    border: 3px solid var(--ink); background: var(--ground); color: var(--ink);
+    padding: 7px 13px; border-radius: 4px; cursor: pointer;
+    box-shadow: 3px 3px 0 var(--shadow);
+    transition: transform 120ms ease, box-shadow 120ms ease;
+  }
+  .themer:hover { transform: translate(-2px, -2px); box-shadow: 5px 5px 0 var(--shadow); }
+  .themer:active { transform: translate(3px, 3px); box-shadow: 0 0 0 var(--shadow); }
+  :focus-visible { outline: 3px solid var(--mauve); outline-offset: 2px; }
+
+  .hero { padding-block: clamp(38px, 6vw, 68px) clamp(24px, 4vw, 40px); }
+  .hero h1 { margin-bottom: 18px; }
+  .hero .lede { margin-bottom: 24px; }
+
+  .pills { display: flex; flex-wrap: wrap; gap: 10px; }
+  .pill { font-family: var(--mono); font-size: 0.72rem; font-weight: 700; border: 2px solid var(--ink); border-radius: 999px; padding: 5px 12px; background: var(--ground); }
+  .pill.on-mauve { background: var(--mauve); color: var(--on-accent); }
+  .pill.on-green { background: var(--green); color: var(--on-accent); }
+
+  /* ---------- the hard case ---------- */
+  .case { padding-block: clamp(30px, 5vw, 54px); }
+  .case-grid { display: grid; gap: 20px; grid-template-columns: 1fr; margin-top: 26px; }
+  @media (min-width: 900px) { .case-grid { grid-template-columns: 1fr 1fr; align-items: start; } }
+
+  .sources { display: grid; gap: 13px; }
+  .src {
+    padding: 13px 15px; border: var(--slab) solid var(--ink); border-radius: 4px;
+    background: var(--raised); box-shadow: 4px 4px 0 var(--shadow);
+    opacity: 0.45; transition: opacity 320ms ease, transform 320ms ease, box-shadow 320ms ease;
+  }
+  .src.lit { opacity: 1; transform: translate(-2px, -2px); box-shadow: 7px 7px 0 var(--shadow); }
+  .src-head { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; font-family: var(--mono); font-size: 0.66rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
+  .swatch { width: 10px; height: 10px; border: 2px solid var(--ink); border-radius: 2px; flex: none; }
+  .src-body { font-size: 0.89rem; }
+  .src-body em { font-style: normal; background: color-mix(in srgb, var(--yellow) 42%, transparent); padding: 0 3px; border-radius: 2px; }
+
+  .resolve { padding: 15px; margin-top: 2px; }
+  .resolve-title { font-family: var(--mono); font-size: 0.66rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); margin-bottom: 10px; }
+  .rrow { display: flex; gap: 9px; align-items: baseline; font-family: var(--mono); font-size: 0.74rem; line-height: 1.7; opacity: 0; transform: translateX(-6px); transition: opacity 300ms ease, transform 300ms ease; }
+  .rrow.lit { opacity: 1; transform: none; }
+  .rmark { font-weight: 700; flex: none; }
+  .ok { color: var(--green); }
+  .bad { color: var(--red); }
+  .hm { color: var(--peach); }
+
+  .chrome { padding: 0; overflow: hidden; }
+  .bar { display: flex; align-items: center; gap: 7px; padding: 10px 13px; background: var(--sunk); border-bottom: var(--slab) solid var(--ink); }
+  .tl { width: 10px; height: 10px; border-radius: 999px; border: 2px solid var(--ink); }
+  .url { flex: 1; margin-left: 6px; font-family: var(--mono); font-size: 0.66rem; color: var(--muted); background: var(--ground); border: 2px solid var(--ink); border-radius: 999px; padding: 3px 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .form { padding: 20px 18px 26px; }
+  .form h3 { margin-bottom: 3px; }
+  .form .sub { font-size: 0.8rem; color: var(--muted); margin-bottom: 18px; }
+  .field { margin-bottom: 15px; position: relative; }
+  .field label { display: block; font-family: var(--mono); font-size: 0.64rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); margin-bottom: 5px; }
+  .input { border: 2px solid var(--ink); border-radius: 4px; background: var(--ground); padding: 9px 11px; font-size: 0.92rem; min-height: 40px; display: flex; align-items: center; position: relative; }
+  .input.focused { border-color: var(--mauve); box-shadow: 0 0 0 3px color-mix(in srgb, var(--mauve) 26%, transparent); }
+  .input.refused { border-color: var(--red); border-style: dashed; }
+  .typed { white-space: pre; }
+  .caret { display: inline-block; width: 2px; height: 1.05em; background: var(--mauve); margin-left: 1px; animation: blink 1.05s steps(1) infinite; }
+  @keyframes blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+
+  .chip {
+    position: absolute; left: 0; top: calc(100% + 9px);
+    display: flex; align-items: center; gap: 9px;
+    border: 2px solid var(--ink); border-radius: 999px;
+    background: var(--mauve); color: var(--on-accent);
+    padding: 6px 8px 6px 13px; font-size: 0.77rem; font-weight: 600; white-space: nowrap;
+    box-shadow: 4px 4px 0 var(--shadow);
+    opacity: 0; transform: translateY(-6px) scale(0.94);
+    transition: opacity 240ms ease, transform 240ms cubic-bezier(.34,1.56,.64,1);
+    z-index: 3;
+  }
+  .chip.show { opacity: 1; transform: translateY(0) scale(1); }
+  .chip.warn { background: var(--peach); }
+
+  .kbd { font-family: var(--mono); font-size: 0.65rem; font-weight: 700; background: var(--on-accent); color: var(--mauve); border: 2px solid var(--ink); border-radius: 4px; padding: 2px 7px; box-shadow: 0 2px 0 var(--ink); transition: transform 90ms ease, box-shadow 90ms ease; }
+  .kbd.press { transform: translateY(2px); box-shadow: 0 0 0 var(--ink); }
+  .chip.warn .kbd { color: var(--peach); }
+
+  .why { margin-top: 26px; font-size: 0.93rem; color: var(--muted); max-width: 64ch; }
+  .why strong { color: var(--ink); font-weight: 600; }
+
+  section { padding-block: clamp(44px, 6.5vw, 78px); }
+  .sec-head { max-width: 62ch; margin-bottom: 32px; display: grid; gap: 12px; }
+
+  .grid { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(255px, 1fr)); }
+  .card { padding: 22px; display: grid; gap: 9px; align-content: start; }
+  .card p { font-size: 0.91rem; color: var(--muted); }
+  .badge { width: 34px; height: 34px; display: grid; place-items: center; border: 2px solid var(--ink); border-radius: 4px; font-family: var(--mono); font-weight: 700; font-size: 0.85rem; color: var(--on-accent); margin-bottom: 3px; }
+  .m { font-family: var(--mono); font-size: 0.85em; }
+
+  figure { margin: 0; }
+  .figbox { padding: 20px 18px 14px; overflow-x: auto; }
+  .figbox svg { display: block; width: 100%; min-width: 660px; height: auto; color: var(--ink); }
+  figcaption { font-size: 0.85rem; color: var(--muted); margin-top: 14px; padding-top: 13px; border-top: 2px solid var(--sunk); }
+
+  .code { font-family: var(--mono); font-size: 0.75rem; line-height: 1.68; background: var(--sunk); border: var(--slab) solid var(--ink); border-radius: 4px; padding: 15px; overflow-x: auto; margin: 0; box-shadow: var(--drop) var(--drop) 0 var(--shadow); white-space: pre; }
+  .c-mauve { color: var(--mauve); font-weight: 700; }
+  .c-green { color: var(--green); }
+  .c-peach { color: var(--peach); }
+  .c-red { color: var(--red); font-weight: 700; }
+  .c-faint { color: var(--faint); }
+
+  .tablewrap { overflow-x: auto; border: var(--slab) solid var(--ink); border-radius: 4px; box-shadow: var(--drop) var(--drop) 0 var(--shadow); }
+  table { border-collapse: collapse; width: 100%; min-width: 520px; background: var(--raised); }
+  th, td { text-align: left; padding: 12px 15px; border-bottom: 2px solid var(--sunk); font-size: 0.87rem; }
+  th { font-family: var(--mono); font-size: 0.67rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; background: var(--sunk); color: var(--muted); }
+  tr:last-child td { border-bottom: none; }
+  td code { font-family: var(--mono); font-size: 0.8rem; color: var(--mauve); font-weight: 700; }
+
+  .cat { padding: 24px; display: grid; gap: 12px; align-content: start; }
+  .cat-top { display: flex; align-items: center; gap: 11px; flex-wrap: wrap; }
+  .cat-name { font-family: var(--display); font-weight: 800; font-size: 1.2rem; }
+  .tag { font-family: var(--mono); font-size: 0.61rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; border: 2px solid var(--ink); border-radius: 999px; padding: 3px 9px; }
+  .tag.built { background: var(--green); color: var(--on-accent); }
+  .tag.ready { background: var(--peach); color: var(--on-accent); }
+  .cat p { font-size: 0.91rem; color: var(--muted); }
+  .cat ul { margin: 0; padding-left: 19px; display: grid; gap: 6px; font-size: 0.88rem; color: var(--muted); }
+  .cat li::marker { color: var(--mauve); }
+
+  .keys { display: grid; gap: 12px; }
+  .keyrow { display: flex; align-items: center; gap: 13px; flex-wrap: wrap; font-size: 0.92rem; color: var(--muted); }
+  .key { font-family: var(--mono); font-size: 0.73rem; font-weight: 700; border: 2px solid var(--ink); border-radius: 4px; padding: 4px 10px; background: var(--ground); color: var(--ink); box-shadow: 0 3px 0 var(--ink); flex: none; }
+
+  footer { border-top: var(--slab) solid var(--ink); padding-block: 30px 46px; margin-top: 26px; }
+  .foot { display: flex; justify-content: space-between; gap: 18px; flex-wrap: wrap; align-items: center; font-size: 0.84rem; color: var(--muted); }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+    .chip { opacity: 1; transform: none; }
+    .src, .rrow { opacity: 1; transform: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="brand"><span class="gem" aria-hidden="true"></span> Carat</div>
+    <button class="themer" id="themer" type="button">Latte / Mocha</button>
+  </header>
+
+  <section class="hero">
+    <p class="eyebrow">Chrome extension &middot; Hack the North 2026</p>
+    <h1>Tab is all<br>you press.</h1>
+    <p class="lede">
+      Carat reads the page the way a screen reader does &mdash; Chrome's accessibility tree, over the DevTools
+      Protocol &mdash; works out the one thing you're most likely to do next, and offers it. One keypress accepts.
+      <span class="tint">Elasticsearch is the memory underneath it.</span>
+    </p>
+    <div class="pills">
+      <span class="pill on-mauve">Accessibility tree, not DOM scraping</span>
+      <span class="pill on-green">Elasticsearch context layer</span>
+      <span class="pill">Local Chrome extension</span>
+    </div>
+  </section>
+
+  <section class="case">
+    <div class="sec-head">
+      <p class="eyebrow">The hard case</p>
+      <h2>Three sources. Two of them disagree.</h2>
+      <p class="lede">
+        You're booking a train for a friend. His name reached you twice, spelled two different ways, in a message
+        addressed <em>to</em> you rather than about you. Watch what Carat fills &mdash; and what it refuses to.
+      </p>
+    </div>
+
+    <div class="case-grid">
+      <div class="sources">
+        <div class="src" id="s1">
+          <div class="src-head"><span class="swatch" style="background:var(--teal)"></span> discord &middot; DM &middot; 12:13&nbsp;AM</div>
+          <div class="src-body">Crazydodo: &ldquo;nuth, is your name <em>Pez Guan</em>&rdquo;</div>
+        </div>
+        <div class="src" id="s2">
+          <div class="src-head"><span class="swatch" style="background:var(--red)"></span> gmail &middot; 12:31&nbsp;AM</div>
+          <div class="src-body">Booking desk: &ldquo;Ticket held for passenger <em>Pez Kwan</em>, Fri 06:40.&rdquo;</div>
+        </div>
+        <div class="src" id="s3">
+          <div class="src-head"><span class="swatch" style="background:var(--blue)"></span> discord &middot; #waterloo &middot; 11:58&nbsp;PM</div>
+          <div class="src-body">&ldquo;I'm booking the VIA ticket <em>for Pez</em> &mdash; he's on the 6:40 Friday.&rdquo;</div>
+        </div>
+
+        <div class="slab resolve" id="resolve">
+          <div class="resolve-title">What Elasticsearch resolves</div>
+          <div class="rrow" id="r1"><span class="rmark ok">&#10003;</span><span><span class="c-green">given_name</span> = &ldquo;Pez&rdquo; &mdash; both sources agree</span></div>
+          <div class="rrow" id="r2"><span class="rmark bad">&#10007;</span><span><span class="c-red">family_name</span> &mdash; conflict: Guan / Kwan</span></div>
+          <div class="rrow" id="r3"><span class="rmark hm">&#9863;</span><span>one person, keyed on the given name &mdash; not two</span></div>
+          <div class="rrow" id="r4"><span class="rmark hm">&#9784;</span><span>subject = <b>Pez</b>, not you &mdash; it was said <i>to</i> you</span></div>
+        </div>
+      </div>
+
+      <div class="slab chrome lift">
+        <div class="bar">
+          <span class="tl" style="background:var(--red)"></span>
+          <span class="tl" style="background:var(--peach)"></span>
+          <span class="tl" style="background:var(--green)"></span>
+          <span class="url">reservia.viarail.ca/en/booking/create/passengers</span>
+        </div>
+        <div class="form">
+          <h3>Passenger 1</h3>
+          <p class="sub">Adult &middot; Toronto &rarr; Waterloo &middot; Fri 06:40</p>
+
+          <div class="field">
+            <label for="fname">First name</label>
+            <div class="input focused" id="fname">
+              <span class="typed" id="typed"></span><span class="caret" aria-hidden="true"></span>
+              <div class="chip" id="chip">
+                Fill First name with &ldquo;Pez&rdquo;
+                <span class="kbd" id="kbd">Tab</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="field" style="margin-top:34px">
+            <label for="lname">Last name</label>
+            <div class="input" id="lname"><span style="color:var(--faint)">&nbsp;</span>
+              <div class="chip warn" id="chip2">
+                Two spellings on record &mdash; asking you
+                <span class="kbd">Guan / Kwan</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <p class="why">
+      <strong>The refusal is the feature.</strong> A na&iuml;ve agent picks the newer source and types a surname that
+      may be wrong onto a ticket that cannot be edited. Carat fills the half the sources agree on, marks the other
+      half disputed, and hands that one decision back to you &mdash; because a wrong name on a rail booking costs more
+      than a question does.
+    </p>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">Architecture</p>
+      <h2>One loop, two clocks.</h2>
+      <p class="lede">
+        Reading and acting both go through CDP. Everything the agent learns lands in Elasticsearch, and everything it
+        decides is shaped by what it reads back out &mdash; including closing out the errand it just finished.
+      </p>
+    </div>
+
+    <figure>
+      <div class="slab figbox">
+        <svg viewBox="0 0 900 560" role="img" aria-label="Carat's agent architecture: the content script reports idle to the background worker, which pulls the accessibility tree over the Chrome DevTools Protocol, renders it as a numbered outline, indexes that outline as an observation, runs three parallel Elasticsearch queries under one deadline, sends outline plus retrieved lines to the model, returns one chip to the page, and on Tab actuates through CDP and writes the action back to Elasticsearch to advance or close the task.">
+          <defs>
+            <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+            </marker>
+            <marker id="ahm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#8839ef"/>
+            </marker>
+          </defs>
+
+          <!-- lanes -->
+          <text x="120" y="26" text-anchor="middle" font-family="monospace" font-size="11" font-weight="700" fill="currentColor" opacity="0.55">IN THE PAGE</text>
+          <text x="420" y="26" text-anchor="middle" font-family="monospace" font-size="11" font-weight="700" fill="currentColor" opacity="0.55">BACKGROUND WORKER</text>
+          <text x="775" y="26" text-anchor="middle" font-family="monospace" font-size="11" font-weight="700" fill="currentColor" opacity="0.55">ELASTICSEARCH</text>
+          <line x1="250" y1="38" x2="250" y2="540" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 6" opacity="0.28"/>
+          <line x1="600" y1="38" x2="600" y2="540" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 6" opacity="0.28"/>
+
+          <!-- page -->
+          <rect x="30" y="180" width="180" height="96" rx="4" fill="none" stroke="currentColor" stroke-width="3"/>
+          <text x="120" y="212" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">content script</text>
+          <text x="120" y="234" text-anchor="middle" font-size="11.5" fill="currentColor" opacity="0.7">idle &middot; typing &middot; selection</text>
+          <text x="120" y="254" text-anchor="middle" font-size="11.5" fill="currentColor" opacity="0.7">chip &middot; ghost text</text>
+
+          <!-- worker chain -->
+          <rect x="290" y="56" width="270" height="62" rx="4" fill="none" stroke="currentColor" stroke-width="3"/>
+          <text x="425" y="82" text-anchor="middle" font-size="13.5" font-weight="700" fill="currentColor">CDP</text>
+          <text x="425" y="102" text-anchor="middle" font-family="monospace" font-size="11" fill="currentColor" opacity="0.7">Accessibility.getFullAXTree</text>
+
+          <rect x="290" y="150" width="270" height="56" rx="4" fill="none" stroke="currentColor" stroke-width="3"/>
+          <text x="425" y="174" text-anchor="middle" font-size="13.5" font-weight="700" fill="currentColor">buildOutline</text>
+          <text x="425" y="193" text-anchor="middle" font-size="11.5" fill="currentColor" opacity="0.7">numbered controls, budgeted</text>
+
+          <rect x="290" y="240" width="270" height="70" rx="4" fill="none" stroke="#8839ef" stroke-width="3"/>
+          <text x="425" y="265" text-anchor="middle" font-size="13.5" font-weight="700" fill="#8839ef">retrieve</text>
+          <text x="425" y="284" text-anchor="middle" font-size="11.5" fill="currentColor" opacity="0.75">task &middot; details &middot; context</text>
+          <text x="425" y="301" text-anchor="middle" font-family="monospace" font-size="10.5" fill="currentColor" opacity="0.6">3 queries &#8226; one 1.8s deadline</text>
+
+          <rect x="290" y="344" width="270" height="56" rx="4" fill="none" stroke="currentColor" stroke-width="3"/>
+          <text x="425" y="368" text-anchor="middle" font-size="13.5" font-weight="700" fill="currentColor">predict</text>
+          <text x="425" y="387" text-anchor="middle" font-size="11.5" fill="currentColor" opacity="0.7">one action, streamed</text>
+
+          <rect x="290" y="434" width="270" height="56" rx="4" fill="none" stroke="currentColor" stroke-width="3"/>
+          <text x="425" y="458" text-anchor="middle" font-size="13.5" font-weight="700" fill="currentColor">actuate</text>
+          <text x="425" y="477" text-anchor="middle" font-size="11.5" fill="currentColor" opacity="0.7">click &middot; fill &middot; select, over CDP</text>
+
+          <!-- elastic -->
+          <rect x="650" y="150" width="220" height="216" rx="4" fill="none" stroke="currentColor" stroke-width="3"/>
+          <text x="760" y="176" text-anchor="middle" font-family="monospace" font-size="11.5" fill="currentColor" opacity="0.85">carat-observations</text>
+          <text x="760" y="202" text-anchor="middle" font-family="monospace" font-size="11.5" fill="currentColor" opacity="0.85">carat-facts</text>
+          <text x="760" y="228" text-anchor="middle" font-family="monospace" font-size="11.5" font-weight="700" fill="#8839ef">carat-tasks</text>
+          <text x="760" y="254" text-anchor="middle" font-family="monospace" font-size="11.5" font-weight="700" fill="#8839ef">carat-details</text>
+          <text x="760" y="280" text-anchor="middle" font-family="monospace" font-size="11.5" fill="currentColor" opacity="0.85">carat-actions</text>
+          <line x1="668" y1="300" x2="852" y2="300" stroke="currentColor" stroke-width="1.5" opacity="0.3"/>
+          <text x="760" y="322" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.65">ingest pipeline</text>
+          <text x="760" y="340" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.55">ECS metadata &middot; redaction</text>
+          <text x="760" y="356" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.55">RRF &middot; ES|QL</text>
+
+          <!-- distill -->
+          <rect x="650" y="56" width="220" height="62" rx="4" fill="none" stroke="currentColor" stroke-width="3"/>
+          <text x="760" y="80" text-anchor="middle" font-size="13" font-weight="700" fill="currentColor">distill</text>
+          <text x="760" y="99" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.7">a page you left &rarr; facts</text>
+
+          <!-- arrows -->
+          <path d="M 210 206 L 286 100" fill="none" stroke="currentColor" stroke-width="2.5" marker-end="url(#ah)"/>
+          <text x="238" y="140" text-anchor="middle" font-size="10.5" font-family="monospace" fill="currentColor" opacity="0.72">idle</text>
+
+          <path d="M 425 118 L 425 146" fill="none" stroke="currentColor" stroke-width="2.5" marker-end="url(#ah)"/>
+          <text x="470" y="137" text-anchor="middle" font-size="10.5" font-family="monospace" fill="currentColor" opacity="0.72">AX nodes</text>
+
+          <path d="M 425 206 L 425 236" fill="none" stroke="currentColor" stroke-width="2.5" marker-end="url(#ah)"/>
+          <path d="M 425 310 L 425 340" fill="none" stroke="currentColor" stroke-width="2.5" marker-end="url(#ah)"/>
+          <text x="500" y="331" text-anchor="middle" font-size="10.5" font-family="monospace" fill="currentColor" opacity="0.72">outline + lines</text>
+
+          <!-- outline indexed as observation -->
+          <path d="M 560 178 L 646 200" fill="none" stroke="currentColor" stroke-width="2.5" marker-end="url(#ah)"/>
+          <text x="604" y="178" text-anchor="middle" font-size="10.5" font-family="monospace" fill="currentColor" opacity="0.72">observation</text>
+
+          <!-- retrieve <-> elastic -->
+          <path d="M 560 268 L 646 250" fill="none" stroke="#8839ef" stroke-width="3" marker-end="url(#ahm)" marker-start="url(#ahm)"/>
+          <text x="604" y="292" text-anchor="middle" font-size="10.5" font-family="monospace" fill="#8839ef" font-weight="700">retrieve</text>
+
+          <!-- page left -> distill -->
+          <path d="M 210 196 C 420 46, 520 46, 646 74" fill="none" stroke="currentColor" stroke-width="2.5" stroke-dasharray="6 5" marker-end="url(#ah)"/>
+          <text x="318" y="40" text-anchor="middle" font-size="10.5" font-family="monospace" fill="currentColor" opacity="0.72">page left</text>
+          <path d="M 760 118 L 760 146" fill="none" stroke="currentColor" stroke-width="2.5" marker-end="url(#ah)"/>
+
+          <!-- predict -> chip -->
+          <path d="M 286 372 L 214 268" fill="none" stroke="currentColor" stroke-width="2.5" marker-end="url(#ah)"/>
+          <text x="214" y="330" text-anchor="middle" font-size="10.5" font-family="monospace" fill="currentColor" opacity="0.72">one chip</text>
+
+          <!-- tab -> actuate -->
+          <path d="M 120 276 L 120 462 L 286 462" fill="none" stroke="currentColor" stroke-width="2.5" marker-end="url(#ah)"/>
+          <text x="150" y="452" text-anchor="start" font-size="10.5" font-family="monospace" fill="currentColor" opacity="0.72">Tab</text>
+
+          <!-- close the loop -->
+          <path d="M 560 462 L 700 462 L 700 370" fill="none" stroke="#8839ef" stroke-width="3" marker-end="url(#ahm)"/>
+          <text x="626" y="452" text-anchor="middle" font-size="10.5" font-family="monospace" fill="#8839ef" font-weight="700">advance or close the task</text>
+
+          <!-- sweep note -->
+          <text x="792" y="404" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.6">tasks expire at 5 min</text>
+          <text x="792" y="421" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.6">context holds 12 h</text>
+        </svg>
+      </div>
+      <figcaption>
+        The purple path is what makes it an agent rather than a search box: <b>retrieve</b> chooses which queries to run
+        from what the page can actually do, and <b>actuate</b> writes back &mdash; an accepted chip advances the task it
+        belonged to, or deletes it when its last field lands.
+      </figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">How it reads a page</p>
+      <h2>Structure, not soup.</h2>
+      <p class="lede">
+        A DOM scrape gives you markup. The accessibility tree gives you what the page <em>means</em> &mdash; every
+        control with its role, its name and its state, which is exactly what deciding on an action needs.
+      </p>
+    </div>
+
+    <div class="grid">
+      <div class="slab card lift">
+        <div class="badge" style="background:var(--mauve)">&#8677;</div>
+        <h3>Next-action chips</h3>
+        <p>Click, fill, select, submit, scroll, switch tab, or open a destination. Grounded in the page, your notes and what you just did &mdash; never invented.</p>
+      </div>
+      <div class="slab card lift">
+        <div class="badge" style="background:var(--blue)">&#9998;</div>
+        <h3>Ghost text</h3>
+        <p>Pause mid-sentence and the rest of the line appears in grey after the caret. Tab takes it, Ctrl+&rarr; takes a single word.</p>
+      </div>
+      <div class="slab card lift">
+        <div class="badge" style="background:var(--green)">&#9781;</div>
+        <h3>Reading memory</h3>
+        <p>Facts from pages you've left, kept for an hour in session storage and offered on whatever site can act on them. Opt-in.</p>
+      </div>
+      <div class="slab card lift">
+        <div class="badge" style="background:var(--peach)">&#9707;</div>
+        <h3>Conflict-aware</h3>
+        <p>Two sources disagreeing about a time or a surname isn't a crash. It's a flagged conflict, and Carat declines to fill the disputed detail.</p>
+      </div>
+      <div class="slab card lift">
+        <div class="badge" style="background:var(--teal)">&#9635;</div>
+        <h3>Debug panel</h3>
+        <p>Alt+Shift+D shows the request, the outline it sent, the answer, token counts and latency for the current tab.</p>
+      </div>
+      <div class="slab card lift">
+        <div class="badge" style="background:var(--red)">&#9866;</div>
+        <h3>Off where it matters</h3>
+        <p>Banks, identity providers and password managers are never touched, whatever your own blocklist says. Password and one-time-code fields are skipped.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">Elastic &mdash; Find the Signal</p>
+      <h2>Elasticsearch as the agent's context layer.</h2>
+      <p class="lede">
+        Not retrieval bolted onto a chatbot. The agent decides <em>which</em> queries to run based on what the page in
+        front of you can actually do, and closes tasks out when you accept a suggestion.
+      </p>
+    </div>
+
+    <div class="tablewrap" style="margin-bottom:30px">
+      <table>
+        <thead><tr><th>Index</th><th>Holds</th></tr></thead>
+        <tbody>
+          <tr><td><code>carat-observations</code></td><td>The accessibility outline of every page read</td></tr>
+          <tr><td><code>carat-facts</code></td><td>Facts distilled from pages you've left behind</td></tr>
+          <tr><td><code>carat-tasks</code></td><td>Open errands, with the fields still to enter</td></tr>
+          <tr><td><code>carat-details</code></td><td>Who people are &mdash; name parts, email, phone &mdash; keyed by who it's about</td></tr>
+          <tr><td><code>carat-actions</code></td><td>Chips accepted and dismissed</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="grid" style="margin-bottom:30px">
+      <div class="slab card lift">
+        <h3>Hybrid retrieval</h3>
+        <p>RRF over BM25 and <span class="m">semantic_text</span> when an inference endpoint is set, BM25 alone when it isn't. Three queries in parallel under one 1.8&thinsp;s deadline.</p>
+      </div>
+      <div class="slab card lift">
+        <h3>ES|QL rollup</h3>
+        <p><span class="m">STATS &hellip; BY status, actionType</span> counts what's still open &mdash; and only runs when this page can finish something.</p>
+      </div>
+      <div class="slab card lift">
+        <h3>Ingest pipeline</h3>
+        <p>Every write is stamped with <span class="m">received_at</span>, normalised host and origin, ECS-style <span class="m">event.*</span> metadata, and card-like digit runs redacted before the document lands.</p>
+      </div>
+      <div class="slab card lift">
+        <h3>Two clocks</h3>
+        <p>Tasks are hot intent &mdash; a five-minute window, swept continuously. Context is long memory &mdash; twelve hours. A task and a fact age differently, so they're queried differently.</p>
+      </div>
+    </div>
+
+    <p class="eyebrow" style="margin-bottom:11px">What reaches the model</p>
+    <div class="code" role="img" aria-label="Retrieved context lines: a calendar task with outstanding fields, an ES|QL summary, a supporting observation, and a personal detail marked as a conflict that must not be filled."><span class="c-mauve">[task]</span> calendar_event <span class="c-faint">from</span> discord.com<span class="c-faint">:</span> Dinner at Seven Shores Cafe on Friday at 6.
+       <span class="c-faint">&mdash; still to enter:</span> <span class="c-green">when=</span>"Friday at 6"<span class="c-faint">,</span> <span class="c-green">location=</span>"Seven Shores Cafe"
+
+<span class="c-peach">[elasticsearch]</span> ES|QL task summary: 1 unresolved calendar_event task open in the last 5 minutes
+<span class="c-peach">[elasticsearch]</span> page <span class="c-faint">from</span> discord.com, 2026-09-20T04:41Z: &hellip;
+
+<span class="c-red">[task]</span> personal_detail <span class="c-faint">for</span> Pez Kwan <span class="c-faint">&mdash;</span> <span class="c-red">conflict:</span> family_name has been
+       given as Guan / Kwan, so do not fill it</div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">Rox &mdash; Best AI Agent</p>
+      <h2>Real data is a mess. That's the job.</h2>
+    </div>
+
+    <div class="grid">
+      <div class="slab card lift">
+        <div class="badge" style="background:var(--mauve)">&#8800;</div>
+        <h3>Conflicting sources</h3>
+        <p>One source says dinner at 6, another says 7. The task keeps a single document, flips to <span class="m">conflict</span>, and the disagreement travels with the record instead of beside it.</p>
+      </div>
+      <div class="slab card lift">
+        <div class="badge" style="background:var(--blue)">&#9863;</div>
+        <h3>Entity resolution</h3>
+        <p>&ldquo;Pez Guan&rdquo; and &ldquo;Pez Kwan&rdquo; resolve to one person with a disputed surname, not two people &mdash; identity keys on the given name.</p>
+      </div>
+      <div class="slab card lift">
+        <div class="badge" style="background:var(--green)">&#9784;</div>
+        <h3>Whose detail is it?</h3>
+        <p>&ldquo;My name is X&rdquo; is you. &ldquo;Is your name X&rdquo;, said <em>to</em> you, is someone else &mdash; likely who you're booking for. Carat files them apart and lets the form's own labels decide.</p>
+      </div>
+      <div class="slab card lift">
+        <div class="badge" style="background:var(--peach)">&#8635;</div>
+        <h3>Incomplete by default</h3>
+        <p>A task is the fields the destination will ask for. Each fill completes one; only the last closes it. Travelling to a page completes nothing, so the errand survives the journey.</p>
+      </div>
+      <div class="slab card lift">
+        <div class="badge" style="background:var(--red)">&#9888;</div>
+        <h3>Declines under doubt</h3>
+        <p>When two people could fill the same form and nothing settles which, Carat fills neither and picks a different action rather than guessing whose name goes in the box.</p>
+      </div>
+      <div class="slab card lift">
+        <div class="badge" style="background:var(--teal)">&#10003;</div>
+        <h3>Closes the loop</h3>
+        <p>Accepting a chip isn't just an answer &mdash; it's a write. The action is recorded and the task it belonged to is advanced or deleted.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">Submitted to</p>
+      <h2>Categories.</h2>
+    </div>
+
+    <div class="grid">
+      <div class="slab cat lift">
+        <div class="cat-top"><span class="cat-name">Elastic</span><span class="tag built">Built on it</span></div>
+        <p>Find the Signal &mdash; Best use of Elasticsearch.</p>
+        <ul>
+          <li>Five indices fed from the accessibility tree</li>
+          <li>Hybrid RRF over BM25 + <span class="m">semantic_text</span></li>
+          <li>ES|QL aggregation over open tasks</li>
+          <li>Ingest pipeline with ECS metadata and redaction</li>
+          <li>Agentic retrieval that picks its own queries, then writes back</li>
+        </ul>
+      </div>
+      <div class="slab cat lift">
+        <div class="cat-top"><span class="cat-name">Rox</span><span class="tag built">Built on it</span></div>
+        <p>Best AI Agent.</p>
+        <ul>
+          <li>Conflict detection across disagreeing sources</li>
+          <li>Entity resolution on partial and misheard names</li>
+          <li>Subject attribution &mdash; whose detail is whose</li>
+          <li>Decisions deferred when the data can't settle them</li>
+          <li>Operates on live pages, not a clean fixture</li>
+        </ul>
+      </div>
+      <div class="slab cat lift">
+        <div class="cat-top"><span class="cat-name">Baseten</span><span class="tag ready">Drop-in</span></div>
+        <p>Best Use of Baseten.</p>
+        <ul>
+          <li>The engine calls an OpenAI-compatible <span class="m">/responses</span> endpoint</li>
+          <li>Base URL is a setting, so a Baseten deployment swaps in without a code change</li>
+          <li>Two model roles &mdash; a fast one for ghost text, a smarter one for actions</li>
+        </ul>
+      </div>
+      <div class="slab cat lift">
+        <div class="cat-top"><span class="cat-name">Browserbase</span><span class="tag ready">Same protocol</span></div>
+        <p>Best Use of Browserbase.</p>
+        <ul>
+          <li>Carat drives pages through the Chrome DevTools Protocol &mdash; the protocol Browserbase exposes remotely</li>
+          <li>Reading and acting already go through one CDP surface</li>
+          <li>Running the same agent against a hosted session is a transport change, not a rewrite</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">Everything you press</p>
+      <h2>Four keys.</h2>
+    </div>
+    <div class="keys">
+      <div class="keyrow"><span class="key">Tab</span> Accept the chip. Twice if it can't be undone.</div>
+      <div class="keyrow"><span class="key">Esc</span> Dismiss it. Never suggested again on that page.</div>
+      <div class="keyrow"><span class="key">Ctrl</span><span class="key">&rarr;</span> Take one word of ghost text.</div>
+      <div class="keyrow"><span class="key">Alt</span><span class="key">Shift</span><span class="key">C</span> Ask for a suggestion right now.</div>
+      <div class="keyrow"><span class="key">Alt</span><span class="key">Shift</span><span class="key">X</span> Clear everything Carat remembers.</div>
+      <div class="keyrow"><span class="key">Alt</span><span class="key">Shift</span><span class="key">D</span> Show what it's thinking on this page.</div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="foot">
+      <span>Carat &mdash; Hack the North 2026</span>
+      <span style="font-family:var(--mono);font-size:0.78rem">Chrome MV3 &middot; WXT &middot; TypeScript &middot; Elasticsearch</span>
+    </div>
+  </footer>
+</div>
+
+<script>
+  (function () {
+    var root = document.documentElement;
+    var btn = document.getElementById('themer');
+    btn.addEventListener('click', function () {
+      var dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      var now = root.getAttribute('data-theme') || (dark ? 'dark' : 'light');
+      root.setAttribute('data-theme', now === 'dark' ? 'light' : 'dark');
+    });
+
+    var reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+    var typed = document.getElementById('typed');
+    var chip = document.getElementById('chip');
+    var chip2 = document.getElementById('chip2');
+    var kbd = document.getElementById('kbd');
+    var lname = document.getElementById('lname');
+    var srcs = ['s1', 's2', 's3'].map(function (id) { return document.getElementById(id); });
+    var rows = ['r1', 'r2', 'r3', 'r4'].map(function (id) { return document.getElementById(id); });
+    var WORD = 'Pez';
+
+    // At rest the whole case reads as resolved, so the first frame - and any
+    // thumbnail of it - shows the outcome rather than an empty form.
+    function rest() {
+      typed.textContent = WORD;
+      srcs.forEach(function (el) { el.classList.add('lit'); });
+      rows.forEach(function (el) { el.classList.add('lit'); });
+      chip.classList.add('show');
+      chip2.classList.add('show');
+      lname.classList.add('refused');
+    }
+
+    if (reduce.matches) { rest(); return; }
+
+    var timers = [];
+    function at(ms, fn) { timers.push(setTimeout(fn, ms)); }
+
+    function cycle() {
+      timers.forEach(clearTimeout);
+      timers = [];
+      typed.textContent = '';
+      srcs.forEach(function (el) { el.classList.remove('lit'); });
+      rows.forEach(function (el) { el.classList.remove('lit'); });
+      chip.classList.remove('show');
+      chip2.classList.remove('show');
+      kbd.classList.remove('press');
+      lname.classList.remove('refused');
+
+      // The three sources arrive, out of order, as they would in real life.
+      at(300, function () { srcs[0].classList.add('lit'); });
+      at(900, function () { srcs[1].classList.add('lit'); });
+      at(1500, function () { srcs[2].classList.add('lit'); });
+
+      // Then what Elasticsearch makes of them.
+      rows.forEach(function (row, i) {
+        at(2150 + i * 330, function () { row.classList.add('lit'); });
+      });
+
+      // The agreed half is offered and taken.
+      at(3700, function () { chip.classList.add('show'); });
+      at(4500, function () { kbd.classList.add('press'); });
+      at(4660, function () { kbd.classList.remove('press'); });
+      for (var i = 0; i < WORD.length; i++) {
+        (function (n) { at(4700 + n * 110, function () { typed.textContent = WORD.slice(0, n + 1); }); })(i);
+      }
+
+      // The disputed half is not.
+      at(5400, function () { lname.classList.add('refused'); chip2.classList.add('show'); });
+      at(8600, cycle);
+    }
+
+    rest();
+    at(1600, cycle);
+  })();
+</script>
+</body>
+</html>
