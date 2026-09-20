@@ -25,12 +25,9 @@ export const STATUS_CSS = `
 }
 .is-running .dot { background: #a6e3a1; }
 .is-running { color: #cdd6f4; }
-.is-busy .dot { animation: carat-pulse 1s ease-in-out infinite; }
+/* Thinking: the dot dims instead of pulsing; nothing on the page loops. */
+.is-busy .dot { opacity: 0.45; }
 /* Quiet: still running, just not talking. */
 .is-quiet .dot { background: #6c7086; }
-@keyframes carat-pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.45; transform: scale(0.75); }
-}
 @media (prefers-reduced-motion: reduce) { .is-busy .dot { animation: none; opacity: 0.6; } }
 `;
