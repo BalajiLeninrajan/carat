@@ -254,7 +254,7 @@ describe('the built manifest', () => {
     expect(manifest.permissions).not.toContain('clipboardRead');
     expect(manifest.optional_permissions).toContain('clipboardRead');
     expect(manifest.permissions).toContain('offscreen');
-    // Importing the config pulls the whole of wxt in, which outruns the 5s
-    // default when the suite is running every other file beside it.
+    // Importing the config pulls the whole of wxt in, which on a loaded
+    // machine takes longer than a unit test's five seconds.
   }, 30_000);
 });

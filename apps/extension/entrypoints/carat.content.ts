@@ -17,8 +17,8 @@ import {
 import { isSensitiveField, looksSecret, maskSensitive } from '../src/engine/shared/redact';
 import { onMessage, safeSendMessage } from '../src/messaging';
 import { createQuiet } from '../src/quiet';
-import { hasMoreBelow, scrollPageDown } from '../src/scroll';
-import { createStatusLine } from '../src/status';
+import { caratScrolling, hasMoreBelow, scrollPageDown } from '../src/scroll';
+import { createStatusLine, PAUSED_NOTICE } from '../src/status';
 
 /** How long the user must be still, after interacting, before Carat looks at the page. */
 const IDLE_MS = 500;
@@ -26,8 +26,12 @@ const IDLE_MS = 500;
 const TYPING_IDLE_MS = 250;
 /** How often the status pill re-asks the worker what it should say. */
 const STATUS_POLL_MS = 5000;
+/** How long a paused tab shows the pill it would otherwise be keeping hidden. */
+const PAUSE_NOTICE_MS = 4000;
 /** A highlight settles before it counts as one: dragging a selection fires all the way. */
 const SELECTION_MS = 300;
+/** How still the page has to be, after the user scrolls it, before Carat asks about what is now on screen. */
+const SCROLL_SETTLE_MS = 600;
 /** What the model is told the user highlighted, at most. */
 const MAX_SELECTION = 300;
 /** The chip, the ring, the status pill and the debug panel each hang off an attribute of their own. */
@@ -827,6 +831,27 @@ export default defineContentScript({
     }
 
     /**
+     * Scrolling is not on that list. It is not an answer to the offer, so the
+     * chip stays where it is and comes back when its control does. It is a
+     * new part of the page to look at, though, so once the scrolling stops
+     * the question goes out again and whatever lands replaces what is up.
+     *
+     * On its own timer rather than the activity one: a page that scrolls
+     * itself must not be able to hold the idle timer open forever. Carat's
+     * own scrolling is excluded, because it asks on its own when it lands.
+     */
+    let scrollSettle: ReturnType<typeof setTimeout> | undefined;
+    document.addEventListener(
+      'scroll',
+      () => {
+        if (caratScrolling()) return;
+        clearTimeout(scrollSettle);
+        scrollSettle = setTimeout(() => schedule('scroll'), SCROLL_SETTLE_MS);
+      },
+      { capture: true, passive: true },
+    );
+
+    /**
      * React and friends rewrite the focused input's value attribute on every
      * keystroke; that is typing, not a page change. Carat's own surfaces are
      * not either. This is the signal the worker's tree cache invalidates on.
@@ -953,11 +978,21 @@ export default defineContentScript({
     // -----------------------------------------------------------------------
     // The status pill, and the two shortcuts the worker relays here
 
+    /** Whether this page has already been told about the pause it is under. */
+    let pauseNoted = false;
+
     async function refreshStatus(): Promise<void> {
       const info = await safeSendMessage('getStatus', undefined);
       if (!info || !ctx.isValid) return;
       status.update(info);
       chip.setSound(info.sound);
+      // With the pill off, a pause looks exactly like carat having nothing to
+      // say. Break that silence once, then leave the page alone.
+      if (info.reason !== 'paused') pauseNoted = false;
+      else if (!info.show && !pauseNoted) {
+        pauseNoted = true;
+        status.notice(PAUSED_NOTICE, PAUSE_NOTICE_MS);
+      }
     }
     void refreshStatus();
     const statusTimer = setInterval(() => void refreshStatus(), STATUS_POLL_MS);

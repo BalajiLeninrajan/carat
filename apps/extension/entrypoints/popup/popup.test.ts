@@ -85,6 +85,28 @@ describe('popup', () => {
     expect(site.checked).toBe(false);
   });
 
+  it('says why carat went quiet on a paused tab, and resumes it', async () => {
+    sendMessage.mockImplementation(async (type: string) => (type === 'isTabPaused' ? true : settings));
+    await import('./main');
+    await flush();
+
+    const row = document.getElementById('paused-row') as HTMLElement;
+    expect(row.hidden).toBe(false);
+    expect(row.textContent).toContain("Paused on this tab: you dismissed Chrome's debugging bar.");
+
+    (document.getElementById('resume') as HTMLButtonElement).click();
+    await flush();
+    expect(sendMessage).toHaveBeenCalledWith('resumeTab', { tabId: 7 });
+    expect(row.hidden).toBe(true);
+  });
+
+  it('keeps the paused line out of the way while the tab is running', async () => {
+    sendMessage.mockImplementation(async (type: string) => (type === 'isTabPaused' ? false : settings));
+    await import('./main');
+    await flush();
+    expect((document.getElementById('paused-row') as HTMLElement).hidden).toBe(true);
+  });
+
   it('says Cleared and goes back to idle', async () => {
     vi.useFakeTimers();
     sendMessage.mockResolvedValue(settings);

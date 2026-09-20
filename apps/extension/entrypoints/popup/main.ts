@@ -9,6 +9,8 @@ const siteRow = document.getElementById('site-row') as HTMLElement;
 const siteEnabled = document.getElementById('site-enabled') as HTMLInputElement;
 const siteHostLabel = document.getElementById('site-host') as HTMLElement;
 const modelLine = document.getElementById('model') as HTMLElement;
+const pausedRow = document.getElementById('paused-row') as HTMLElement;
+const resumeButton = document.getElementById('resume') as HTMLButtonElement;
 const retryButton = document.getElementById('retry') as HTMLButtonElement;
 const optionsLink = document.getElementById('options') as HTMLAnchorElement;
 const tabHome = document.getElementById('tab-home') as HTMLButtonElement;
@@ -19,6 +21,8 @@ const analyticsEl = document.getElementById('analytics') as HTMLElement;
 
 /** The host of the tab the popup was opened over; undefined on chrome:// and friends. */
 let activeHost: string | undefined;
+/** That tab's id, which the pause lives on. */
+let activeTabId: number | undefined;
 
 export function siteHost(url: string | undefined): string | undefined {
   if (!url) return undefined;
@@ -64,6 +68,20 @@ function renderSite(settings: Settings): void {
   if (activeHost === undefined) return;
   siteHostLabel.textContent = activeHost;
   siteEnabled.checked = !isSiteOff(settings, activeHost);
+}
+
+/**
+ * Pressing Cancel on Chrome's debugging bar stops carat on that tab, and
+ * nothing on the page says so. The popup is where the user finds out and
+ * where they undo it.
+ */
+async function renderPaused(): Promise<void> {
+  if (activeTabId === undefined) return;
+  try {
+    pausedRow.hidden = !(await withTimeout(sendMessage('isTabPaused', { tabId: activeTabId })));
+  } catch {
+    pausedRow.hidden = true;
+  }
 }
 
 function renderModel(settings: Settings): void {
@@ -153,10 +171,12 @@ async function load(): Promise<void> {
   try {
     const [settings, tab] = await withTimeout(Promise.all([sendMessage('getSettings', undefined), findActiveTab()]));
     activeHost = tab.host;
+    activeTabId = tab.id;
     enabled.checked = settings.enabled;
     renderSite(settings);
     renderModel(settings);
     app.dataset.state = 'ready';
+    void renderPaused();
   } catch {
     app.dataset.state = 'offline';
   } finally {
@@ -217,6 +237,19 @@ siteEnabled.addEventListener('change', async () => {
     app.dataset.state = 'offline';
   } finally {
     siteEnabled.disabled = false;
+  }
+});
+
+resumeButton.addEventListener('click', async () => {
+  if (activeTabId === undefined) return;
+  resumeButton.disabled = true;
+  try {
+    await withTimeout(sendMessage('resumeTab', { tabId: activeTabId }));
+    pausedRow.hidden = true;
+  } catch {
+    app.dataset.state = 'offline';
+  } finally {
+    resumeButton.disabled = false;
   }
 });
 
