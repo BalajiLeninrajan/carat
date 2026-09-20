@@ -132,8 +132,14 @@ export const CHIP_CSS = `
 }
 .chip:hover { background: #181825; }
 .text { display: flex; flex-direction: column; justify-content: center; min-width: 0; gap: 1px; }
-/* The label is what gives way when the two lines do not both fit. */
-.label { line-height: ${LINE_PX}px; text-box-trim: trim-both; text-box-edge: cap alphabetic; overflow: hidden; text-overflow: ellipsis; }
+/* The label is what gives way when the two lines do not both fit.
+   It is never text-box-trimmed, whatever the keycap does: prose has
+   descenders, trimming to the baseline takes the room they need off the
+   bottom of the line box, and a clipped overflow then cuts them off. The
+   keycap can be trimmed because a cap and an arrow have nothing below the
+   baseline to lose. Half a pixel of disagreement between the two centre
+   lines is cheaper than a clipped "g". */
+.label { line-height: ${LINE_PX}px; overflow: hidden; text-overflow: ellipsis; }
 .sub { font-size: 11px; line-height: 1.2; color: #a6adc8; overflow: hidden; text-overflow: ellipsis; }
 .sub[hidden] { display: none; }
 .value { font-weight: 600; color: #f5e0dc; }
