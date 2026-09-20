@@ -527,11 +527,12 @@ function sourceOf(value: string, req: NextActionRequest): string | undefined {
   return line ? truncate(`from this tab: ${normalizeWhitespace(line)}`, SOURCE_CHARS) : undefined;
 }
 
-/** What a note renders as: the fact, then `(read on discord.com, 2m ago)`. */
-const NOTE_TAIL = /\s*\((?:read on ([^,()]+)|this tab), [^()]*\)\s*$/;
+/** What a note renders as: `2m ago: the fact (read on discord.com)`. */
+const NOTE_TAIL = /\s*\((?:read on ([^()]+)|this tab)\)\s*$/;
+const NOTE_AGE = /^(?:just now|\d+[smh] ago): /;
 
 function noteFact(note: string): string {
-  return normalizeWhitespace(note.replace(NOTE_TAIL, ''));
+  return normalizeWhitespace(note.replace(NOTE_AGE, '').replace(NOTE_TAIL, ''));
 }
 
 function noteOrigin(note: string): string {

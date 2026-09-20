@@ -14,7 +14,7 @@ const CONTROLS: OutlineControl[] = [
   { n: 3, role: 'button', name: 'Pay $312.40', risky: true },
 ];
 
-const READ_NOTE = 'Dinner at Seven Shores Cafe on Friday at 6. (read on discord.com, 2m ago)';
+const READ_NOTE = '2m ago: Dinner at Seven Shores Cafe on Friday at 6. (read on discord.com)';
 
 /** A fill is only allowed a value the user read or typed; these deps supply the reading. */
 const fromNotes = { lines: async () => [READ_NOTE] };

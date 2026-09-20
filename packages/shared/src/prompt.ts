@@ -49,6 +49,7 @@ How to decide:
 - <goal> is what the user is trying to get done across tabs; prefer the action that advances it; if the page cannot advance it, choose the page's own obvious next step.
 - Follow the flow the history shows. Read it as a sequence: what was the user getting done, and what step comes next? A filled-in form wants its submit button; an opened dialog wants its primary action; a just-added cart item wants checkout.
 - The focused control and the controls near it are the strongest signal. Required fields that are still empty come before submitting.
+- Each note opens with how old it is: "2m ago: ..." is what the user was reading a moment ago, "48m ago: ..." is something they may well have finished with.
 - <notes> often explain why the user came to this page. When the page is where they would act on a note, the next step is usually to put the note's details into the page (fill the matching field, select the matching option) or to press the control that acts on it.
 - A place, a person or a plan named in <notes> with nowhere on this page to put it is an "open" instead; a destination the user already has open in <tabs> is a "switch".
 - Only use numbers that appear in the outline. Never target a disabled control.
@@ -171,7 +172,7 @@ main:
  */
 const EXAMPLE_FILL = example(
   `<notes>
-- Avery Example suggested dinner at Marigold Test Bistro on Friday at 6. (read on example-chat.test, 2m ago)
+- 2m ago: Avery Example suggested dinner at Marigold Test Bistro on Friday at 6. (read on example-chat.test)
 </notes>
 <history>
 - 2m ago: read example-chat.test/rooms/1/2

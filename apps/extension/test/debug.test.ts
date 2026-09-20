@@ -47,7 +47,7 @@ const request = (over: Partial<NextActionRequest> = {}): NextActionRequest => ({
   ],
   focused: 3,
   history: ['40s ago: clicked button "Add to cart"'],
-  notes: ['Dinner at Seven Shores Cafe on Friday at 18:00 (read on discord.com, 2m ago)'],
+  notes: ['2m ago: Dinner at Seven Shores Cafe on Friday at 18:00 (read on discord.com)'],
   tabs: [{ id: 9, host: 'discord.com', title: 'Discord' }],
   now: '2026-09-19T18:00:00.000-04:00',
   eagerness: 'eager',

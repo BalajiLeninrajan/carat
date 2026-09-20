@@ -28,6 +28,10 @@ export const NOTES_LIMITS = {
   ttlMs: 60 * 60_000,
   /** Notes the request carries. */
   top: 8,
+  /** Past this a note is old news: the page in front of the user outweighs it. */
+  oldMs: 30 * 60_000,
+  /** How many old notes a request carries. The rest are dropped rather than ranked last. */
+  oldMax: 2,
   factChars: 200,
   /** Text under this is not worth a model call. */
   minTextChars: 120,
@@ -173,7 +177,9 @@ export function createNotes(deps: NotesDeps): Notes {
       const newestFirst = [...list].sort((a, b) => b.at - a.at);
       const others = newestFirst.filter((n) => n.tabId !== mine);
       const own = mine === undefined ? [] : newestFirst.filter((n) => n.tabId === mine);
-      return [...others, ...own].slice(0, NOTES_LIMITS.top).map((n) => render(n, at, n.tabId === mine));
+      return capOld([...others, ...own], at)
+        .slice(0, NOTES_LIMITS.top)
+        .map((n) => render(n, at, n.tabId === mine));
     },
     async newest(n, at = now()) {
       const list = await read();
@@ -205,9 +211,26 @@ export function fallbackFacts(item: Pick<ContextItem, 'id' | 'text' | 'kind' | '
     .map((c) => `${CANDIDATE_FACT[c.kind]} mentioned: ${c.value}${where}`);
 }
 
+/**
+ * Half an hour of reading is a lot of notes, and an hour-old one about
+ * somewhere the user has long since left is what the model reaches for when
+ * the page in front of it gives it nothing. Two of them are kept, in case the
+ * plan really was made this morning; the rest go. Newest first is the order
+ * they arrive in, so the two kept are the two newest old ones.
+ */
+function capOld(ordered: Note[], at: number): Note[] {
+  let old = 0;
+  return ordered.filter((n) => at - n.at < NOTES_LIMITS.oldMs || ++old <= NOTES_LIMITS.oldMax);
+}
+
+/**
+ * How old, then the fact, then where it was read. The age leads because it is
+ * what the model is asked to weigh the note by, and a line it has to read to
+ * the end to date is a line it dates last.
+ */
 function render(note: Note, at: number, own: boolean): string {
-  const where = own ? '(this tab' : `(read on ${hostOf(note.origin)}`;
-  return `${note.text} ${where}, ${relativeAge(note.at, at)})`;
+  const where = own ? 'this tab' : `read on ${hostOf(note.origin)}`;
+  return `${relativeAge(note.at, at)}: ${note.text} (${where})`;
 }
 
 function prune(list: Note[], at: number): Note[] {

@@ -152,7 +152,7 @@ describe('enrich', () => {
   });
 
   it('finds the note a fill value was read from', () => {
-    const notes = ['dinner at Seven Shores Cafe, Friday at 6? (read on discord.com, 2m ago)'];
+    const notes = ['2m ago: dinner at Seven Shores Cafe, Friday at 6? (read on discord.com)'];
     const out = enrich(action({ kind: 'fill', value: 'Seven Shores Cafe' }), req({ notes }));
     expect(out?.source).toBe('from discord.com: dinner at Seven Shores Cafe, Friday at 6?');
   });
@@ -181,7 +181,7 @@ describe('enrich', () => {
   });
 
   it('hands back the same object once there is nothing left to add', () => {
-    const notes = ['dinner at Seven Shores Cafe, Friday at 6? (read on discord.com, 2m ago)'];
+    const notes = ['2m ago: dinner at Seven Shores Cafe, Friday at 6? (read on discord.com)'];
     const once = enrich(action({ kind: 'fill', value: 'Seven Shores Cafe' }), req({ notes }));
     expect(enrich(once, req({ notes }))).toBe(once);
   });

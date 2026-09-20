@@ -58,7 +58,7 @@ describe('notes', () => {
 
     expect(distill).toHaveBeenCalledTimes(1);
     expect(distill.mock.calls[0]![1]).toBe('discord.com');
-    expect(await notes.top({ tabId: 9 })).toEqual(['Dinner at Seven Shores Cafe on Friday at 6. (read on discord.com, just now)']);
+    expect(await notes.top({ tabId: 9 })).toEqual(['just now: Dinner at Seven Shores Cafe on Friday at 6. (read on discord.com)']);
   });
 
   it('distils on tab-hide, not on every capture', async () => {
@@ -121,7 +121,7 @@ describe('notes', () => {
     answer = ['The new plan: Friday.'];
     await notes.distilNow(item({ hash: 2 }));
 
-    expect(await notes.top({ tabId: 9 })).toEqual(['The new plan: Friday. (read on discord.com, just now)']);
+    expect(await notes.top({ tabId: 9 })).toEqual(['just now: The new plan: Friday. (read on discord.com)']);
   });
 
   it('never reads the same text twice', async () => {
@@ -142,7 +142,37 @@ describe('notes', () => {
     const top = await notes.top({ tabId: 1 });
     expect(top[0]).toContain('raj@example.com');
     expect(top[0]).toContain('read on mail.example.com');
-    expect(top.find((line) => line.includes('hana@example.com'))).toContain('(this tab');
+    expect(top.find((line) => line.includes('hana@example.com'))).toContain('(this tab)');
+  });
+
+  it('opens every line with how old the note is, so the model can weigh it', async () => {
+    const { notes, tick } = setup(async () => ['Dinner at Seven Shores Cafe on Friday at 6.']);
+    await notes.distilNow(item({ tabId: 1, hash: 1 }));
+    tick(3 * MIN);
+    expect((await notes.top({ tabId: 9 }))[0]).toBe('3m ago: Dinner at Seven Shores Cafe on Friday at 6. (read on discord.com)');
+    tick(39 * MIN);
+    expect((await notes.top({ tabId: 9 }))[0]).toBe('42m ago: Dinner at Seven Shores Cafe on Friday at 6. (read on discord.com)');
+  });
+
+  it('carries two notes from over half an hour ago and no more', async () => {
+    let site = 0;
+    const { notes, tick } = setup(async () => [`Fact ${site}`]);
+    // Six pages read at five-minute intervals, then the user reads nothing for
+    // half an hour: the first four are old news by the time they act.
+    for (site = 0; site < 6; site++) {
+      await notes.distilNow(item({ origin: `https://site${site}.example`, tabId: site + 10, hash: site }));
+      tick(5 * MIN);
+    }
+    tick(15 * MIN);
+
+    const top = await notes.top({ tabId: 1 });
+    const old = top.filter((line) => /\b(3[0-9]|[4-9][0-9])m ago|h ago/.test(line));
+    expect(old).toHaveLength(NOTES_LIMITS.oldMax);
+    // The two kept are the newest of the old ones, and every fresh one is there.
+    expect(old[0]).toContain('Fact 3');
+    expect(old[1]).toContain('Fact 2');
+    expect(top.filter((line) => /Fact [45]/.test(line))).toHaveLength(2);
+    expect(top.some((line) => /Fact [01]\b/.test(line))).toBe(false);
   });
 
   it('carries at most eight lines, newest first', async () => {
