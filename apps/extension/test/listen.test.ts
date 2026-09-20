@@ -1,11 +1,21 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_SETTINGS, type Settings } from '../src/engine/shared/settings';
+import type { Note } from '../src/engine/background/notes';
 import { downsample, encodeWav, toBase64 } from '../src/engine/offscreen/listen';
 
-type RecordHeard = (lines: string[], context: string[], settings: Settings) => Promise<void>;
-const { recordHeard } = vi.hoisted(() => ({ recordHeard: vi.fn<RecordHeard>(async () => undefined) }));
+type RecordHeard = (lines: string[], context: string[], settings: Settings) => Promise<Note[]>;
+type IndexFacts = (observation: unknown, notes: Note[]) => Promise<void>;
+const { recordHeard, indexFacts } = vi.hoisted(() => ({
+  recordHeard: vi.fn<RecordHeard>(async (lines) =>
+    lines.map((text, i) => ({ at: Date.now() + i, source: 'heard' as const, url: '', title: '', text })),
+  ),
+  indexFacts: vi.fn<IndexFacts>(async () => undefined),
+}));
 vi.mock('../src/engine/background/notes', () => ({ recordHeard }));
+vi.mock('../src/background/elastic', () => ({
+  createElasticMemory: () => ({ indexFacts }),
+}));
 
 /** The offscreen document's messages, as the worker sees them. */
 type Listener = (msg: unknown) => void;
@@ -103,6 +113,7 @@ describe('background listening', () => {
   beforeEach(() => {
     vi.resetModules();
     recordHeard.mockClear();
+    indexFacts.mockClear();
     vi.useFakeTimers();
   });
   afterEach(() => {
@@ -121,6 +132,10 @@ describe('background listening', () => {
     await settle();
     expect(recordHeard).toHaveBeenCalledTimes(1);
     expect(recordHeard).toHaveBeenCalledWith(['dinner with Alex on Friday at six'], [], h.settings);
+    expect(indexFacts).toHaveBeenCalledTimes(1);
+    expect(indexFacts.mock.calls[0]?.[1]).toEqual([
+      expect.objectContaining({ source: 'heard', text: 'dinner with Alex on Friday at six' }),
+    ]);
   });
 
   it('notes one batch, not one note per line', async () => {

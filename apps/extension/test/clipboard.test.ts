@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { readFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createClipboardReader, MIN_GAP_MS, type ClipboardDocument } from '../src/engine/background/clipboard';
 import {
@@ -8,7 +9,7 @@ import {
   recordCopied,
   type Note,
 } from '../src/engine/background/notes';
-import { setClipboardPermission, CLIPBOARD_PERMISSION } from '../entrypoints/options/form';
+import { CLIPBOARD_PERMISSION, setClipboardPermission } from '../entrypoints/options/form';
 import { looksSecret } from '../src/engine/shared/redact';
 import { DEFAULT_SETTINGS, type Settings } from '../src/engine/shared/settings';
 
@@ -245,15 +246,19 @@ describe('the clipboard permission toggle', () => {
 });
 
 describe('the built manifest', () => {
-  it('keeps clipboardRead optional and never asks for it up front', async () => {
+  it('keeps clipboard optional and asks for microphone access from the options tab', async () => {
     const config = (await import('../wxt.config')).default;
     const manifest = config.manifest as {
       permissions: string[];
       optional_permissions: string[];
     };
+    const optionsHtml = await readFile(`${process.cwd()}/entrypoints/options/index.html`, 'utf8');
     expect(manifest.permissions).not.toContain('clipboardRead');
+    expect(manifest.permissions).not.toContain('audioCapture');
     expect(manifest.optional_permissions).toContain('clipboardRead');
+    expect(manifest.optional_permissions).not.toContain('audioCapture');
     expect(manifest.permissions).toContain('offscreen');
+    expect(optionsHtml).toContain('name="manifest.open_in_tab" content="true"');
     // Importing the config pulls the whole of wxt in, which on a loaded
     // machine takes longer than a unit test's five seconds.
   }, 30_000);

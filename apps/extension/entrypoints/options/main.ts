@@ -28,6 +28,14 @@ function render(s: Settings): void {
   renderForm(form, s);
 }
 
+async function requestMicrophoneAccess(): Promise<void> {
+  if (!navigator.mediaDevices?.getUserMedia) throw new Error('microphone capture is not available on this page');
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+  });
+  for (const track of stream.getTracks()) track.stop();
+}
+
 async function load(): Promise<void> {
   app.dataset.state = 'loading';
   setStatus('');
@@ -78,18 +86,21 @@ clipboardRead.addEventListener('change', async () => {
 retryButton.addEventListener('click', () => void load());
 
 /**
- * An offscreen document cannot show Chrome's microphone prompt, so the grant
- * has to be asked for from a real extension page. Once granted it holds for
- * the extension, and the worker's offscreen document opens the device without
- * asking again.
+ * An offscreen document cannot show Chrome's microphone prompt, so a visible
+ * extension page asks for the web media permission first. Once granted it holds
+ * for the extension origin, and the worker's offscreen document opens the
+ * device without asking again.
  */
 micButton.addEventListener('click', async () => {
   micButton.disabled = true;
   micStatus.textContent = 'Asking…';
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    for (const track of stream.getTracks()) track.stop();
+    await requestMicrophoneAccess();
+    const listenEnabled = form.elements.namedItem('listenEnabled') as HTMLInputElement | null;
+    if (listenEnabled) listenEnabled.checked = true;
+    render(await withTimeout(sendMessage('setSettings', { listenEnabled: true })));
     micStatus.textContent = 'Microphone allowed';
+    setStatus('Saved');
   } catch (err) {
     micStatus.textContent = err instanceof Error ? `Refused: ${err.message}` : 'Refused';
   } finally {

@@ -12,6 +12,7 @@
 
 import { maskSensitive } from "../shared/redact";
 import { loadSettings } from "../shared/settings";
+import { createElasticMemory, type Observation } from "../../background/elastic";
 import { recordHeard } from "./notes";
 import { closeOffscreen, openOffscreen } from "./offscreen";
 /** Alt-tabbing away this briefly does not stop listening mid-sentence. */
@@ -22,6 +23,7 @@ const NOTE_AFTER_PAUSE_MS = 20_000;
 const NOTE_AFTER_SPEECH_S = 120;
 /** Already-noted lines passed along as context for the next batch. */
 const CONTEXT_LINES = 3;
+const elastic = createElasticMemory({ settings: () => loadSettings() });
 
 interface HeardLine {
   at: number;
@@ -44,11 +46,21 @@ export async function flush(): Promise<void> {
   noted = [...noted, ...batch].slice(-CONTEXT_LINES);
   const s = await loadSettings();
   if (!s.apiKey) return;
-  await recordHeard(
+  const added = await recordHeard(
     batch.map((l) => l.text),
     context,
     s,
   ).catch((e) => console.error("[carat] noting speech failed:", e));
+  if (added?.length) {
+    const observation: Observation = {
+      id: `heard:${batch[0]?.at ?? Date.now()}:${batch.length}`,
+      url: "",
+      title: "Microphone",
+      text: batch.map((l) => l.text).join("\n"),
+      at: batch[0]?.at ?? Date.now(),
+    };
+    await elastic.indexFacts(observation, added).catch((e) => console.warn("[carat] elastic heard indexing failed:", e));
+  }
 }
 
 let chromeFocused = true;
