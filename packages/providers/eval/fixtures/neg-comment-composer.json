@@ -1,0 +1,24 @@
+{
+  "name": "neg-comment-composer",
+  "request": {
+    "page": {
+      "host": "www.reddit.com",
+      "title": "Where is the best brunch in town? : brunch",
+      "path": "/r/brunch/comments/1/best",
+      "scroll": { "y": 0, "pages": 2.4, "more": true }
+    },
+    "outline": "main:\n  h1 Where is the best brunch in town?\n  text: We went on Sunday and the queue was worth it.\n  [1] textbox \"Join the conversation\" (required)\n  text: The field is required and cannot be empty (field message)\n  [2] link \"Read the other 42 comments\"\n  group \"Promoted\":\n    text: Ad\n    [3] button \"Join\"\n(2.4 more screens below; 18 controls not shown)",
+    "controls": [
+      { "n": 1, "role": "textbox", "name": "Join the conversation", "state": "required", "composer": true },
+      { "n": 2, "role": "link", "name": "Read the other 42 comments" },
+      { "n": 3, "role": "button", "name": "Join" }
+    ],
+    "history": ["1m ago: visited www.reddit.com/r/brunch"],
+    "notes": ["2m ago: Redirecting… | Slack (read on app.slack.com)"],
+    "tabs": [{ "id": 8, "host": "app.slack.com", "title": "Redirecting… | Slack" }],
+    "now": "2026-09-16T14:04:00-04:00",
+    "eagerness": "eager"
+  },
+  "expect": { "kind": "any", "forbidKinds": ["fill"], "forbidTargets": [1] },
+  "expectLocal": { "kind": "none" }
+}

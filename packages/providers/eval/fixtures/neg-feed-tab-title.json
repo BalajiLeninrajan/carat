@@ -1,0 +1,24 @@
+{
+  "name": "neg-feed-tab-title",
+  "request": {
+    "page": {
+      "host": "www.reddit.com",
+      "title": "Reddit — the front page",
+      "path": "/",
+      "scroll": { "y": 0, "pages": 3.4, "more": true }
+    },
+    "outline": "banner:\n  [1] searchbox \"Search Reddit\"\nmain:\n  h1 Popular posts\n  text: Where is the best brunch in town?\n  [2] link \"Where is the best brunch in town?\"\n  group \"Promoted\":\n    text: Ad\n    [3] button \"Join\"\n(2.4 more screens below; 31 controls not shown)",
+    "controls": [
+      { "n": 1, "role": "searchbox", "name": "Search Reddit" },
+      { "n": 2, "role": "link", "name": "Where is the best brunch in town?" },
+      { "n": 3, "role": "button", "name": "Join" }
+    ],
+    "history": ["3m ago: visited app.slack.com", "20s ago: visited www.reddit.com"],
+    "notes": ["2m ago: Redirecting… | Slack (read on app.slack.com)"],
+    "tabs": [{ "id": 8, "host": "app.slack.com", "title": "Redirecting… | Slack" }],
+    "now": "2026-09-16T14:04:00-04:00",
+    "eagerness": "eager"
+  },
+  "expect": { "kind": "any", "forbidKinds": ["fill"], "forbidTargets": [1] },
+  "expectLocal": { "kind": "none" }
+}
