@@ -68,6 +68,8 @@ export interface Notes {
   distilNow(item: ContextItem): Promise<Note[]>;
   /** The newest facts from other tabs, then this tab's own older ones, marked. */
   top(requester: Pick<Requester, 'tabId'>, now?: number): Promise<string[]>;
+  /** The newest `n` facts across every tab, newest first. What the goal is derived from. */
+  newest(n: number, now?: number): Promise<string[]>;
   sweep(): Promise<void>;
   clear(): Promise<void>;
   /** Resolves once every queued write has landed. */
@@ -172,6 +174,13 @@ export function createNotes(deps: NotesDeps): Notes {
       const others = newestFirst.filter((n) => n.tabId !== mine);
       const own = mine === undefined ? [] : newestFirst.filter((n) => n.tabId === mine);
       return [...others, ...own].slice(0, NOTES_LIMITS.top).map((n) => render(n, at, n.tabId === mine));
+    },
+    async newest(n, at = now()) {
+      const list = await read();
+      return [...list]
+        .sort((a, b) => b.at - a.at)
+        .slice(0, n)
+        .map((note) => render(note, at, false));
     },
     sweep: () => edit((list) => list),
     clear() {

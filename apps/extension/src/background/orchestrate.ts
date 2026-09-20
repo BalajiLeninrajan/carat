@@ -31,6 +31,8 @@ export interface NextActionDeps {
   history?: Pick<HistoryStore, 'lines'>;
   /** Facts distilled from pages read in other tabs, newest first. */
   notes?: { lines(host: string): Promise<string[]> };
+  /** One line for what the user is trying to get done across tabs, when carat has worked one out. */
+  goal?: () => Promise<string | undefined>;
   /** The user's open tabs, so `switch` has something to name. */
   tabs?: () => Promise<OpenTab[]>;
   /** Where the model's later answer goes. Without it the reply waits for the model. */
@@ -89,10 +91,11 @@ export async function nextAction(input: PageSnapshot, requester: Requester, deps
     return { action: null };
   }
 
-  const [history, notes, tabs] = await Promise.all([
+  const [history, notes, tabs, goal] = await Promise.all([
     requester.tabId === undefined ? [] : (deps.history?.lines(requester.tabId, started) ?? []),
     deps.notes?.lines(input.page.host) ?? [],
     deps.tabs?.().catch(() => []) ?? [],
+    deps.goal?.().catch(() => undefined) ?? undefined,
   ]);
   const req: NextActionRequest = {
     page: input.page,
@@ -101,6 +104,7 @@ export async function nextAction(input: PageSnapshot, requester: Requester, deps
     ...(input.focused !== undefined ? { focused: input.focused } : {}),
     history,
     notes,
+    ...(goal ? { goal } : {}),
     tabs: tabs.filter((t: OpenTab) => t.id !== requester.tabId),
     now: new Date(started).toISOString(),
     eagerness: settings.eagerness,

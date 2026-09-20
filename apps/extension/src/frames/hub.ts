@@ -2,8 +2,8 @@ import type { AcceptKey, RelayedKey } from '../chip';
 import type { FrameOutline } from '../outline';
 import { anchorInFrame } from '../chip/position';
 import type { ScriptContext } from '../content/context';
-import type { FrameReport, PerformReply, PerformRequest, ToChild, ToTop } from './protocol';
-import { frameNumber, isFrameMessage, stamp } from './protocol';
+import type { FrameLine, FrameReport, PerformReply, PerformRequest, ToChild, ToTop } from './protocol';
+import { frameElements, frameNumber, isFrameMessage, stamp } from './protocol';
 
 /** How long the top waits for child frames to answer a snapshot request, and for one to perform. */
 export const HUB_TIMING = { refreshMs: 150, performMs: 3000, staleMs: 60_000 } as const;
@@ -159,8 +159,16 @@ export function createFrameHub(ctx: ScriptContext, doc: Document, opts: FrameHub
     frames,
     outlines: () =>
       frames()
-        .filter((f) => (f.report.controls?.length ?? 0) > 0)
-        .map((f) => ({ frame: f.iframe, token: f.token, controls: f.report.controls ?? [] })),
+        .map((f) => ({
+          frame: f.iframe,
+          token: f.token,
+          controls: f.report.controls ?? [],
+          lines: f.report.lines ?? [],
+          ...(f.report.summary?.length ? { summary: f.report.summary } : {}),
+          ...(f.report.host ? { host: f.report.host } : {}),
+        }))
+        // A frame that is all prose and no control still belongs in the outline.
+        .filter((o) => o.controls.length > 0 || o.lines.length > 0),
     refresh,
     perform,
     arm,
@@ -181,11 +189,16 @@ export function createFrameHub(ctx: ScriptContext, doc: Document, opts: FrameHub
  * in, which is the best box the top can offer for it.
  */
 export function findIframeFor(doc: Document, source: Window): Element | null {
-  for (const el of doc.querySelectorAll('iframe,frame')) {
-    const w = (el as HTMLIFrameElement).contentWindow;
-    if (w && (w === source || contains(w, source, FRAME_DEPTH - 1))) return el;
-  }
-  return null;
+  const match = (els: Iterable<Element>): Element | null => {
+    for (const el of els) {
+      const w = (el as HTMLIFrameElement).contentWindow;
+      if (w && (w === source || contains(w, source, FRAME_DEPTH - 1))) return el;
+    }
+    return null;
+  };
+  // The light DOM answers for nearly every page. A frame inside a component
+  // costs the deeper scan, and only on the report that the first pass missed.
+  return match(doc.querySelectorAll('iframe,frame')) ?? match(frameElements(doc));
 }
 
 function contains(win: Window, source: Window, depth: number): boolean {
@@ -204,5 +217,17 @@ function contains(win: Window, source: Window, depth: number): boolean {
 function validReport(r: unknown): r is FrameReport {
   if (!r || typeof r !== 'object') return false;
   const o = r as Partial<FrameReport>;
-  return Array.isArray(o.controls) && !!o.rects;
+  if (!Array.isArray(o.controls) || !o.rects) return false;
+  if (o.lines !== undefined && !(Array.isArray(o.lines) && o.lines.every(validLine))) return false;
+  if (o.summary !== undefined && !(Array.isArray(o.summary) && o.summary.every((s) => typeof s === 'string'))) return false;
+  return o.host === undefined || typeof o.host === 'string';
+}
+
+const LINE_KINDS = new Set(['struct', 'heading', 'text', 'option', 'control']);
+
+function validLine(line: unknown): line is FrameLine {
+  if (!line || typeof line !== 'object') return false;
+  const l = line as Partial<Extract<FrameLine, { kind: 'control' }>> & { kind?: unknown; text?: unknown };
+  if (typeof l.kind !== 'string' || !LINE_KINDS.has(l.kind) || typeof l.indent !== 'number') return false;
+  return l.kind === 'control' ? typeof l.n === 'number' : typeof l.text === 'string';
 }

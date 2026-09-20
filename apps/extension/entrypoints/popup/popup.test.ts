@@ -295,6 +295,47 @@ describe('popup', () => {
     expect(note.hidden).toBe(true);
   });
 
+  it('shows the goal carat is working against, and drops it from the cross', async () => {
+    const goal = 'book a flight ZRH to LON on Friday, cheapest';
+    sendMessage.mockImplementation(async (type: string) => {
+      if (type === 'getSettings') return { enabled: true };
+      if (type === 'getKnown') return { items: [], pinned: false, goal };
+      return undefined;
+    });
+    await import('./main');
+    await flush();
+    const row = document.getElementById('goal-row') as HTMLElement;
+    expect(row.hidden).toBe(false);
+    expect(document.getElementById('goal-text')?.textContent).toBe(goal);
+
+    (document.getElementById('goal-drop') as HTMLButtonElement).click();
+    // The line goes as the user clicks, not after the round trip.
+    expect(row.hidden).toBe(true);
+    await flush();
+    expect(sendMessage).toHaveBeenCalledWith('clearGoal', undefined);
+  });
+
+  it('shows no goal line at all when carat has not worked one out', async () => {
+    sendMessage.mockImplementation(async (type: string) =>
+      type === 'getSettings' ? { enabled: true } : { items: [], pinned: false },
+    );
+    await import('./main');
+    await flush();
+    expect((document.getElementById('goal-row') as HTMLElement).hidden).toBe(true);
+  });
+
+  it('takes the goal line down with the rest when the header clear runs', async () => {
+    sendMessage.mockImplementation(async (type: string) =>
+      type === 'getSettings' ? { enabled: true } : type === 'getKnown' ? { items: [], pinned: false, goal: 'find brunch' } : undefined,
+    );
+    await import('./main');
+    await flush();
+    expect((document.getElementById('goal-row') as HTMLElement).hidden).toBe(false);
+
+    (document.getElementById('clear') as HTMLButtonElement).click();
+    expect((document.getElementById('goal-row') as HTMLElement).hidden).toBe(true);
+  });
+
   it('opens the options page from the Settings link', async () => {
     sendMessage.mockImplementation(async (type: string) =>
       type === 'getSettings' ? { enabled: true } : { items: [] },

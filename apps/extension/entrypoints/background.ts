@@ -14,6 +14,8 @@ import {
   RefineQueue,
   chromeTabsApi,
   clearActionCache,
+  createGoal,
+  createGoalAsk,
   createKeepWarm,
   createNotes,
   createVisionPipeline,
@@ -65,6 +67,20 @@ export default defineBackground(() => {
     },
     pinned: () => store.isPinned(),
   });
+  // --- goal (balaji/trust-goal) ---
+  // One line for what the user is getting done across tabs, derived from the
+  // notes and the timeline after each distillation and each accepted chip.
+  const goal = createGoal({
+    area: chrome.storage.session,
+    notes: (n) => notes.newest(n),
+    history: (n) => history.allLines(n),
+    ask: async (messages, opts) => {
+      const send = createGoalAsk(await settings.get());
+      return send ? send(messages, opts) : '';
+    },
+  });
+  const deriveGoal = () => void goal.derive().catch(() => undefined);
+  // --- end goal ---
   // Chrome commits a navigation seconds before the content script has an outline;
   // everything in front of the outline is already known, so it goes to the model now.
   const warmer = createWarmer({
@@ -72,6 +88,8 @@ export default defineBackground(() => {
     notes: (tabId) => notes.top({ tabId }),
     history: (tabId, at) => history.lines(tabId, at),
     tabs: (tabId) => describedTabs(tabId),
+    // The goal heads the prefix, so a warm-up without it warms the wrong bytes.
+    goal: () => goal.current(),
   });
   warmer.attach(chrome.webNavigation);
   chrome.tabs.onRemoved.addListener((tabId) => warmer.forget(tabId));
@@ -108,6 +126,8 @@ export default defineBackground(() => {
     const item = data.kind === 'selection' ? await store.upsertSelection(input) : await store.upsertPage(input);
     // A page the user is leaving is finished being read, so it is distilled now.
     if (item) notes.onCapture(item, data.leaving === true);
+    // Whatever that reading added is one of the two things a goal is derived from.
+    if (item && data.leaving === true) void notes.flush().then(deriveGoal);
     return note(item ? 'stored' : 'empty');
   });
 
@@ -132,6 +152,7 @@ export default defineBackground(() => {
         settings: () => settings.get(),
         history,
         notes: { lines: async () => notes.top({ tabId }) },
+        goal: () => goal.current(),
         tabs: () => describedTabs(tabId),
         refine,
         warmed: (id, req) => warmer.warmed(id, req),
@@ -171,7 +192,9 @@ export default defineBackground(() => {
       onPerform: (tabId, entry) => void diag.recordPerform(tabId, entry),
       onHistory: (tabId, line) => {
         if (tabId === undefined) return;
-        if (data.accepted) void history.recordAccepted(tabId, line).catch(() => undefined);
+        // An accepted chip is the other thing a goal is derived from: it is the
+        // clearest signal there is of what the user is actually doing.
+        if (data.accepted) void history.recordAccepted(tabId, line).then(deriveGoal, () => undefined);
         else void history.recordDismissed(tabId, line).catch(() => undefined);
       },
     }),
@@ -191,7 +214,12 @@ export default defineBackground(() => {
   });
 
   // The key and the cross-tab context stay with the extension's own pages; a content script gets a redacted view.
-  onMessage('getKnown', ({ sender }) => (trusted(sender) ? getKnown(store) : { items: [], pinned: false }));
+  onMessage('getKnown', ({ sender }) => (trusted(sender) ? getKnown(store, goal) : { items: [], pinned: false }));
+  // --- goal (balaji/trust-goal) ---
+  onMessage('clearGoal', async ({ sender }) => {
+    if (trusted(sender)) await goal.clear();
+  });
+  // --- end goal ---
   onMessage('clearKnown', async ({ sender }) => {
     if (!trusted(sender)) return;
     // --- clear (balaji/engine-clear) ---
@@ -272,7 +300,7 @@ export default defineBackground(() => {
   // --- clear (balaji/engine-clear) ---
   // Alt+Shift+X, beside Alt+Shift+C: one wipe behind the shortcut and the
   // popup's button, and the tab is told once the stores are empty.
-  const wipe = () => clearAll({ store, shots, history, notes });
+  const wipe = () => clearAll({ store, shots, history, notes, goal });
   const tellCleared = (tabId: number) => void sendMessage('contextCleared', undefined, tabId).catch(() => undefined);
   chrome.commands?.onCommand.addListener((command, tab) => {
     handleClearCommand(command, tab?.id, { clear: wipe, notify: tellCleared });

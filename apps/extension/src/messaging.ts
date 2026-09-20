@@ -75,7 +75,9 @@ export interface Protocol {
   feedback(data: FeedbackInput): void;
   /** Sent only from a Tab press on an `open` or `switch` chip; the background rebuilds the URL from the registry. */
   navigate(data: { kind: 'open' | 'switch'; value: string }): { ok: boolean };
-  getKnown(): { items: KnownItem[]; pinned: boolean };
+  getKnown(): { items: KnownItem[]; pinned: boolean; goal?: string };
+  /** The × beside the goal line in the popup: drop it, and let the next derivation find another. */
+  clearGoal(): void;
   /** The popup's button. The keyboard shortcut runs the same routine in the background. */
   clearKnown(): void;
   setPinned(data: { pinned: boolean }): { pinned: boolean };
