@@ -127,6 +127,30 @@ describe('a child frame with nothing to read', () => {
   });
 });
 
+describe('a child frame inside a component', () => {
+  it('splices under the frame line where the shadow walk meets it, and numbers past the page’s own controls', () => {
+    document.body.innerHTML = `<main><button>Upvote</button><div id="card"></div></main>`;
+    const host = document.getElementById('card')!;
+    const root = host.attachShadow({ mode: 'open' });
+    root.innerHTML = `<h2>Booking</h2><iframe></iframe>`;
+    const frame = root.querySelector('iframe') as HTMLIFrameElement;
+    const doc = frame.contentDocument!;
+    doc.body.innerHTML = `<p>Table for two, Friday at 6.</p><button>Confirm</button>`;
+
+    const report = reportOf(frame, doc, frame.contentWindow!, { host: 'book.example' });
+    const { outline, controls, registry } = buildOutline(document, window, { frames: [report] });
+
+    expect(under(outline, 'frame book.example:').slice(0, 2)).toEqual(['text: Table for two, Friday at 6.', '[2] button "Confirm"']);
+    expect(flat(outline).indexOf('h2 Booking')).toBeLessThan(flat(outline).indexOf('frame book.example:'));
+    expect(controls.map((c) => c.name)).toEqual(['Upvote', 'Confirm']);
+    // The frame is the second frame-shaped thing the hub would number, and the
+    // registry sends its control back through the hub rather than clicking here.
+    expect(controls[1]!.fr).toBe(1);
+    expect(registry.get(2)!.frame).toEqual({ token: 'tok', remoteId: '1' });
+    expect(registry.get(2)!.el).toBe(frame);
+  });
+});
+
 describe('the page’s budget', () => {
   /** A frame of prose in front of one field, on a page with controls of its own. */
   function crowded(): { frames: FrameOutline[] } {

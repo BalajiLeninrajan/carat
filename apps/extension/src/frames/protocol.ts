@@ -103,11 +103,38 @@ export function stamp<T extends object>(body: T): T & { carat: typeof FRAME_MARK
   return { carat: FRAME_MARK, v: FRAME_VERSION, ...body };
 }
 
+/** Frame elements are looked for this many open shadow roots down, and this many elements in. */
+export const FRAME_SHADOW_DEPTH = 8;
+const FRAME_SCAN_NODES = 20_000;
+
+/**
+ * Every frame element in the document, light DOM and open shadow roots
+ * together, in the order a walk meets them: a host's root comes right after
+ * the host. The outline walks into open shadow roots, so a frame inside a
+ * component is described like any other, and the hub has to be able to match
+ * a report to it and number it. A closed root is opaque here as it is there.
+ */
+export function frameElements(doc: Document): Element[] {
+  const out: Element[] = [];
+  let seen = 0;
+  const scan = (root: Document | ShadowRoot, depth: number): void => {
+    for (const el of root.querySelectorAll('*')) {
+      if (seen++ > FRAME_SCAN_NODES) return;
+      const tag = el.tagName.toLowerCase();
+      if (tag === 'iframe' || tag === 'frame') out.push(el);
+      const shadow = (el as Element & { shadowRoot?: ShadowRoot | null }).shadowRoot;
+      if (shadow && depth < FRAME_SHADOW_DEPTH) scan(shadow, depth + 1);
+    }
+  };
+  scan(doc, 0);
+  return out;
+}
+
 /**
  * A frame's number in the top document: its position among the frame
  * elements, one-based, so the model sees `fr: 1` on every field of the first
  * embedded form. Consistent within one snapshot, which is all it needs to be.
  */
 export function frameNumber(doc: Document, iframe: Element): number {
-  return Array.from(doc.querySelectorAll('iframe,frame')).indexOf(iframe) + 1;
+  return frameElements(doc).indexOf(iframe) + 1;
 }

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createChip } from '../src/chip';
 import { anchorInFrame, placeAt } from '../src/chip/position';
 import type { ScriptContext } from '../src/content';
-import { FRAME_TIMING, HUB_TIMING, createFrameHub, findIframeFor, startFrameAgent, stamp } from '../src/frames';
+import { FRAME_TIMING, HUB_TIMING, createFrameHub, findIframeFor, frameNumber, startFrameAgent, stamp } from '../src/frames';
 import type { FrameLine, FrameReport, ToChild, ToTop } from '../src/frames';
 import { buildOutline } from '../src/outline';
 import { inViewport, viewportRect } from '../src/scroll';
@@ -166,6 +166,34 @@ describe('frame hub', () => {
       report: { controls: [], rects: {}, lines: [{ kind: 'sermon', indent: 0, text: 'do as I say' }] } as unknown as FrameReport,
     });
     expect(hub.frames()).toHaveLength(1);
+  });
+
+  it('matches and numbers a frame that sits inside an open shadow root', () => {
+    // The outline walks into open roots, so a frame inside a component is
+    // described. The hub has to reach it too, or its report is thrown away.
+    const plain = document.createElement('iframe');
+    document.body.append(plain);
+    const host = document.createElement('div');
+    document.body.append(host);
+    const inner = document.createElement('iframe');
+    host.attachShadow({ mode: 'open' }).append(inner);
+
+    expect(findIframeFor(document, inner.contentWindow!)).toBe(inner);
+    expect(frameNumber(document, plain)).toBe(1);
+    expect(frameNumber(document, inner)).toBe(2);
+
+    const hub = createFrameHub(fakeCtx(), document, { onReport: () => undefined, onKey: () => undefined });
+    fromFrame(inner.contentWindow!, stamp({ type: 'report', token: 'deep', reply: false, report: report() }));
+    expect(hub.frames().map((f) => f.iframe)).toEqual([inner]);
+    expect(hub.numberOf(hub.frames()[0]!)).toBe(2);
+  });
+
+  it('leaves a closed shadow root opaque, as the outline does', () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const inner = document.createElement('iframe');
+    host.attachShadow({ mode: 'closed' }).append(inner);
+    expect(findIframeFor(document, inner.contentWindow!)).toBeNull();
   });
 
   it('asks frames for a fresh report and waits for the replies or the cap, without re-triggering a snapshot', async () => {

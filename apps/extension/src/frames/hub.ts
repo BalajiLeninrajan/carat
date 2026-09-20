@@ -3,7 +3,7 @@ import type { FrameOutline } from '../outline';
 import { anchorInFrame } from '../chip/position';
 import type { ScriptContext } from '../content/context';
 import type { FrameLine, FrameReport, PerformReply, PerformRequest, ToChild, ToTop } from './protocol';
-import { frameNumber, isFrameMessage, stamp } from './protocol';
+import { frameElements, frameNumber, isFrameMessage, stamp } from './protocol';
 
 /** How long the top waits for child frames to answer a snapshot request, and for one to perform. */
 export const HUB_TIMING = { refreshMs: 150, performMs: 3000, staleMs: 60_000 } as const;
@@ -189,11 +189,16 @@ export function createFrameHub(ctx: ScriptContext, doc: Document, opts: FrameHub
  * in, which is the best box the top can offer for it.
  */
 export function findIframeFor(doc: Document, source: Window): Element | null {
-  for (const el of doc.querySelectorAll('iframe,frame')) {
-    const w = (el as HTMLIFrameElement).contentWindow;
-    if (w && (w === source || contains(w, source, FRAME_DEPTH - 1))) return el;
-  }
-  return null;
+  const match = (els: Iterable<Element>): Element | null => {
+    for (const el of els) {
+      const w = (el as HTMLIFrameElement).contentWindow;
+      if (w && (w === source || contains(w, source, FRAME_DEPTH - 1))) return el;
+    }
+    return null;
+  };
+  // The light DOM answers for nearly every page. A frame inside a component
+  // costs the deeper scan, and only on the report that the first pass missed.
+  return match(doc.querySelectorAll('iframe,frame')) ?? match(frameElements(doc));
 }
 
 function contains(win: Window, source: Window, depth: number): boolean {
