@@ -3,6 +3,7 @@ import { SCROLL_SETTLE_MS, caratScrolling } from '../scroll';
 import { createEffects } from './effects';
 import { deepActiveElement, shouldInterceptTab } from './keys';
 import { placeChip } from './position';
+import { PREVIEW_CSS, PREVIEW_DELAY_MS } from './preview';
 import { createSounds } from './sound';
 import { CHIP_CSS, TIMING } from './styles';
 
@@ -43,6 +44,11 @@ interface ChipText extends ChipCallbacks {
   label: string;
   /** Second line under the offer: where the value came from, e.g. "from discord.com · 2m ago". */
   detail?: string;
+  /**
+   * One line saying what accepting would actually do, shown only while the
+   * pointer or the focus rests on the chip: see `previewLine`.
+   */
+  preview?: string;
   /** Why it was offered; shown as the native tooltip on hover. */
   reason?: string;
   /** The model may still replace this action; the chip carries a pulsing dot until `settle()`. */
@@ -97,6 +103,8 @@ export interface Chip {
   readonly text: string;
   /** The second line, when there is one; the shadow root is closed, so tests read it here. */
   readonly detail: string;
+  /** The hover preview while it is up; the shadow root is closed, so tests read it here. */
+  readonly preview: string;
   /** Whether the indicator is up; the shadow root is closed, so tests read it here. */
   readonly pending: boolean;
   /** Whether the first Tab of an irreversible action has landed. */
@@ -179,14 +187,19 @@ export function createChip(doc: Document = document): Chip {
   label.className = 'label';
   const sub = doc.createElement('span');
   sub.className = 'sub';
-  text.append(label, sub);
+  const peek = doc.createElement('span');
+  peek.className = 'preview';
+  peek.hidden = true;
+  text.append(label, sub, peek);
   const spinner = doc.createElement('span');
   spinner.className = 'pending';
   spinner.hidden = true;
   const key = doc.createElement('kbd');
   key.textContent = 'Tab';
   pill.append(text, spinner, key);
-  root.append(style, pill);
+  const previewStyle = doc.createElement('style');
+  previewStyle.textContent = PREVIEW_CSS;
+  root.append(style, previewStyle, pill);
 
   // The ring lives in its own host: it goes up on the target as soon as the
   // model names it, before there is anything to say about it.
@@ -201,6 +214,9 @@ export function createChip(doc: Document = document): Chip {
   let armTimer: ReturnType<typeof setTimeout> | undefined;
   // The reason on its own, so the waiting line can go on and come off it.
   let reason = '';
+  // The preview line this chip would show, and the rest it is waiting out.
+  let previewText = '';
+  let previewTimer: ReturnType<typeof setTimeout> | undefined;
   const win = doc.defaultView ?? window;
   // Every animation that outlives the call that started it, so a chip that
   // goes mid-spring takes its own frames with it.
@@ -309,6 +325,40 @@ export function createChip(doc: Document = document): Chip {
     const el = e.target;
     if (el === doc.body || el === doc.documentElement) return;
     dismiss('acted');
+  };
+
+  /**
+   * A device that can only be touched never hovers, so it never gets a
+   * preview: on a phone the line would need a press, and a press on the chip
+   * is an accept.
+   */
+  function hoverable(): boolean {
+    try {
+      return win.matchMedia?.('(hover: none) and (pointer: coarse)').matches !== true;
+    } catch {
+      return true;
+    }
+  }
+
+  /**
+   * The pointer, or the focus, came to rest on the chip. The preview opens a
+   * quarter of a second later, inside the pill, so the anchor never moves.
+   */
+  const onPeekIn = (e: Event): void => {
+    if ((e as PointerEvent).pointerType === 'touch') return;
+    if (!session || previewText === '' || !hoverable()) return;
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(() => {
+      if (!session || previewText === '') return;
+      peek.textContent = previewText;
+      peek.hidden = false;
+    }, PREVIEW_DELAY_MS);
+  };
+
+  const onPeekOut = (): void => {
+    clearTimeout(previewTimer);
+    previewTimer = undefined;
+    peek.hidden = true;
   };
 
   const onTyped = (): void => dismiss('typed');
@@ -502,6 +552,7 @@ export function createChip(doc: Document = document): Chip {
     ringTarget = keepRing;
     sub.textContent = opts.detail ?? '';
     sub.hidden = !opts.detail;
+    previewText = opts.preview ?? '';
     reason = opts.reason ?? '';
     setPending(opts.pending === true);
     key.textContent = 'Tab';
@@ -659,6 +710,8 @@ export function createChip(doc: Document = document): Chip {
     cancelAttention();
     cancelKey();
     fx.clear();
+    onPeekOut();
+    previewText = '';
     if (!session) return;
     const s = session;
     session = null;
@@ -777,6 +830,15 @@ export function createChip(doc: Document = document): Chip {
     ringHost.remove();
   }
 
+  // Bound once, for the life of the chip, and on the host rather than the
+  // pill: `pointerenter` does not bubble, and the root is closed. The pill is
+  // focusable but out of the page's tab order, so Tab still belongs to the offer.
+  pill.tabIndex = -1;
+  host.addEventListener('pointerenter', onPeekIn);
+  host.addEventListener('pointerleave', onPeekOut);
+  host.addEventListener('focusin', onPeekIn);
+  host.addEventListener('focusout', onPeekOut);
+
   return {
     show,
     showBanner,
@@ -793,6 +855,9 @@ export function createChip(doc: Document = document): Chip {
     },
     get detail() {
       return sub.hidden ? '' : (sub.textContent ?? '');
+    },
+    get preview() {
+      return peek.hidden ? '' : (peek.textContent ?? '');
     },
     get pending() {
       return pending;

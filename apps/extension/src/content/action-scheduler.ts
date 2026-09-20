@@ -1,6 +1,7 @@
-import type { NextAction } from '@carat/shared';
+import type { NextAction, OutlineControl } from '@carat/shared';
 import type { Chip } from '../chip';
 import { QUIET_HINT } from '../chip';
+import { previewLine } from '../chip/preview';
 import { fromSurface } from '../dom/surfaces';
 import { performFill } from '../fill';
 import type { FrameHub, KnownFrame } from '../frames';
@@ -125,6 +126,8 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
   let seq = 0;
   let gen = 0;
   let registry = new Map<number, OutlineTarget>();
+  /** What the outline said about each numbered control, for the chip's preview line. */
+  let controls: OutlineControl[] = [];
   /** What carat has already done here, so the same chip is not offered twice on one page load. */
   const done = new Set<string>();
   /** Esc on an action keeps it quiet for the rest of this page load. */
@@ -326,6 +329,7 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
       lastSentAt = now;
       asked = true;
       registry = targets;
+      controls = request.controls;
 
       const mine = ++seq;
       observer.onRequest?.();
@@ -398,6 +402,12 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     if (opts.page) opts.page.filling = true;
 
     const el = target?.el;
+    const control = action.target === null ? undefined : controls.find((c) => c.n === action.target);
+    const preview = previewLine({
+      action,
+      ...(control ? { control } : {}),
+      ...(action.kind === 'scroll' ? { below: screensBelow() } : {}),
+    });
     const shared = {
       label: action.label,
       reason: action.reason,
@@ -407,6 +417,7 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
       // Something here has already been refused since the user last moved, so
       // this one arrives without the glow: a retry is quieter than a first offer.
       ...(escapes > 0 ? { retry: true } : {}),
+      ...(preview ? { preview } : {}),
       // Said no this often and the user wants the key, not another answer.
       ...(escapes >= SNAPSHOT_TIMING.snoozeAfterEscapes ? { detail: QUIET_HINT } : {}),
       pending,
@@ -594,6 +605,12 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     cancelRetry();
   }
 
+  /** How much page is left under the fold, in viewports; what a scroll offer is worth. */
+  function screensBelow(): number {
+    const { y, pages } = viewportsOf(win, doc);
+    return Math.max(0, pages - y - 1);
+  }
+
   /** Whether this scroll follows another of carat's closely enough to be the user paging through. */
   function repeating(): boolean {
     const now = Date.now();
@@ -666,6 +683,7 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     done.clear();
     dismissed.clear();
     registry = new Map();
+    controls = [];
     lastActed = null;
     lastHash = '';
     lastAt = 0;
