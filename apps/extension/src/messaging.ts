@@ -13,6 +13,9 @@ import type { StatusInfo } from './status/info';
  *
  * The background handles every message but `forceSuggest`, `contextCleared`,
  * `toggleDebug` and `debugEvent`, which it sends to one tab's content script.
+ *
+ * Messages that name a `tabId` come from the popup, which has no tab of its
+ * own to be the sender.
  */
 export interface Protocol {
   /** Alt+Shift+C: ask on this page now, past the idle wait. */
@@ -37,6 +40,10 @@ export interface Protocol {
   getStatus(): StatusInfo;
   /** Recent suggestion outcomes and trends for the popup analytics tab. */
   getAnalytics(): ActionAnalytics;
+  /** Did the user press Cancel on Chrome's debugging bar over this tab? The popup asks about the tab it opened over. */
+  isTabPaused(data: { tabId: number }): boolean;
+  /** The popup's Resume button: unpause that tab and ask it for a suggestion straight away. */
+  resumeTab(data: { tabId: number }): void;
   getSettings(): Settings;
   setSettings(s: Partial<Settings>): Settings;
   /**

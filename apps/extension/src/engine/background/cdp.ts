@@ -5,7 +5,8 @@
  * If the user dismisses Chrome's "started debugging this browser" banner,
  * every session is detached with reason "canceled_by_user". Carat then marks
  * those tabs paused (badge "OFF") rather than immediately re-attaching, which
- * would just bring the banner straight back. Clicking the toolbar icon resumes.
+ * would just bring the banner straight back. The popup's Resume button and
+ * Alt+Shift+C both clear it.
  */
 
 const PROTOCOL_VERSION = "1.3";
@@ -26,26 +27,45 @@ function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-async function pausedTabs(): Promise<Set<number>> {
-  const stored = (await chrome.storage.session.get(PAUSED_KEY)) as Record<string, number[] | undefined>;
-  return new Set<number>(stored[PAUSED_KEY] ?? []);
+/**
+ * The paused tabs, each with the origin it was paused on. Session storage, so
+ * the pause outlives a worker restart; the origin is what later tells a
+ * navigation away from that site from a click within it.
+ */
+async function pausedTabs(): Promise<Map<number, string>> {
+  const stored = (await chrome.storage.session.get(PAUSED_KEY)) as Record<string, Record<string, string> | undefined>;
+  return new Map(Object.entries(stored[PAUSED_KEY] ?? {}).map(([id, origin]) => [Number(id), origin]));
 }
 
-async function setPaused(tabIds: number[], paused: boolean): Promise<void> {
-  const set = await pausedTabs();
+async function setPaused(tabIds: number[], paused: boolean, origin = ""): Promise<void> {
+  const tabs = await pausedTabs();
   for (const id of tabIds) {
-    if (paused) set.add(id);
-    else set.delete(id);
+    if (paused) tabs.set(id, origin);
+    else tabs.delete(id);
     chrome.action.setBadgeText({ tabId: id, text: paused ? "OFF" : "" }).catch(() => {});
     chrome.action
-      .setTitle({ tabId: id, title: paused ? "Carat is paused on this tab. Click to resume." : "Carat" })
+      .setTitle({ tabId: id, title: paused ? "Carat is paused on this tab. Open Carat to resume." : "Carat" })
       .catch(() => {});
   }
-  await chrome.storage.session.set({ [PAUSED_KEY]: [...set] });
+  await chrome.storage.session.set({ [PAUSED_KEY]: Object.fromEntries(tabs) });
 }
 
 export async function isPaused(tabId: number): Promise<boolean> {
   return (await pausedTabs()).has(tabId);
+}
+
+function originOf(url: string | undefined): string {
+  try {
+    return new URL(url ?? "").origin;
+  } catch {
+    return "";
+  }
+}
+
+/** Cancel was pressed on the debugging bar over this tab: stop reading it until told otherwise. */
+export async function pause(tabId: number): Promise<void> {
+  const tab = await chrome.tabs.get(tabId).catch(() => undefined);
+  await setPaused([tabId], true, originOf(tab?.url));
 }
 
 export function resume(tabId: number): Promise<void> {
@@ -120,7 +140,25 @@ chrome.debugger.onDetach.addListener((source, reason) => {
   idleTimers.delete(tabId);
   for (const l of detachListeners) l(tabId);
   console.info(`[carat] debugger detached from tab ${tabId}: ${reason}`);
-  if (reason === "canceled_by_user") setPaused([tabId], true);
+  if (reason === "canceled_by_user") void pause(tabId);
+});
+
+/**
+ * Dismissing the banner was about the page it appeared over, not about the
+ * tab forever. Leaving that site clears the pause, so carat comes back on its
+ * own instead of staying dead for the rest of the session. Clicking around
+ * the same site does not: that is still the page the user objected to.
+ */
+chrome.webNavigation.onCommitted.addListener(({ tabId, frameId, url }) => {
+  if (frameId !== 0) return;
+  void (async () => {
+    const pausedOn = (await pausedTabs()).get(tabId);
+    if (pausedOn === undefined) return;
+    const now = originOf(url);
+    if (now === "" || now === pausedOn) return;
+    console.info(`[carat] tab ${tabId} left ${pausedOn || "an unknown page"}; carat is running there again`);
+    await resume(tabId);
+  })();
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {

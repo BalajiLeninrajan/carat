@@ -126,14 +126,6 @@ export default defineBackground(() => {
     if (details.reason === 'install' && !settings.apiKey) void chrome.runtime.openOptionsPage();
   });
 
-  // Clicking the toolbar icon opens the popup; a tab paused by the debugger
-  // banner is resumed from there instead.
-  chrome.action.onClicked.addListener(async (tab) => {
-    if (tab.id == null) return;
-    if (await isPaused(tab.id)) await resume(tab.id);
-    else void chrome.runtime.openOptionsPage();
-  });
-
   /** Live content-script connections, so worker-side events can reach a tab. */
   const ports = new Map<number, (msg: WorkerToContent) => void>();
 
@@ -468,13 +460,26 @@ export default defineBackground(() => {
   }
 
   // -------------------------------------------------------------------------
+  // Asking on demand
+
+  /**
+   * Ask this tab for a suggestion now, past the idle wait. Alt+Shift+C and the
+   * popup's Resume button both end here. Asking on a paused tab means the user
+   * wants carat back, so the pause goes first.
+   */
+  async function askNow(tabId: number): Promise<void> {
+    if (await isPaused(tabId)) await resume(tabId);
+    await sendMessage('forceSuggest', undefined, tabId).catch(() => undefined);
+  }
+
+  // -------------------------------------------------------------------------
   // Shortcuts
 
   chrome.commands.onCommand.addListener(async (command, tab) => {
     const tabId = tab?.id;
     if (handleDebugCommand(command, tabId, { toggle: (id) => void toggleDebug(id) })) return;
     if (command === COMMANDS.suggest && tabId !== undefined) {
-      await sendMessage('forceSuggest', undefined, tabId).catch(() => undefined);
+      await askNow(tabId);
       return;
     }
     if (command === COMMANDS.clear) {
@@ -506,6 +511,13 @@ export default defineBackground(() => {
     return describeStatus(await loadSettings(), sender.tab?.url, paused);
   });
   onMessage('getAnalytics', () => elastic.analytics());
+  onMessage('isTabPaused', ({ data }) => isPaused(data.tabId));
+  onMessage('resumeTab', async ({ data }) => {
+    await resume(data.tabId);
+    // The user came to the popup because carat had gone quiet, so answer with a
+    // suggestion rather than waiting for them to touch the page again.
+    await askNow(data.tabId);
+  });
   onMessage('clearKnown', () => clearAll());
   onMessage('getDebug', ({ data, sender }) => snapshotFor(data.tabId ?? sender.tab?.id));
   onMessage('setDebug', async ({ data, sender }) => {
