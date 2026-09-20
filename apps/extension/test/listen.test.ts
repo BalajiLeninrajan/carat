@@ -17,6 +17,8 @@ interface Harness {
   unfocus: () => Promise<void>;
   createDocument: ReturnType<typeof vi.fn>;
   closeDocument: ReturnType<typeof vi.fn>;
+  /** Messages the worker sent the document, which is how the microphone is driven. */
+  sent: ReturnType<typeof vi.fn>;
   fetchImpl: ReturnType<typeof vi.fn>;
   settings: Settings;
 }
@@ -39,11 +41,13 @@ async function harness(over: Partial<Settings> = {}): Promise<Harness> {
   /** Each transcription answers with the text of the utterance that asked for it. */
   const spoken: string[] = [];
   const fetchImpl = vi.fn(async () => Response.json({ text: spoken.shift() ?? '' }));
+  const sent = vi.fn(async () => undefined);
 
   vi.stubGlobal('fetch', fetchImpl);
   vi.stubGlobal('chrome', {
     runtime: {
       onMessage: { addListener: (fn: Listener) => (onMessage = fn) },
+      sendMessage: sent,
       getContexts: async () => (open ? [{ contextType: 'OFFSCREEN_DOCUMENT' }] : []),
       getURL: (path: string) => `chrome-extension://carat/${path}`,
       ContextType: { OFFSCREEN_DOCUMENT: 'OFFSCREEN_DOCUMENT' },
@@ -57,7 +61,12 @@ async function harness(over: Partial<Settings> = {}): Promise<Harness> {
       onChanged: { addListener: () => undefined },
       local: { get: async () => settings },
     },
-    offscreen: { createDocument, closeDocument, Reason: { USER_MEDIA: 'USER_MEDIA' } },
+    offscreen: {
+      createDocument,
+      closeDocument,
+      hasDocument: async () => open,
+      Reason: { USER_MEDIA: 'USER_MEDIA', CLIPBOARD: 'CLIPBOARD' },
+    },
     action: {
       setBadgeBackgroundColor: async () => undefined,
       setBadgeText: async () => undefined,
@@ -72,6 +81,7 @@ async function harness(over: Partial<Settings> = {}): Promise<Harness> {
     settings,
     createDocument,
     closeDocument,
+    sent,
     fetchImpl,
     say: async (text, seconds = 5) => {
       spoken.push(text);
@@ -178,24 +188,30 @@ describe('background listening', () => {
     expect(recordHeard).not.toHaveBeenCalled();
   });
 
-  it('opens the microphone document only while listening is on', async () => {
+  it('asks for the microphone only while listening is on', async () => {
     const off = await harness({ listenEnabled: false });
     expect(off.createDocument).not.toHaveBeenCalled();
+    expect(off.sent).not.toHaveBeenCalled();
 
     vi.resetModules();
     vi.unstubAllGlobals();
     const on = await harness();
+    // One document serves the clipboard too, so it is stated with both reasons.
     expect(on.createDocument).toHaveBeenCalledWith(
-      expect.objectContaining({ url: 'offscreen.html', reasons: ['USER_MEDIA'] }),
+      expect.objectContaining({ url: 'offscreen.html', reasons: ['CLIPBOARD', 'USER_MEDIA'] }),
     );
+    // The document being up is not the microphone being open: that is asked for.
+    expect(on.sent).toHaveBeenCalledWith({ type: 'carat-listen-start' });
   });
 
-  it('closes it when Chrome loses focus, and notes what was said first', async () => {
+  it('gives the microphone back when Chrome loses focus, and notes what was said first', async () => {
     const h = await harness();
     await h.say('leave the microphone out of it now');
 
     await h.unfocus();
 
+    // The microphone goes first, then the document, since nothing else wants it.
+    expect(h.sent).toHaveBeenCalledWith({ type: 'carat-listen-stop' });
     expect(h.closeDocument).toHaveBeenCalledTimes(1);
     await settle();
     expect(recordHeard).toHaveBeenCalledTimes(1);
