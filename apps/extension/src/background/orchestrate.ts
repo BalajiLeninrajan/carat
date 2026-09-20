@@ -9,10 +9,11 @@ import {
   scrollLabel,
 } from '@carat/shared';
 import type { Provider } from '@carat/providers';
-import { LocalProvider, RaceProvider, createProvider } from '@carat/providers';
+import { LocalProvider, RaceProvider, cacheKey as promptCacheKey, createProvider } from '@carat/providers';
 import type { StorageArea } from '../store';
 import type { NextActionResponse, PageSnapshot } from '../messaging';
 import { AnswerCache, CACHE_MS } from './answer-cache';
+import type { DebugAnswer, DebugRequest } from './debug';
 import type { AnswerOrigin, GateVerdict, SuggestDiag } from './diag';
 import { explainGate } from './gate';
 import type { HistoryStore } from './history';
@@ -39,6 +40,12 @@ export interface NextActionDeps {
   now?: () => number;
   timeoutMs?: number;
   onDiag?: (diag: SuggestDiag) => void;
+  /**
+   * Set only while a tab's debug panel is open: the request exactly as it went
+   * out, then the answer with the raw reply, the race's winner and the
+   * validator's verdict on each pass. Nothing extra is assembled without it.
+   */
+  onDebug?: (patch: { request?: DebugRequest; answer?: DebugAnswer }) => void;
 }
 
 export { CACHE_MS };
@@ -100,6 +107,26 @@ export async function nextAction(input: PageSnapshot, requester: Requester, deps
   };
 
   const key = cacheKeyFor(req);
+  // Only ever set while the tab's debug panel is open; without it nothing
+  // beyond the ordinary diag line is assembled or kept.
+  const watching = deps.onDebug;
+  const validations: string[] | undefined = watching ? [] : undefined;
+  let raw: string | undefined;
+  watching?.({ request: { at: started, req, cacheKey: key, promptCacheKey: promptCacheKey(req.page.host, req.page.path) } });
+  const trace = (placeholder: NextAction | null, chosen: NextAction | null, provider?: Provider): void => {
+    watching?.({
+      answer: {
+        at: now(),
+        placeholder,
+        action: chosen,
+        ...(raw !== undefined ? { raw } : {}),
+        ...(provider instanceof RaceProvider && provider.winner ? { winner: provider.winner } : {}),
+        attempts: [...(diag.attempts ?? [])],
+        validations: [...(validations ?? [])],
+      },
+    });
+  };
+
   const hit = input.force ? undefined : await cache.get(key);
   if (hit && started - hit.at < CACHE_MS) {
     diag.source = 'cache';
@@ -107,35 +134,46 @@ export async function nextAction(input: PageSnapshot, requester: Requester, deps
     report(diag, hit.action);
     sayWhySilent(diag, hit.action);
     deps.onDiag?.(diag);
+    trace(null, hit.action);
     return { action: hit.action };
   }
 
   diag.warmed = deps.warmed?.(requester.tabId, req) ?? false;
   // No network behind it, so this is the first tick: the chip is up while the model is still reading.
-  const placeholder = validate(await answer(deps.localProvider ?? new LocalProvider(), req, deps), req, settings, diag);
+  const placeholder = checked('placeholder', await answer(deps.localProvider ?? new LocalProvider(), req, deps), req, settings, diag, validations);
   diag.placeholderMs = now() - started;
   const provider = (deps.createProvider ?? ((s: Settings) => createProvider(s)))(settings);
   // With no ticket there is nowhere to put a later answer, so the reply waits for the model itself.
+  const keepRaw = watching ? (text: string) => (raw = text) : undefined;
   if (!deps.refine) {
-    const model = validate(
-      await answer(provider, req, deps, () => {
-        diag.partialMs ??= now() - started;
-      }),
+    const model = checked(
+      'model',
+      await answer(
+        provider,
+        req,
+        deps,
+        () => {
+          diag.partialMs ??= now() - started;
+        },
+        keepRaw,
+      ),
       req,
       settings,
       diag,
+      validations,
     );
     diag.finalMs = now() - started;
     const first = pick(placeholder, model);
     diag.source = first === placeholder && placeholder !== null ? 'placeholder' : 'model';
     if (provider instanceof RaceProvider) diag.attempts = [...provider.attempts];
     // Eager owes the user a chip: nothing here is an answer, it is a reason to ask again.
-    const chosen = await insist(first, provider, req, settings, deps, diag);
+    const chosen = await insist(first, provider, req, settings, deps, diag, validations);
     diag.ms = now() - started;
     void cache.set(key, { at: started, action: chosen });
     report(diag, chosen);
     sayWhySilent(diag, chosen);
     deps.onDiag?.(diag);
+    trace(placeholder, chosen, provider);
     return { action: chosen };
   }
 
@@ -147,21 +185,31 @@ export async function nextAction(input: PageSnapshot, requester: Requester, deps
   deps.onDiag?.(diag);
 
   void (async () => {
+    let settled: NextAction | null = placeholder;
     try {
-      const model = validate(
-        await answer(provider, req, deps, (target) => {
-          // The ring moves to the control the model named before it has finished naming what to do there.
-          diag.partialMs ??= now() - started;
-          if (req.controls.some((c) => c.n === target)) ticket.push({ target });
-        }),
+      const model = checked(
+        'model',
+        await answer(
+          provider,
+          req,
+          deps,
+          (target) => {
+            // The ring moves to the control the model named before it has finished naming what to do there.
+            diag.partialMs ??= now() - started;
+            if (req.controls.some((c) => c.n === target)) ticket.push({ target });
+          },
+          keepRaw,
+        ),
         req,
         settings,
         diag,
+        validations,
       );
       diag.finalMs = now() - started;
       if (provider instanceof RaceProvider) diag.attempts = [...provider.attempts];
       // Eager owes the user a chip: nothing here is a reason to ask again, not an answer.
-      const chosen = await insist(pick(placeholder, model), provider, req, settings, deps, diag);
+      const chosen = await insist(pick(placeholder, model), provider, req, settings, deps, diag, validations);
+      settled = chosen;
       void cache.set(key, { at: now(), action: chosen });
       if (chosen !== placeholder) {
         diag.replaced = true;
@@ -176,6 +224,7 @@ export async function nextAction(input: PageSnapshot, requester: Requester, deps
     } finally {
       ticket.close();
       deps.onDiag?.(diag);
+      trace(placeholder, settled, provider);
     }
   })();
 
@@ -202,16 +251,41 @@ async function answer(
   req: NextActionRequest,
   deps: NextActionDeps,
   onTarget?: (target: number) => void,
+  onRaw?: (text: string) => void,
 ): Promise<NextAction | null> {
   const signal = AbortSignal.timeout(deps.timeoutMs ?? LIMITS.providerTimeoutMs);
   try {
     return await provider.next(req, {
       signal,
       ...(onTarget ? { onPartial: ({ target }: { target: number | null }) => target !== null && onTarget(target) } : {}),
+      ...(onRaw ? { onRaw } : {}),
     });
   } catch {
     return null;
   }
+}
+
+/**
+ * `validate`, with a line written for the debug panel saying what the
+ * validator made of this pass. Without a panel open `lines` is undefined and
+ * this is `validate` and nothing else.
+ */
+function checked(
+  who: string,
+  action: NextAction | null,
+  req: NextActionRequest,
+  settings: Settings,
+  diag: SuggestDiag,
+  lines: string[] | undefined,
+): NextAction | null {
+  const had = diag.refused;
+  const out = validate(action, req, settings, diag);
+  if (lines) {
+    if (out) lines.push(`${who}: allowed`);
+    else if (diag.refused && diag.refused !== had) lines.push(`${who}: refused, ${diag.refused}`);
+    else lines.push(`${who}: nothing to allow`);
+  }
+  return out;
 }
 
 /**
@@ -252,17 +326,19 @@ async function insist(
   settings: Settings,
   deps: NextActionDeps,
   diag: SuggestDiag,
+  lines?: string[],
 ): Promise<NextAction | null> {
   if (chosen || settings.eagerness !== 'eager') return chosen;
   const why = diag.refused ?? 'none';
   diag.reasked = why;
   delete diag.refused;
+  lines?.push(`asked again after "${why}"`);
   const again: NextActionRequest = { ...req, history: [...req.history, nudgeLine(why)] };
-  const second = validate(await answer(provider, again, deps), again, settings, diag);
+  const second = checked('second ask', await answer(provider, again, deps), again, settings, diag, lines);
   // A race keeps only its latest run's attempts, and this was a run of its own.
   if (provider instanceof RaceProvider) diag.attempts = [...(diag.attempts ?? []), ...provider.attempts];
   if (second) return second;
-  const fallback = validate(lastResort(req), req, settings, diag);
+  const fallback = checked('the page’s plainest step', lastResort(req), req, settings, diag, lines);
   if (fallback) {
     diag.source = 'fallback';
     delete diag.refused;

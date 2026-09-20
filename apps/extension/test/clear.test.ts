@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ContextItem } from '@carat/shared';
 import { COMMANDS, clearAll, handleClearCommand } from '../src/background/clear';
+import { DEBUG_COMMAND } from '../src/background/debug';
 import { HistoryStore } from '../src/background/history';
 import { createNotes } from '../src/background/notes';
 import { ContextStore, ShotStore, createSettingsStore } from '../src/store';
@@ -123,11 +124,12 @@ describe('the clear shortcut', () => {
 });
 
 describe('the manifest', () => {
-  it('declares both shortcuts, so Chrome offers them at chrome://extensions/shortcuts', () => {
+  it('declares all three shortcuts, so Chrome offers them at chrome://extensions/shortcuts', () => {
     const commands = wxtConfig.manifest && 'commands' in wxtConfig.manifest ? wxtConfig.manifest.commands : undefined;
-    expect(Object.keys(commands ?? {}).sort()).toEqual([COMMANDS.suggest, COMMANDS.clear].sort());
+    expect(Object.keys(commands ?? {}).sort()).toEqual([COMMANDS.suggest, COMMANDS.clear, DEBUG_COMMAND].sort());
     expect(commands?.[COMMANDS.suggest]?.suggested_key).toEqual({ default: 'Alt+Shift+C' });
     expect(commands?.[COMMANDS.clear]?.suggested_key).toEqual({ default: 'Alt+Shift+X' });
     expect(commands?.[COMMANDS.clear]?.description).toBe('Clear what Carat remembers');
+    expect(commands?.[DEBUG_COMMAND]?.suggested_key).toEqual({ default: 'Alt+Shift+D' });
   });
 });

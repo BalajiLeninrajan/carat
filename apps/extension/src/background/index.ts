@@ -1,5 +1,7 @@
 export { gate, explainGate, hasWork } from './gate';
 export type { GateInput } from './gate';
+export { DEBUG_COMMAND, DEBUG_KEY, DEBUG_LIMITS, DebugLog, debugSnapshot, handleDebugCommand } from './debug';
+export type { DebugAnswer, DebugEvent, DebugGate, DebugRequest, DebugSnapshot, DebugSources, TabDebug } from './debug';
 export { DiagLog, MAX_PERFORMS } from './diag';
 export type {
   AnswerOrigin,

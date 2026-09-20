@@ -2,11 +2,12 @@ import { defineBackground } from 'wxt/utils/define-background';
 import { isDenylisted } from '@carat/shared';
 import { createVisionProvider } from '@carat/providers';
 import { onMessage, sendMessage } from '../src/messaging';
-import { ContextStore, ShotStore, createSettingsStore, isSiteOff, parseLocation } from '../src/store';
+import { ContextStore, ShotStore, createSettingsStore, isSiteOff, parseLocation, siteHost } from '../src/store';
 // --- clear (balaji/engine-clear) ---
 import { clearAll, handleClearCommand } from '../src/background/clear';
 // --- end clear ---
 import {
+  DebugLog,
   DiagLog,
   HistoryStore,
   KEEP_WARM_ALARM,
@@ -17,9 +18,11 @@ import {
   createNotes,
   createVisionPipeline,
   createWarmer,
+  debugSnapshot,
   describeStatus,
   describedTabs,
   getKnown,
+  handleDebugCommand,
   handleFeedback,
   isExtensionPage,
   nextAction,
@@ -39,6 +42,8 @@ export default defineBackground(() => {
   const store = new ContextStore(chrome.storage.session);
   const shots = new ShotStore(chrome.storage.session);
   const diag = new DiagLog(chrome.storage.session);
+  // Off for every tab until its debug panel is opened; see DebugLog.
+  const debug = new DebugLog(chrome.storage.session);
   const settings = createSettingsStore(chrome.storage.local);
   // The 60 s answer cache is mirrored to session storage, so a page already paid for is not asked about twice.
   useAnswerStorage(chrome.storage.session);
@@ -120,6 +125,8 @@ export default defineBackground(() => {
 
   onMessage('nextAction', async ({ data, sender }) => {
     const tabId = sender.tab?.id;
+    // The extra trace is assembled only for a tab whose panel is open.
+    const watching = await debug.isOn(tabId);
     try {
       return await nextAction(data, requesterFromSender(sender, data.page), {
         settings: () => settings.get(),
@@ -128,7 +135,22 @@ export default defineBackground(() => {
         tabs: () => describedTabs(tabId),
         refine,
         warmed: (id, req) => warmer.warmed(id, req),
-        ...(tabId !== undefined ? { onDiag: (d) => void diag.recordSuggest(tabId, d) } : {}),
+        ...(tabId !== undefined
+          ? {
+              onDiag: (d) => {
+                void diag.recordSuggest(tabId, d);
+                pushDebug(tabId);
+              },
+            }
+          : {}),
+        ...(watching && tabId !== undefined
+          ? {
+              onDebug: (patch) => {
+                if (patch.request) void debug.recordRequest(tabId, patch.request).then(() => pushDebug(tabId));
+                if (patch.answer) void debug.recordAnswer(tabId, patch.answer).then(() => pushDebug(tabId));
+              },
+            }
+          : {}),
       });
     } catch {
       return { action: null };
@@ -182,6 +204,50 @@ export default defineBackground(() => {
   onMessage('getDiag', async ({ data, sender }) =>
     trusted(sender) ? { diag: (await diag.get(data.tabId)) ?? null } : { diag: null },
   );
+
+  // The debug panel. A page may only ever ask about the tab it is running in;
+  // naming another one is the popup's and the options page's privilege.
+  const debugSources = {
+    diag,
+    debug,
+    history,
+    settings: () => settings.get(),
+    host: async (tabId: number) => {
+      try {
+        return siteHost((await chrome.tabs.get(tabId)).url) ?? '';
+      } catch {
+        return '';
+      }
+    },
+  };
+  onMessage('getDebug', ({ data, sender }) =>
+    debugSnapshot(trusted(sender) ? (data.tabId ?? sender.tab?.id) : sender.tab?.id, debugSources),
+  );
+  onMessage('setDebug', async ({ data, sender }) => {
+    const tabId = sender.tab?.id;
+    if (tabId === undefined) return { on: false };
+    if (data.on) await debug.open(tabId);
+    else await debug.close(tabId);
+    return { on: data.on };
+  });
+  // Every panel is one tab's; a tab that goes takes its trace with it.
+  chrome.tabs.onRemoved.addListener((tabId) => void debug.forget(tabId).catch(() => undefined));
+
+  /** The panel repaints from this; a tab with no panel open is never sent one. */
+  function pushDebug(tabId: number): void {
+    void (async () => {
+      if (!(await debug.isOn(tabId))) return;
+      const snapshot = await debugSnapshot(tabId, debugSources);
+      await sendMessage('debugEvent', snapshot, tabId).catch(() => undefined);
+    })().catch(() => undefined);
+  }
+
+  // Alt+Shift+D, beside Alt+Shift+C and Alt+Shift+X.
+  chrome.commands?.onCommand.addListener((command, tab) => {
+    handleDebugCommand(command, tab?.id, {
+      toggle: (tabId) => void sendMessage('toggleDebug', undefined, tabId).catch(() => undefined),
+    });
+  });
   // The status line is the one thing a page may learn about settings beyond the redacted view: a verdict and a model name.
   onMessage('getStatus', async ({ sender }) => describeStatus(await settings.get(), sender.tab?.url ?? sender.url));
   onMessage('getSettings', async ({ sender }) => {

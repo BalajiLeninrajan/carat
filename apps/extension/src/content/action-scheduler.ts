@@ -1,6 +1,7 @@
 import type { NextAction } from '@carat/shared';
 import type { Chip } from '../chip';
 import { QUIET_HINT } from '../chip';
+import { fromSurface } from '../dom/surfaces';
 import { performFill } from '../fill';
 import type { FrameHub, KnownFrame } from '../frames';
 import { createFrameHub } from '../frames';
@@ -89,6 +90,12 @@ export interface RequestObserver {
   onAnswer?(): void;
   /** A snooze started and will be over at this time, or ended, which is `null`. */
   onQuiet?(until: number | null): void;
+  /**
+   * Why the scheduler did or did not ask, for the debug panel's timeline:
+   * the trigger's own name, with the refusal or the memo as the detail.
+   * Nothing reads it unless the panel is open.
+   */
+  onEvent?(event: { name: string; detail?: string }): void;
 }
 
 export interface ActionOptions extends RequestObserver {
@@ -223,6 +230,12 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
    * while waiting is the one that goes.
    */
   function ask(trigger: Trigger): Refusal | undefined {
+    const refusal = decide(trigger);
+    observer.onEvent?.({ name: trigger, ...(refusal ? { detail: refusal } : {}) });
+    return refusal;
+  }
+
+  function decide(trigger: Trigger): Refusal | undefined {
     if (!ctx.isValid) return 'gone';
     // Shift+Tab bought a minute of silence, and nothing buys its way past that:
     // the shortcut ends the snooze itself before it asks.
@@ -298,8 +311,14 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
       // asking if the page moved after the immediate one went out.
       if (!force && trigger !== 'lost' && trigger !== 'performed' && trigger !== 'silent') {
         // A page that settled without changing has nothing new to say.
-        if ((trigger === 'quiet' || trigger === 'settled') && !fresh) return;
-        if (!fresh && events === lastEvents && now - lastAt < SNAPSHOT_TIMING.identicalMs) return;
+        if ((trigger === 'quiet' || trigger === 'settled') && !fresh) {
+          observer.onEvent?.({ name: 'memo', detail: `${trigger}, the outline has not moved` });
+          return;
+        }
+        if (!fresh && events === lastEvents && now - lastAt < SNAPSHOT_TIMING.identicalMs) {
+          observer.onEvent?.({ name: 'memo', detail: `${trigger}, same outline and nothing new in the timeline` });
+          return;
+        }
       }
       lastHash = hash;
       lastAt = now;
@@ -333,6 +352,7 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
       // chip is all the placeholder ever had. Ask once more rather than let
       // it stand as the model's answer.
       if (update.lost) {
+        observer.onEvent?.({ name: 'ticket lost', detail: 'the service worker went down holding it' });
         settle(mine);
         // The one re-ask is only spent when it actually goes out: a refusal
         // here (an Esc waiting on its timer, an action in flight) would
@@ -477,6 +497,7 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     if (quietTimer !== null) clearTimeout(quietTimer);
     quietTimer = ctx.setTimeout(wake, SNAPSHOT_TIMING.snoozeMs);
     observer.onQuiet?.(quietUntil);
+    observer.onEvent?.({ name: 'snooze', detail: `quiet for ${SNAPSHOT_TIMING.snoozeMs / 1000}s` });
     // The model reads this next time: the user wanted silence here, not a better answer.
     events++;
     void send('history', { entries: [{ t: Date.now(), kind: 'snoozed' }] });
@@ -653,20 +674,24 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     afterUser.soon();
   }
 
-  const onUser = (): void => {
+  const onUser = (e?: Event): void => {
+    // Working the debug panel is not working the page.
+    if (e && fromSurface(e)) return;
     userActed();
     afterUser.soon();
   };
   // A click, a keystroke or a scroll of the user's own: ask again once they pause.
   for (const type of ['click', 'input'] as const) ctx.addEventListener(doc, type, onUser);
   // Carat's own smooth scroll fires these too; that one is not the user moving.
-  const onScrolled = (): void => {
+  const onScrolled = (e: Event): void => {
     if (caratScrolling()) return;
-    onUser();
+    onUser(e);
   };
   ctx.addEventListener(win, 'scroll', onScrolled, { passive: true } as AddEventListenerOptions);
   // The focus moving is the strongest signal there is; that one does not wait.
-  ctx.addEventListener(doc, 'focusin', () => {
+  ctx.addEventListener(doc, 'focusin', (e) => {
+    // Clicking into the debug panel moves the focus, but not the user's place on the page.
+    if (fromSurface(e)) return;
     userActed();
     ask('focus');
   });

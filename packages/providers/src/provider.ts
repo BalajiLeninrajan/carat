@@ -13,6 +13,12 @@ export interface NextOptions {
    * the model is still writing. Called at most once per call.
    */
   onPartial?: (partial: { target: number | null }) => void;
+  /**
+   * The reply exactly as it arrived, before it is parsed or salvaged. Set
+   * only while a tab's debug panel is open; providers with no text to hand
+   * back (the regex placeholder, Jev's choice call) leave it alone.
+   */
+  onRaw?: (text: string) => void;
 }
 
 /** One page in, one action out. Swapping providers only ever means implementing this. */

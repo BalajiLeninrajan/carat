@@ -87,6 +87,11 @@ export class RaceProvider implements Provider {
     return this.run?.attempts ?? [];
   }
 
+  /** Whose answer the run is standing on, or undefined while nothing usable has landed. */
+  get winner(): Settings['provider'] | undefined {
+    return this.run?.bestProvider;
+  }
+
   /** Whether anything in here has a prefix to warm at all: the regex placeholder and Jev have none. */
   get warms(): boolean {
     return this.providers.some((p) => p.warm !== undefined);
@@ -122,6 +127,7 @@ class Run {
   readonly attempts: RaceAttempt[] = [];
   ended = false;
   best: NextAction | null = null;
+  bestProvider: Settings['provider'] | undefined;
 
   private readonly controller = new AbortController();
   private resolveFirst!: (a: NextAction | null) => void;
@@ -161,7 +167,11 @@ class Run {
     const started = Date.now();
     let result: Promise<NextAction | null>;
     try {
-      result = provider.next(req, { signal: this.controller.signal, ...(opts.onPartial ? { onPartial: opts.onPartial } : {}) });
+      result = provider.next(req, {
+        signal: this.controller.signal,
+        ...(opts.onPartial ? { onPartial: opts.onPartial } : {}),
+        ...(opts.onRaw ? { onRaw: opts.onRaw } : {}),
+      });
     } catch (e) {
       result = Promise.reject(e);
     }
@@ -184,6 +194,7 @@ class Run {
     if (usable && rank > this.bestRank) {
       this.best = action;
       this.bestRank = rank;
+      this.bestProvider = provider.id;
     }
     if (usable && !this.firstDone) this.finishFirst();
     else if (usable) {

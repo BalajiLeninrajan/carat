@@ -1,6 +1,7 @@
 import { defineExtensionMessaging } from '@webext-core/messaging';
 import type { GetDataType, GetReturnType } from '@webext-core/messaging';
 import type { ContextItem, NextAction, NextActionRequest, Settings } from '@carat/shared';
+import type { DebugSnapshot } from './background/debug';
 import type { TabDiag } from './background/diag';
 import type { HistoryEntry } from './history';
 import type { FeedbackInput } from './background/feedback';
@@ -54,9 +55,10 @@ export interface PerformedAction {
   host: string;
 }
 
-// Background handles every message but `forceSuggest` and `contextCleared`,
-// which it sends to one tab's content script when a keyboard shortcut fires or
-// the stores are wiped.
+// Background handles every message but `forceSuggest`, `contextCleared`,
+// `toggleDebug` and `debugEvent`, which it sends to one tab's content script
+// when a keyboard shortcut fires, the stores are wiped, or the debug panel
+// that tab has open has something new to show.
 export interface Protocol {
   capture(data: { url: string; title: string; text: string; kind: 'page' | 'selection'; leaving?: boolean }): void;
   /** What the user just did on the page: clicks and typing, for the per-tab timeline. */
@@ -78,6 +80,18 @@ export interface Protocol {
   clearKnown(): void;
   setPinned(data: { pinned: boolean }): { pinned: boolean };
   getDiag(data: { tabId: number }): { diag: TabDiag | null };
+  /**
+   * Everything the background knows about one tab, for the debug panel. A
+   * content script asks about its own tab and leaves `tabId` out; the popup
+   * and the options page may name one.
+   */
+  getDebug(data: { tabId?: number }): DebugSnapshot;
+  /** The panel opened or closed on this tab. Nothing extra is kept until it has opened once. */
+  setDebug(data: { on: boolean }): { on: boolean };
+  /** Background to one tab: the panel's data moved. */
+  debugEvent(data: DebugSnapshot): void;
+  /** Alt+Shift+D on this tab: the panel opens, or closes if it was open. */
+  toggleDebug(): void;
   /** What the status line on a page may show: running or not, and the model in use. Never the key. */
   getStatus(): StatusInfo;
   getSettings(): Settings;
