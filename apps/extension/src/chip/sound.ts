@@ -35,7 +35,7 @@ const ARM: Tone[] = [
 ];
 
 export interface Sounds {
-  /** The options page's "Sound on Tab". Off means no context is ever built. */
+  /** The options page's "Sound on accept". Off means no context is ever built. */
   setEnabled(on: boolean): void;
   accept(): void;
   dismiss(): void;
@@ -75,7 +75,7 @@ export function createSounds(win: Window = window): Sounds {
       }
     }
     // A context built on an earlier tab suspends when the tab is backgrounded;
-    // the Tab press this is running under is the gesture that may resume it.
+    // the key press this is running under is the gesture that may resume it.
     if (ctx.state === 'suspended') void ctx.resume?.().catch(() => undefined);
     return ctx;
   }
