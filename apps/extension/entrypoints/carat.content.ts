@@ -13,6 +13,7 @@ import {
 } from '../src/engine/shared/protocol';
 import { isSensitiveField, maskSensitive } from '../src/engine/shared/redact';
 import { onMessage, safeSendMessage } from '../src/messaging';
+import { createQuiet } from '../src/quiet';
 import { hasMoreBelow, scrollPageDown } from '../src/scroll';
 import { createStatusLine } from '../src/status';
 
@@ -247,6 +248,8 @@ export default defineContentScript({
     const chip = createChip(document, ring);
     const status = createStatusLine(document);
     const debug = startDebug(ctx, document);
+    // Shift+Tab on any chip: a minute with nothing asked and nothing offered.
+    const quiet = createQuiet((left) => status.setQuiet(left));
 
     interface Suggestion {
       reqId: number;
@@ -304,6 +307,8 @@ export default defineContentScript({
           suggestion = null;
           ring.hide();
           if (reason === 'escape' && s) post({ type: 'dismiss', reqId: s.reqId });
+          // Shift+Tab is not about this offer, it is about the next minute of them.
+          if (reason === 'snoozed') startQuiet();
         },
       };
       if (msg.browser || !suggestion?.el) chip.showBanner(common);
@@ -611,9 +616,17 @@ export default defineContentScript({
     let pageChanged = true;
 
     function schedule(reason: string): void {
+      // A quiet minute is a minute of not asking, so nothing is even queued.
+      if (quiet.active) return;
       lastReason = reason;
       clearTimeout(idleTimer);
       idleTimer = setTimeout(onIdle, reason === 'input' ? TYPING_IDLE_MS : IDLE_MS);
+    }
+
+    function startQuiet(): void {
+      clearTimeout(idleTimer);
+      quiet.start();
+      debug.event({ name: 'quiet', detail: 'Shift+Tab: a minute without offers' });
     }
 
     const MODIFIER_KEYS = new Set(['Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'Fn']);
@@ -692,7 +705,7 @@ export default defineContentScript({
     });
 
     function onIdle(): void {
-      if (document.visibilityState !== 'visible') return;
+      if (document.visibilityState !== 'visible' || quiet.active) return;
       const f = asTextField(deepActive());
       const selection = selectedText();
       lastSelection = selection;
@@ -801,6 +814,8 @@ export default defineContentScript({
 
     const stopForce = onMessage('forceSuggest', () => {
       if (!ctx.isValid) return;
+      // Asking for one is the plainest way of saying the quiet minute is over.
+      quiet.end();
       activity++;
       schedule('force');
     });
@@ -812,6 +827,7 @@ export default defineContentScript({
 
     ctx.onInvalidated(() => {
       clearInterval(statusTimer);
+      quiet.destroy();
       stopForce();
       stopCleared();
       chip.destroy();

@@ -130,6 +130,17 @@ describe('chip', () => {
     expect(onDismiss).toHaveBeenCalledWith('timeout');
   });
 
+  it('asks for a quiet minute on Shift+Tab, and stands an armed chip down first', () => {
+    chip.show({ target, label: 'Click "Send reply"', irreversible: true, onAccept, onDismiss });
+    key(target, 'Tab');
+    expect(chip.armed).toBe(true);
+    const e = key(target, 'Tab', { shiftKey: true });
+    expect(e.defaultPrevented).toBe(true);
+    expect(chip.armed).toBe(false);
+    expect(onAccept).not.toHaveBeenCalled();
+    expect(onDismiss).toHaveBeenCalledWith('snoozed');
+  });
+
   describe('an action that cannot be undone', () => {
     const showRisky = (): void =>
       chip.show({ target, label: 'Click "Send reply"', irreversible: true, onAccept, onDismiss });
