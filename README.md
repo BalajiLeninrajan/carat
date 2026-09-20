@@ -3,15 +3,17 @@
 A Chrome extension that guesses the one thing you are about to do on the page
 in front of you, and does it when you tap a key.
 
-Carat reads the page through Chrome's accessibility tree, asks a model what
-comes next, and puts a small chip beside the control it means. Tap the right
-Shift and the chip acts: it presses the button, fills the field, picks the
-option, opens the tab, or reads on down the page. Esc turns it down.
+Carat reads the page through Chrome's accessibility tree, searches Elasticsearch
+for what you were already in the middle of, asks a model what comes next, and
+puts a small chip beside the control it means. Tap the right Shift and the chip
+acts: it presses the button, fills the field, picks the option, opens the tab, or
+reads on down the page. Esc turns it down.
 
 - On a search results page: `Click "DoorDash Food Delivery"`
 - Halfway down a long article: `Scroll more`
 - On a checkout with nothing left to type: `Click "Continue to payment"`
 - After a friend messages you a restaurant: `Open "Seven Shores Cafe" in Google Maps`
+- On an empty Calendar event, an hour after that message: `Fill Title with "Dinner at Seven Shores Cafe"`
 
 Pause while typing and the same key finishes the line instead. Carat writes the
 rest in grey after the caret, `Dinner at Seven` grows `Shores Cafe, Friday at 6`,
@@ -44,8 +46,13 @@ Two things Chrome will tell you about:
   tab Carat reads. Closing it detaches the debugger and Carat goes quiet on that
   tab until you reload.
 
-Open the options page and paste an OpenAI API key. Nothing works without one.
-Any OpenAI Responses API endpoint does, so a proxy or a local server works too.
+Open the options page and fill in two things. An OpenAI API key, which nothing
+works without; any OpenAI Responses API endpoint does, so a proxy or a local
+server works too. And your Elasticsearch URL and API key, which is where Carat
+keeps what it has read and where it looks before every guess. Carat creates the
+indices and the ingest pipeline on the first write, so a cluster and a key are
+all it needs from you. Set the inference endpoint id to `default` to turn on
+semantic retrieval; leave it blank and retrieval stays lexical.
 
 ## Keys
 
@@ -71,25 +78,53 @@ and you can rebind them at `chrome://extensions/shortcuts`.
      │ focus, typing, scroll, selection, copies    │ target, label, text
      ▼                                             │
   ┌─ service worker ──────────────────────────────────────────┐
-  │  listen → outline → predict → actuate                     │
+  │  listen → outline → retrieve → predict → actuate          │
   │  notes · timeline · clipboard · tasks                     │
-  └──┬──────────────┬─────────────────┬───────────────┬───────┘
-     │ chrome.      │ Responses API   │ offscreen     │ optional
-     │ debugger     │                 │ document      │
-     ▼              ▼                 ▼               ▼
-  accessibility   the model       microphone,    Elasticsearch
-  tree of the tab                 system clipboard
+  └──┬────────────────┬──────────────────┬────────────────────┘
+     │ chrome.        │ offscreen        │ Responses API
+     │ debugger       │ document         │
+     ▼                ▼                  ▼
+  accessibility    microphone,        the model
+  tree of the tab  system clipboard      ▲
+     │                                   │
+     │ every reading, fact, action       │ [task] the one thing
+     ▼                                   │ this page can finish
+  ┌─ Elasticsearch ───────────────────────┴───────────────────┐
+  │  observations · facts · tasks · details · actions         │
+  │  ingest pipeline · RRF over BM25 + semantic_text          │
+  └───────────────────────────────────────────────────────────┘
 ```
 
 The service worker owns everything. The content script sends what you did and
 draws what comes back; it never sees the API key and never decides anything.
 
-What the model is given, in an order that keeps the provider's prompt cache
-warm: the instructions, the other open tabs, the facts Carat kept from pages you
-left, what has happened in this tab, and then the page as a numbered outline of
-its accessibility tree with the focused control marked. It answers with one
-streamed JSON object, target first, so the ring lands on the control before the
-words arrive.
+Every page Carat reads goes to Elasticsearch: the outline itself, the facts
+distilled out of it, the personal details it learned about whoever the page was
+about, and every chip you took or turned down. Facts group into tasks by what
+they would finish, so `Dinner at Seven Shores Cafe on Friday at 6` becomes a
+`calendar_event` waiting on a title, a time and a location. When a second source
+says seven instead of six, the task keeps one document and flips to
+`status: conflict`, and the prompt tells the model to leave that detail alone
+rather than guess between them.
+
+That is what the guess is made of. Before each call Carat works out what the
+page in front of you can actually finish, from the host when it is Calendar,
+Maps or Gmail and from the controls otherwise, then runs two searches side by
+side under one deadline: the open task for that capability from the last five
+minutes, ranked against the page with conflicts boosted, and the context behind
+it from the last twelve hours, RRF over BM25 and `semantic_text`. An ES|QL
+rollup counts what is still open. The result reaches the model as one `[task]`
+line naming the single thing to finish and a few `[elasticsearch]` lines
+supporting it.
+
+So what the model is given, in an order that keeps the provider's prompt cache
+warm: the instructions, the other open tabs, the retrieved task ahead of the
+notes Carat kept from pages you left, what has happened in this tab, and then
+the page as a numbered outline of its accessibility tree with the focused
+control marked. It answers with one streamed JSON object, target first, so the
+ring lands on the control before the words arrive. Taking the chip or turning it
+down runs a delete-by-query that closes the task out, and the loop ends where it
+started.
 
 ## What it will not do
 
@@ -106,9 +141,11 @@ words arrive.
 - Password, card and one-time-code fields are never read, never filled, and
   never copied into what Carat remembers.
 
-Everything Carat remembers lives in `chrome.storage.session` and is gone when
-Chrome closes. The reading memory, the microphone and the system clipboard are
-each off until you turn them on.
+What Carat holds in the browser lives in `chrome.storage.session` and is gone
+when Chrome closes; what outlives the session is in your own cluster, under your
+own prefix, where you can read it and delete it. The ingest pipeline strips
+card-like digit sequences before anything is indexed. The reading memory, the
+microphone and the system clipboard are each off until you turn them on.
 
 ## Settings worth knowing
 
@@ -122,9 +159,6 @@ Open the options page from the extension menu.
 - **Read the system clipboard.** What you copy in the browser is always a note;
   this adds what you copy in other apps. Chrome asks for the permission when you
   tick the box and Carat hands it back when you untick it.
-- **Elasticsearch.** Give it a URL and an API key and Carat indexes what it
-  reads into five indices under a prefix, then retrieves the open task before
-  each prediction. Leave it blank and Carat runs entirely on session memory.
 
 The popup has a per-site switch, a Pin that freezes what Carat knows, and the
 current goal with a × to drop it.
