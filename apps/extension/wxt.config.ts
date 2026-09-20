@@ -8,7 +8,9 @@ export default defineConfig({
     // webNavigation: visits.ts logs every top-level navigation into the timeline.
     // search: the "open" kind runs a query with the user's own default engine.
     // offscreen carries no warning of its own: it is the document the clipboard is read from.
-    permissions: ['debugger', 'storage', 'tabs', 'webNavigation', 'search', 'offscreen'],
+    // alarms: the Elastic sweep expires open tasks off the prediction path, and
+    // a service worker is suspended too often for setInterval to be the timer.
+    permissions: ['debugger', 'storage', 'tabs', 'webNavigation', 'search', 'offscreen', 'alarms'],
     // Never in `permissions`: reading the system clipboard is asked for from the
     // options page, on the gesture that turns the setting on, and given back
     // when it goes off.

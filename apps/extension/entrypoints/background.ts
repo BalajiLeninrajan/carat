@@ -12,11 +12,18 @@ import {
   acceptAction,
   cancelPrediction,
   dismissAction,
+  peekAction,
   predictAction,
   type PredictionTrace,
 } from '../src/engine/background/predict';
+import {
+  createElasticMemory,
+  TASK_LINE_PREFIX,
+  type ElasticDebugEvent,
+  type Observation,
+} from '../src/background/elastic';
 import '../src/engine/background/visits';
-import { PORT_NAME, type ContentToWorker, type IdleMessage, type WorkerToContent } from '../src/engine/shared/protocol';
+import { PORT_NAME, type ActionKind, type ContentToWorker, type IdleMessage, type WorkerToContent } from '../src/engine/shared/protocol';
 import { isBlocked, loadSettings, saveSettings, type Settings } from '../src/engine/shared/settings';
 import {
   DebugLog,
@@ -38,8 +45,66 @@ export const COMMANDS = {
   debug: 'toggleDebug',
 } as const;
 
+/** How often expired Elastic tasks are swept, in minutes. */
+const SWEEP_MINUTES = 1;
+const SWEEP_ALARM = 'carat-elastic-sweep';
+
 export default defineBackground(() => {
   const debug = new DebugLog(chrome.storage.session as unknown as DebugArea);
+
+  /**
+   * Ours: the Elasticsearch context layer. Optional and best-effort — with no
+   * URL or key every call returns immediately, and a failure never reaches the
+   * prediction path.
+   */
+  const elastic = createElasticMemory({ settings: () => loadSettings(), onDebug: logElastic });
+
+  /** Said once per worker, not once per page, so a missing key is noticed but not shouted. */
+  let elasticOffNoted = false;
+
+  /**
+   * Whether to index and retrieve at all, and a one-time note in the console
+   * when the answer is no. Without this the layer is silent in both cases and
+   * there is no way to tell "off" from "broken".
+   */
+  const elasticOn = (settings: Settings): boolean => {
+    const on = !!settings.elasticUrl && !!settings.elasticApiKey;
+    if (!on && !elasticOffNoted) {
+      elasticOffNoted = true;
+      console.info('[carat] elastic: off — set a URL and an API key in the options page to index and retrieve');
+    }
+    return on;
+  };
+
+  /**
+   * A finished chip: Elastic records it and deletes the task it closed out, so
+   * the same suggestion does not come back on the next page.
+   */
+  const recordChip = (
+    tabId: number,
+    chip: { kind: ActionKind; label: string; value: string; url: string },
+    accepted: boolean,
+  ): Promise<void> => {
+    console.log(`[carat] elastic → ${accepted ? 'accepted' : 'dismissed'} ${chip.kind}: ${chip.label}`);
+    return elastic
+      .recordAction({ tabId, host: hostOf(chip.url), kind: chip.kind, label: chip.label, value: chip.value, accepted })
+      .catch((e) => console.warn('[carat] elastic recordAction failed:', e));
+  };
+
+  /**
+   * Expired tasks are dropped in the background, not on the prediction path.
+   * Guarded because this is an optional extra: if the alarms permission is
+   * ever missing, the sweep should stop, not take the whole worker down with
+   * it and leave the browser with no chips at all.
+   */
+  if (chrome.alarms) {
+    void chrome.alarms.create(SWEEP_ALARM, { periodInMinutes: SWEEP_MINUTES });
+    chrome.alarms.onAlarm.addListener((alarm) => {
+      if (alarm.name === SWEEP_ALARM) void elastic.sweepExpiredTasks();
+    });
+  } else {
+    console.warn('[carat] no alarms permission; expired Elastic tasks will not be swept');
+  }
 
   chrome.runtime.onInstalled.addListener(async (details) => {
     const settings = await loadSettings();
@@ -131,20 +196,35 @@ export default defineBackground(() => {
           void event(tabId, msg.entry);
           break;
         case 'accept': {
+          const chip = peekAction(tabId, msg.reqId);
           const result = await acceptAction(tabId, msg.reqId);
           post({ type: 'result', reqId: msg.reqId, ...result });
           void event(tabId, 'accepted', result.ok ? undefined : result.reason);
           if (!result.ok) console.warn(`[carat] accept refused: ${result.reason}`);
+          if (chip && result.ok) void recordChip(tabId, chip, true);
           break;
         }
-        case 'dismiss':
+        case 'dismiss': {
+          const chip = peekAction(tabId, msg.reqId);
           dismissAction(tabId, msg.reqId);
           void event(tabId, 'dismissed');
+          if (chip) void recordChip(tabId, chip, false);
           break;
+        }
         case 'seen': {
           const settings = await loadSettings();
           if (!settings.enabled || !settings.memoryEnabled || !settings.apiKey || isBlocked(settings, msg.url)) break;
-          recordSeen(msg, settings).catch((e) => console.error('[carat] noting failed:', e));
+          recordSeen(msg, settings)
+            .then((added) => {
+              if (added.length && elasticOn(settings)) {
+                console.log(
+                  `[carat] elastic → ${added.length} fact(s) from ${hostOf(msg.url)}\n` +
+                    added.map((n) => `  - ${n.text}`).join('\n'),
+                );
+                void elastic.indexFacts(observationOf(tabId, msg.url, msg.title, msg.text), added);
+              }
+            })
+            .catch((e) => console.error('[carat] noting failed:', e));
           break;
         }
         // Ours: a copy made on the page. Stored as it stands, with no model
@@ -196,7 +276,41 @@ export default defineBackground(() => {
     const textOutline = buildOutline(snapshot.nodes, { ...common, mode: 'text' });
     const actionOutline = buildOutline(snapshot.nodes, { ...common, mode: 'action', focusedValue });
     const history = await historyFor(tabId, msg.url);
-    const notes = await notesFor(msg.url, settings);
+    // The accessibility tree is what Elastic remembers this page by: the same
+    // outline the model reads, not a separate DOM scrape.
+    if (elasticOn(settings)) {
+      console.log(
+        `[carat] elastic → observation · ${hostOf(msg.url)} · ${textOutline.text.length} chars of AX outline` +
+          ` · ${actionOutline.candidates.length} controls · "${msg.title.slice(0, 60)}"`,
+      );
+      void elastic.indexObservation(observationOf(tabId, msg.url, msg.title, textOutline.text));
+    }
+    const retrieveLines = async (): Promise<string[]> => {
+      if (!elasticOn(settings)) return [];
+      try {
+        const lines = await elastic.retrieve(
+          {
+            url: msg.url,
+            title: msg.title,
+            text: actionOutline.text,
+            candidates: actionOutline.candidates,
+            focused: actionOutline.focused,
+            history,
+          },
+          tabId,
+        );
+        if (lines.length) console.log(`[carat] elastic \u2190 ${lines.length} line(s)\n${lines.map((l) => `  ${l}`).join('\n')}`);
+        else console.log('[carat] elastic \u2190 nothing for this page');
+        return lines;
+      } catch (e) {
+        console.warn('[carat] elastic retrieve failed:', e);
+        return [];
+      }
+    };
+    const [ownNotes, elasticLines] = await Promise.all([notesFor(msg.url, settings), retrieveLines()]);
+    // The task line leads; the user's own notes keep their place ahead of the
+    // supporting context, so retrieval can never crowd out what they read.
+    const notes = mergeNotes(ownNotes, elasticLines);
     if (idleSeq.get(tabId) !== seq) return;
 
     console.log(
@@ -388,4 +502,37 @@ function hostOf(url: string): string {
   } catch {
     return '';
   }
+}
+
+/**
+ * Every Elasticsearch request, in the worker console. The layer is
+ * best-effort by design — a bad key or a sleeping deployment is swallowed so
+ * the chip still appears — which means without this there is nothing at all
+ * to look at when it is not working. Failures carry the response body, since
+ * that is where the reason lives.
+ */
+function logElastic(event: ElasticDebugEvent): void {
+  const status = event.status === undefined ? '' : ` ${event.status}`;
+  const line = `[carat] elastic ${event.kind}${status} · ${event.summary}`;
+  if (event.ok) console.log(line);
+  else console.warn(`${line}\n  ${event.path}`, event.response);
+}
+
+/** One reading of a page, as the Elastic context layer stores it. */
+function observationOf(tabId: number, url: string, title: string, text: string): Observation {
+  return { id: `${tabId}:${url}`, tabId, url, title, text, at: Date.now() };
+}
+
+/**
+ * Elastic returns the task line first and its supporting context after. The
+ * task goes above the user's own notes because it names the one thing this
+ * page can finish; the context goes below them.
+ */
+function mergeNotes(own: string, elasticLines: string[]): string {
+  if (!elasticLines.length) return own;
+  const task = elasticLines.filter((line) => line.startsWith(TASK_LINE_PREFIX));
+  const context = elasticLines.filter((line) => !line.startsWith(TASK_LINE_PREFIX));
+  const mine = own === '(none)' ? [] : own.split('\n').filter(Boolean);
+  const lines = [...task.map((l) => `- ${l}`), ...mine, ...context.map((l) => `- ${l}`)];
+  return lines.length ? lines.join('\n') : '(none)';
 }

@@ -39,6 +39,21 @@ export interface Settings {
   statusLine: boolean;
   /** Ours: the chip's short note on Tab. Off means no AudioContext is ever built. */
   sound: boolean;
+  /**
+   * Ours: optional Elasticsearch context layer. With a URL and an API key,
+   * the accessibility tree of every page read, the facts distilled from it and
+   * the chips accepted or dismissed are indexed under `elasticIndexPrefix`,
+   * and the open task is retrieved before each prediction.
+   */
+  elasticUrl: string;
+  elasticApiKey: string;
+  elasticIndexPrefix: string;
+  /**
+   * Optional Elastic inference endpoint for `semantic_text`. Blank keeps
+   * retrieval lexical; "default" uses the deployment default; an endpoint id
+   * such as ".elser-2-elasticsearch" turns on RRF hybrid retrieval.
+   */
+  elasticInferenceId: string;
 }
 
 // Picked by the model × reasoning ablation (npm run eval): as accurate as the
@@ -63,7 +78,22 @@ export const DEFAULT_SETTINGS: Settings = {
   blocklist: [],
   statusLine: false,
   sound: true,
+  elasticUrl: "",
+  elasticApiKey: "",
+  elasticIndexPrefix: "carat",
+  elasticInferenceId: "",
 };
+
+/** Index names allow a narrow character set, and a blank prefix is not one. */
+export function indexPrefix(v: string): string {
+  const cleaned = v
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+  return cleaned || DEFAULT_SETTINGS.elasticIndexPrefix;
+}
 
 export async function loadSettings(): Promise<Settings> {
   const stored = await chrome.storage.local.get(DEFAULT_SETTINGS as unknown as Record<string, unknown>);
@@ -72,6 +102,11 @@ export async function loadSettings(): Promise<Settings> {
   for (const key of ["textModel", "actionModel"] as const) {
     if (PREVIOUS_DEFAULT_MODELS.includes(settings[key])) settings[key] = DEFAULT_MODEL;
   }
+  // A trailing slash on the URL doubles up with every path we build.
+  settings.elasticUrl = settings.elasticUrl.trim().replace(/\/+$/, "");
+  settings.elasticApiKey = settings.elasticApiKey.trim();
+  settings.elasticIndexPrefix = indexPrefix(settings.elasticIndexPrefix);
+  settings.elasticInferenceId = settings.elasticInferenceId.trim();
   return settings;
 }
 

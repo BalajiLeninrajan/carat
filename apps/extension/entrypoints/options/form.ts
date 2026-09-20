@@ -1,6 +1,6 @@
-import { DEFAULT_SETTINGS, type Settings } from '@/src/engine/shared/settings';
+import { DEFAULT_SETTINGS, indexPrefix, type Settings } from '@/src/engine/shared/settings';
 
-const TEXT_KEYS = ['apiKey', 'baseUrl', 'textModel', 'actionModel'] as const;
+const TEXT_KEYS = ['apiKey', 'baseUrl', 'textModel', 'actionModel', 'elasticUrl', 'elasticApiKey', 'elasticIndexPrefix', 'elasticInferenceId'] as const;
 const BOOL_KEYS = ['enabled', 'textEnabled', 'actionsEnabled', 'memoryEnabled', 'sound', 'statusLine'] as const;
 const TIERS: ReadonlySet<Settings['serviceTier']> = new Set(['auto', 'default', 'priority']);
 
@@ -32,6 +32,11 @@ export function readForm(form: HTMLFormElement): Partial<Settings> {
     actionModel: input(form, 'actionModel').value.trim() || DEFAULT_SETTINGS.actionModel,
     serviceTier: TIERS.has(tier) ? tier : DEFAULT_SETTINGS.serviceTier,
     blocklist: parseBlocklist((form.elements.namedItem('blocklist') as HTMLTextAreaElement).value),
+    // loadSettings normalizes these further (trailing slash, index-prefix charset).
+    elasticUrl: input(form, 'elasticUrl').value.trim().replace(/\/+$/, ''),
+    elasticApiKey: input(form, 'elasticApiKey').value.trim(),
+    elasticIndexPrefix: indexPrefix(input(form, 'elasticIndexPrefix').value),
+    elasticInferenceId: input(form, 'elasticInferenceId').value.trim(),
   };
   for (const k of BOOL_KEYS) patch[k] = input(form, k).checked;
   return patch;

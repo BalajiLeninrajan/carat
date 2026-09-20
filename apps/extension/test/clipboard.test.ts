@@ -81,43 +81,44 @@ describe('copies in <notes>', () => {
   it('renders in the engine format, naming the host it was copied on', async () => {
     vi.useFakeTimers();
     await recordCopied({ text: 'Seven Shores Cafe', url: 'https://reddit.com/r/x', title: 'r/x' });
-    expect(await notesFor('https://maps.test/', settings)).toBe(
-      '- the user copied "Seven Shores Cafe" (just now, on reddit.com)',
-    );
+    expect(await notesFor('https://maps.test/', settings)).toBe('- just now, copied on reddit.com: Seven Shores Cafe');
   });
 
   it('says where a copy with no page behind it came from', async () => {
     vi.useFakeTimers();
     await recordCopied({ text: 'NW-55821', url: '', title: '' });
-    expect(await notesFor('https://a.test/', settings)).toBe('- the user copied "NW-55821" (just now, from another app)');
+    expect(await notesFor('https://a.test/', settings)).toBe('- just now, copied from another app: NW-55821');
   });
 
-  it('puts a fresh copy in front of the read notes, and queues it after ten minutes', async () => {
+  it('keeps a fresh copy in the prompt behind ten pages read since, and lets it go after ten minutes', async () => {
     vi.useFakeTimers();
     const now = Date.now();
+    await recordCopied({ text: 'Seven Shores Cafe', url: 'https://reddit.com/r/x', title: '' });
+    const copy = store.notes()[0]!;
+    // Ten pages read after the copy would otherwise push it out of the prompt.
     const read: Note[] = Array.from({ length: 10 }, (_, i) => ({
-      at: now - 1000 + i,
+      at: now + i,
       source: 'read' as const,
       url: `https://read.test/${i}`,
       title: '',
       text: `fact ${i}`,
     }));
-    await store.api.set({ notes: read });
-    await recordCopied({ text: 'Seven Shores Cafe', url: 'https://reddit.com/r/x', title: '' });
+    await store.api.set({ notes: [copy, ...read] });
 
-    const fresh = await notesFor('https://a.test/', { ...settings, memoryEnabled: true });
-    expect(fresh.split('\n')[0]).toContain('the user copied "Seven Shores Cafe"');
-    expect(fresh.split('\n')).toHaveLength(10);
+    const fresh = (await notesFor('https://a.test/', { ...settings, memoryEnabled: true })).split('\n');
+    // Last is the strongest place in the prompt: the model weighs a note by its age.
+    expect(fresh.at(-1)).toContain('copied on reddit.com: Seven Shores Cafe');
+    expect(fresh).toHaveLength(10);
 
     vi.setSystemTime(now + COPY_TOP_MS + 1000);
     const later = await notesFor('https://a.test/', { ...settings, memoryEnabled: true });
-    expect(later.split('\n')[0]).not.toContain('the user copied');
+    expect(later).not.toContain('copied on reddit.com');
   });
 
   it('counts a copy whatever the memory and listening settings say', async () => {
     await recordCopied({ text: 'Seven Shores Cafe', url: 'https://reddit.com/r/x', title: '' });
     const off = { ...settings, memoryEnabled: false, listenEnabled: false };
-    expect(await notesFor('https://a.test/', off)).toContain('the user copied');
+    expect(await notesFor('https://a.test/', off)).toContain('copied on reddit.com');
   });
 
   it('leaves out what the system clipboard produced once the setting is off', async () => {

@@ -51,7 +51,12 @@ export function createStatusLine(doc: Document = document): StatusLine {
   let info: StatusInfo | null = null;
 
   const mount = (): void => {
-    if (!host.isConnected) doc.documentElement.append(host);
+    if (host.isConnected) return;
+    try {
+      doc.documentElement?.append(host);
+    } catch {
+      // Some very dynamic pages can detach or deny the root while we render.
+    }
   };
 
   const render = (): void => {
@@ -61,6 +66,10 @@ export function createStatusLine(doc: Document = document): StatusLine {
       return;
     }
     mount();
+    if (!host.isConnected) {
+      visible = false;
+      return;
+    }
     host.style.display = 'block';
     visible = true;
     pill.classList.toggle('is-running', info.running);

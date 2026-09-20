@@ -181,6 +181,31 @@
           <span class="hint">Banks, identity providers and password managers are always off, whatever is in this list.</span>
         </label>
 
+        <h2>Elasticsearch context layer</h2>
+        <span class="hint">Optional. With a URL and an API key, Carat indexes the accessibility tree of every page it reads, the facts distilled from it, and the chips you accept or dismiss — then retrieves the one open task this page can finish before each prediction. Leave the URL blank to keep everything local.</span>
+
+        <label>
+          <span class="name">Elasticsearch URL</span>
+          <input type="url" name="elasticUrl" placeholder="https://your-deployment.es.us-central1.gcp.cloud.es.io" autocomplete="off" spellcheck="false" />
+        </label>
+
+        <label>
+          <span class="name">API key</span>
+          <input type="password" name="elasticApiKey" autocomplete="off" spellcheck="false" />
+        </label>
+
+        <div class="row2">
+          <label>
+            <span class="name">Index prefix</span>
+            <input type="text" name="elasticIndexPrefix" placeholder="carat" autocomplete="off" spellcheck="false" />
+          </label>
+          <label>
+            <span class="name">Inference endpoint</span>
+            <input type="text" name="elasticInferenceId" placeholder="default, .elser-2-elasticsearch, or blank" autocomplete="off" spellcheck="false" />
+          </label>
+        </div>
+        <span class="hint">Blank keeps retrieval BM25-only. Set an endpoint id to add a <code>semantic_text</code> field and retrieve with RRF over both.</span>
+
         <div class="actions">
           <button type="submit" class="primary" id="save">Save</button>
           <span id="status" role="status" aria-live="polite"></span>
