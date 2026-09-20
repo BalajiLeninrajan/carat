@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_SETTINGS } from '../src/engine/shared/settings';
 import { describeStatus } from '../src/status/info';
-import { createStatusLine, statusText } from '../src/status';
+import { createStatusLine, PAUSED_NOTICE, statusText } from '../src/status';
 
 const settings = { ...DEFAULT_SETTINGS, apiKey: 'sk-x', statusLine: true };
 
@@ -72,6 +72,37 @@ describe('status line element', () => {
     line.update({ show: false, running: true, sound: true, model: 'm' });
     expect(host!.style.display).toBe('none');
     expect(line.visible).toBe(false);
+  });
+
+  it('shows a notice while switched off, then goes quiet again', () => {
+    vi.useFakeTimers();
+    // The pill's root is closed to the page, so borrow it on the way out.
+    let root: ShadowRoot | undefined;
+    const attach = Element.prototype.attachShadow;
+    const spy = vi
+      .spyOn(Element.prototype, 'attachShadow')
+      .mockImplementation(function (this: Element, init: ShadowRootInit) {
+        root = attach.call(this, { ...init, mode: 'open' });
+        return root;
+      });
+    const line = createStatusLine(document);
+    spy.mockRestore();
+
+    line.update({ show: false, running: false, reason: 'paused', sound: true, model: 'm' });
+    expect(line.visible).toBe(false);
+
+    line.notice(PAUSED_NOTICE, 4000);
+    const host = document.querySelector<HTMLElement>('[data-carat-status]');
+    expect(host!.style.display).toBe('block');
+    expect(line.visible).toBe(true);
+    expect(root!.querySelector('.text')?.textContent).toBe('carat · paused, click the icon to resume');
+
+    vi.advanceTimersByTime(3999);
+    expect(line.visible).toBe(true);
+    vi.advanceTimersByTime(1);
+    expect(host!.style.display).toBe('none');
+    expect(line.visible).toBe(false);
+    vi.useRealTimers();
   });
 
   it('removes itself on destroy', () => {
