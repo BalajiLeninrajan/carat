@@ -18,6 +18,7 @@ import {
   createGoalAsk,
   createKeepWarm,
   createGhostRunner,
+  createClipboardReader,
   createNotes,
   createVisionPipeline,
   createWarmer,
@@ -30,7 +31,10 @@ import {
   isExtensionPage,
   nextAction,
   performNavigation,
+  SYSTEM_ORIGIN,
+  chromeClipboardDocument,
   redactSettings,
+  rememberCopy,
   requesterFromSender,
   setPinned,
   undoNavigation,
@@ -69,6 +73,36 @@ export default defineBackground(() => {
     },
     pinned: () => store.isPinned(),
   });
+  // Tabs whose content script last reported a visible password field. The
+  // clipboard is never read over one of them.
+  const passwordTabs = new Set<number>();
+  // The system clipboard: off until the user turns the setting on and Chrome
+  // grants the optional permission. What is copied inside the browser arrives
+  // over the `clipboard` message instead and needs none of this.
+  const clipboard = createClipboardReader({
+    settings: () => settings.get(),
+    granted: async () => {
+      try {
+        return await chrome.permissions.contains({ permissions: ['clipboardRead'] });
+      } catch {
+        return false;
+      }
+    },
+    doc: chromeClipboardDocument(),
+    activeTab: async () => {
+      try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        return tab ? { ...(tab.id !== undefined ? { id: tab.id } : {}), ...(tab.url ? { url: tab.url } : {}) } : undefined;
+      } catch {
+        return undefined;
+      }
+    },
+    passwordTab: (tabId) => passwordTabs.has(tabId),
+    remember: (copy) => rememberCopy(copy, { notes, history }),
+  });
+  const pollClipboard = (): void => void clipboard.poll().catch(() => undefined);
+  chrome.tabs.onActivated.addListener(() => pollClipboard());
+  chrome.tabs.onRemoved.addListener((tabId) => passwordTabs.delete(tabId));
   // --- goal (balaji/trust-goal) ---
   // One line for what the user is getting done across tabs, derived from the
   // notes and the timeline after each distillation and each accepted chip.
@@ -99,7 +133,10 @@ export default defineBackground(() => {
   const keepWarm = createKeepWarm({ alarms: chrome.alarms, area: chrome.storage.session });
   // A navigation is where fresh material comes from, so it is also where the tick starts.
   chrome.webNavigation.onCommitted.addListener((d) => {
-    if (d.frameId === 0) void keepWarm.check();
+    if (d.frameId !== 0) return;
+    void keepWarm.check();
+    // A page the user just landed on is where what they copied elsewhere gets used.
+    pollClipboard();
   });
   // The other half of Tab: grey text after the caret while the user types.
   const ghost = createGhostRunner({
@@ -140,6 +177,23 @@ export default defineBackground(() => {
     return note(item ? 'stored' : 'empty');
   });
 
+  // A copy made in the browser. Stored as it stands: what the user copied is
+  // already the fact, so there is nothing for the distiller to do.
+  onMessage('clipboard', async ({ data, sender }) => {
+    const tabId = sender.tab?.id;
+    if (tabId === undefined) return;
+    const location = parseLocation(data.url);
+    if (!location) return;
+    const host = new URL(location.origin).host;
+    if (isDenylisted(new URL(location.origin).hostname)) return;
+    const current = await settings.get();
+    if (!current.enabled || isSiteOff(current, host)) return;
+    await rememberCopy(
+      { text: data.text, origin: location.origin, tabId, title: data.title },
+      { notes, history },
+    ).catch(() => null);
+  });
+
   // What the user just did on the page, batched by the content script.
   onMessage('history', ({ data, sender }) => {
     const tabId = sender.tab?.id;
@@ -154,6 +208,11 @@ export default defineBackground(() => {
 
   onMessage('nextAction', async ({ data, sender }) => {
     const tabId = sender.tab?.id;
+    // The one place the background learns a tab is showing a login form.
+    if (tabId !== undefined) {
+      if (data.password) passwordTabs.add(tabId);
+      else passwordTabs.delete(tabId);
+    }
     // The extra trace is assembled only for a tab whose panel is open.
     const watching = await debug.isOn(tabId);
     try {
@@ -243,7 +302,7 @@ export default defineBackground(() => {
   });
 
   // The key and the cross-tab context stay with the extension's own pages; a content script gets a redacted view.
-  onMessage('getKnown', ({ sender }) => (trusted(sender) ? getKnown(store, goal) : { items: [], pinned: false }));
+  onMessage('getKnown', ({ sender }) => (trusted(sender) ? getKnown(store, goal, notes) : { items: [], pinned: false }));
   // --- goal (balaji/trust-goal) ---
   onMessage('clearGoal', async ({ sender }) => {
     if (trusted(sender)) await goal.clear();
@@ -313,8 +372,16 @@ export default defineBackground(() => {
   });
   onMessage('setSettings', async ({ data, sender }) => {
     if (!trusted(sender)) return redactSettings(await settings.get());
+    const before = await settings.get();
     const next = await settings.set(data);
     if (!next.screenshots) await shots.clear();
+    // Turning the system clipboard off takes the offscreen document down and
+    // drops what it read. What the user copied in the browser stays: that half
+    // never needed the permission and is not what they just switched off.
+    if (before.clipboardRead && !next.clipboardRead) {
+      await clipboard.forget();
+      await notes.dropCopies(SYSTEM_ORIGIN).catch(() => undefined);
+    }
     // The eagerness level is part of every request, so what was cached under the old one is stale.
     clearActionCache();
     return next;

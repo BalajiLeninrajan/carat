@@ -97,7 +97,8 @@ function renderItem(item: KnownItem): HTMLLIElement {
 
   const meta = el('div', 'meta');
   meta.append(el('span', 'origin', item.origin.replace(/^https?:\/\//, '')));
-  const chip = el('span', 'chip', item.kind);
+  // A copy is tagged by what the user did, not by where it came from.
+  const chip = el('span', 'chip', item.kind === 'clipboard' ? 'copied' : item.kind);
   chip.dataset.kind = item.kind;
   meta.append(chip, el('span', 'age', relativeAge(item.capturedAt)));
 

@@ -6,6 +6,7 @@ import {
   eagernessNote,
   eagernessPosition,
   normalizeSettings,
+  setClipboardPermission,
 } from './settings-form';
 
 const app = document.getElementById('app') as HTMLElement;
@@ -28,6 +29,7 @@ const smartModel = field<HTMLInputElement>('smartModel');
 const screenshots = field<HTMLInputElement>('screenshots');
 const eagerness = field<HTMLInputElement>('eagerness');
 const ghost = field<HTMLInputElement>('ghost');
+const clipboardRead = field<HTMLInputElement>('clipboardRead');
 const eagernessNoteEl = document.getElementById('eagerness-note') as HTMLElement;
 
 // The thumb carries a position; everything a reader needs — the level's name
@@ -58,6 +60,7 @@ function render(s: Settings): void {
   smartModel.value = s.smartModel;
   screenshots.checked = s.screenshots;
   ghost.checked = s.ghost;
+  clipboardRead.checked = s.clipboardRead;
   eagerness.value = String(eagernessPosition(s.eagerness));
   showEagerness();
 }
@@ -75,6 +78,7 @@ function read(): Partial<Settings> {
     screenshots: screenshots.checked,
     eagerness: eagernessAt(eagerness.value),
     ghost: ghost.checked,
+    clipboardRead: clipboardRead.checked,
   });
 }
 
@@ -110,6 +114,23 @@ form.addEventListener('submit', async (e) => {
 
 form.addEventListener('input', () => {
   if (status.textContent === 'Saved') setStatus('');
+});
+
+// The permission is asked for on the click itself, because Chrome only
+// prompts during a user gesture. A refusal puts the box back, and either way
+// the setting is saved at once rather than waiting for Save: the background
+// drops what it read from the clipboard the moment this goes off.
+clipboardRead.addEventListener('change', async () => {
+  const want = clipboardRead.checked;
+  const granted = await setClipboardPermission(chrome.permissions, want);
+  clipboardRead.checked = granted;
+  if (want && !granted) setStatus('Chrome did not grant the clipboard permission', true);
+  try {
+    render(await withTimeout(sendMessage('setSettings', { clipboardRead: granted })));
+    if (granted === want) setStatus('Saved');
+  } catch (err) {
+    setStatus(err instanceof Error ? err.message : 'Save failed', true);
+  }
 });
 
 eagerness.addEventListener('input', showEagerness);

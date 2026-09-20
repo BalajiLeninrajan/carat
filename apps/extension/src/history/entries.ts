@@ -9,7 +9,7 @@ export const HISTORY_LIMITS = {
   ttlMs: 30 * 60_000,
   /** Lines the request carries. */
   maxLines: 12,
-  /** How much of a typed value is remembered. */
+  /** How much of a typed value, or of a copy, is remembered. */
   valueChars: 24,
   nameChars: 60,
   /** A URL in a navigation line: host plus path, no query. */
@@ -51,6 +51,7 @@ export function asNavHow(transition: string | undefined, qualifiers: readonly st
 export type HistoryEntry =
   | { t: number; kind: 'click'; role: string; name: string }
   | { t: number; kind: 'type'; name: string; value: string }
+  | { t: number; kind: 'copied'; text: string }
   | { t: number; kind: 'nav'; how: NavHow; to: string }
   | { t: number; kind: 'opened'; from: number }
   | { t: number; kind: 'accepted'; what: string }
@@ -96,6 +97,8 @@ export function describeEntry(e: HistoryEntry): string {
       return `clicked ${e.role} ${quote(e.name)}`;
     case 'type':
       return e.value ? `typed into ${quote(e.name)} (${quote(e.value)})` : `typed into ${quote(e.name)}`;
+    case 'copied':
+      return `copied ${quote(e.text)}`;
     case 'nav':
       return navLine(e.how, e.to);
     case 'opened':

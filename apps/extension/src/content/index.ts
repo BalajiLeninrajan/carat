@@ -1,5 +1,7 @@
 export { startCapture, CAPTURE_TIMING } from './capture-scheduler';
 export type { CaptureOptions } from './capture-scheduler';
+export { startClipboard, CLIPBOARD_LIMITS } from './clipboard';
+export type { ClipboardOptions } from './clipboard';
 export { startActions, SNAPSHOT_TIMING } from './action-scheduler';
 export type { ActionsHandle, ActionOptions } from './action-scheduler';
 export { send } from './send';

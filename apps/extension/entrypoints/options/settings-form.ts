@@ -19,6 +19,7 @@ export interface SettingsFormValues {
   screenshots: boolean;
   eagerness: string;
   ghost: boolean;
+  clipboardRead: boolean;
 }
 
 const PROVIDERS: ReadonlySet<Settings['provider']> = new Set(['openai', 'baseten', 'local']);
@@ -44,7 +45,36 @@ export function normalizeSettings(v: SettingsFormValues): Partial<Settings> {
     screenshots: v.screenshots,
     eagerness: isEagerness(v.eagerness) ? v.eagerness : DEFAULT_SETTINGS.eagerness,
     ghost: v.ghost,
+    clipboardRead: v.clipboardRead,
   };
+}
+
+/** The optional permission behind "Read the system clipboard". */
+export const CLIPBOARD_PERMISSION = 'clipboardRead' as const;
+
+/** The slice of `chrome.permissions` the toggle uses. Both calls need a user gesture. */
+export interface PermissionsApi {
+  request(p: { permissions: chrome.runtime.ManifestPermission[] }): Promise<boolean>;
+  remove(p: { permissions: chrome.runtime.ManifestPermission[] }): Promise<boolean>;
+}
+
+/**
+ * Turn the clipboard permission on or off, and say where the toggle should
+ * end up. Chrome asks the user on `request`, so a refusal, a missing
+ * `chrome.permissions` and a call that throws all leave the setting off: the
+ * box reverts rather than promising a read that cannot happen.
+ */
+export async function setClipboardPermission(api: PermissionsApi | undefined, want: boolean): Promise<boolean> {
+  if (!api) return false;
+  try {
+    if (!want) {
+      await api.remove({ permissions: [CLIPBOARD_PERMISSION] });
+      return false;
+    }
+    return (await api.request({ permissions: [CLIPBOARD_PERMISSION] })) === true;
+  } catch {
+    return false;
+  }
 }
 
 /**

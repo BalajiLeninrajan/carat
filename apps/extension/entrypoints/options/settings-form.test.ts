@@ -1,14 +1,16 @@
 import { DEFAULT_SETTINGS, EAGERNESS_HELP, EAGERNESS_LEVELS } from '@carat/shared';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
+  CLIPBOARD_PERMISSION,
   EAGERNESS_NAMES,
   eagernessAt,
   eagernessNote,
   eagernessPosition,
   normalizeSettings,
+  setClipboardPermission,
 } from './settings-form';
 
-const base = { enabled: true, provider: 'openai', baseURL: '', apiKey: '', model: '', statusLine: false, sound: true, smartModel: '', screenshots: false, eagerness: 'eager', ghost: true };
+const base = { enabled: true, provider: 'openai', baseURL: '', apiKey: '', model: '', statusLine: false, sound: true, smartModel: '', screenshots: false, eagerness: 'eager', ghost: true, clipboardRead: false };
 
 describe('normalizeSettings', () => {
   it('fills blank baseURL and model with the defaults', () => {
@@ -96,5 +98,51 @@ describe('normalizeSettings', () => {
   it('carries the status line toggle through', () => {
     expect(normalizeSettings(base).statusLine).toBe(false);
     expect(normalizeSettings({ ...base, statusLine: true }).statusLine).toBe(true);
+  });
+
+  it('keeps the clipboard off unless the box is ticked', () => {
+    expect(normalizeSettings(base).clipboardRead).toBe(false);
+    expect(normalizeSettings({ ...base, clipboardRead: true }).clipboardRead).toBe(true);
+    expect(DEFAULT_SETTINGS.clipboardRead).toBe(false);
+  });
+});
+
+function permissions(granted: boolean) {
+  return {
+    request: vi.fn(async () => granted),
+    remove: vi.fn(async () => true),
+  };
+}
+
+describe('the clipboard toggle', () => {
+  it('asks Chrome for the permission when it goes on', async () => {
+    const api = permissions(true);
+    expect(await setClipboardPermission(api, true)).toBe(true);
+    expect(api.request).toHaveBeenCalledWith({ permissions: [CLIPBOARD_PERMISSION] });
+    expect(api.remove).not.toHaveBeenCalled();
+  });
+
+  it('reverts when Chrome refuses', async () => {
+    const api = permissions(false);
+    expect(await setClipboardPermission(api, true)).toBe(false);
+    expect(api.request).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives the permission back when it goes off', async () => {
+    const api = permissions(true);
+    expect(await setClipboardPermission(api, false)).toBe(false);
+    expect(api.remove).toHaveBeenCalledWith({ permissions: [CLIPBOARD_PERMISSION] });
+    expect(api.request).not.toHaveBeenCalled();
+  });
+
+  it('stays off when there is no permissions API, or the call throws', async () => {
+    expect(await setClipboardPermission(undefined, true)).toBe(false);
+    const broken = {
+      request: vi.fn(async () => {
+        throw new Error('no gesture');
+      }),
+      remove: vi.fn(async () => true),
+    };
+    expect(await setClipboardPermission(broken, true)).toBe(false);
   });
 });

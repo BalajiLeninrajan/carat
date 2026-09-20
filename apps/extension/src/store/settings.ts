@@ -45,6 +45,7 @@ function sanitize(raw: unknown): Settings {
     smartModel: str(r.smartModel, '').trim() || legacySmartModel(r.visionModel),
     eagerness: isEagerness(r.eagerness) ? r.eagerness : DEFAULT_SETTINGS.eagerness,
     ghost: typeof r.ghost === 'boolean' ? r.ghost : DEFAULT_SETTINGS.ghost,
+    clipboardRead: typeof r.clipboardRead === 'boolean' ? r.clipboardRead : DEFAULT_SETTINGS.clipboardRead,
   };
 }
 

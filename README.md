@@ -111,6 +111,12 @@ The content script sends the outline and nothing else about the page. Everything
 
 Context lives only in `chrome.storage.session` and is never written to disk. The API key stays in the service worker; content scripts never receive it.
 
+## Clipboard
+
+What you copy is usually what you are about to paste, so carat keeps it. Ctrl+C or Ctrl+X on a page stores the selection as a note of its own, up to a thousand characters, with the host it was copied on and the time: `copied 12s ago on reddit.com: "Seven Shores Cafe"`. Nothing is distilled first, because what you copied is already the fact. For ten minutes it sits at the top of the eight notes a request carries, and after that it queues with the rest; the tab's timeline gets a `copied "Seven Shores Cafe"` line beside the clicks and the typing. A copy is in `<notes>` like anything else carat read, so a fill built from one is grounded by the same rule as a fill built from a page. Copying the same text twice is still one note. Nothing is kept from a password, card or code field, from a page showing a password field, or from a denylisted host, and text shaped like a card number, a key or a password is thrown away whatever field it came from.
+
+Text copied outside the browser costs a permission, so it is off until you ask for it. "Read the system clipboard" on the options page asks Chrome for the optional `clipboardRead` permission on the click itself, and the box goes back to off if Chrome refuses; unticking it hands the permission back and drops what was read. While it is on, carat reads the clipboard through an offscreen document when you switch tabs and when a page commits, at most once every five seconds, and stores the text only when it differs from the last read. Only a hash of that last text is kept between reads, never the text. It never reads while the tab in front is on a denylisted host or is showing a password field. A copy from outside is filed under the host `clipboard` and lives like every other note: an hour, gone on Alt+Shift+X, frozen while carat is pinned, and listed in the popup with a `copied` tag.
+
 ## Running it
 
 ```

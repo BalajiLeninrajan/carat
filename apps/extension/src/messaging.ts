@@ -10,7 +10,9 @@ import type { GhostInput, GhostReply } from './background/ghost';
 import type { StatusInfo } from './background/status';
 import type { VisionCue } from './background/vision';
 
-export type KnownItem = Pick<ContextItem, 'id' | 'origin' | 'title' | 'kind' | 'capturedAt'> & {
+export type KnownItem = Pick<ContextItem, 'id' | 'origin' | 'title' | 'capturedAt'> & {
+  /** `clipboard` is text the user copied; the rest are pages carat read. */
+  kind: ContextItem['kind'] | 'clipboard';
   preview: string;
 };
 
@@ -65,6 +67,10 @@ export interface Protocol {
   capture(data: { url: string; title: string; text: string; kind: 'page' | 'selection'; leaving?: boolean }): void;
   /** What the user just did on the page: clicks and typing, for the per-tab timeline. */
   history(data: { entries: HistoryEntry[] }): void;
+  /** The user copied or cut something on this page. Stored as a note as it stands, without distillation. */
+  clipboard(data: { url: string; title: string; text: string }): void;
+  /** Background to the offscreen document: paste and say what came out. Nothing else may ask. */
+  readClipboard(): { text: string };
   /** One page in, one action out. */
   nextAction(data: PageSnapshot): NextActionResponse;
   /** Long-poll for the next word on a reply's `ticket`; polled again while the answer says `more`. */

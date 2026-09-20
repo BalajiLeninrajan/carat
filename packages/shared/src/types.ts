@@ -55,6 +55,13 @@ export interface Settings {
    * On by default; off leaves Tab to the action chip everywhere.
    */
   ghost: boolean;
+  /**
+   * Read the system clipboard, so text copied outside the browser is context
+   * too. Off until the user turns it on, and it only does anything once
+   * Chrome has granted the optional `clipboardRead` permission. What the user
+   * copies inside the browser is remembered either way.
+   */
+  clipboardRead: boolean;
 }
 
 /**
@@ -88,12 +95,15 @@ export const DEFAULT_SETTINGS: Settings = {
   smartModel: '',
   eagerness: DEFAULT_EAGERNESS,
   ghost: true,
+  clipboardRead: false,
 };
 
 export const LIMITS = {
   titleChars: 80,
   pageTextChars: 4000,
   selectionTextChars: 1000,
+  /** One copy, as it is stored and rendered. The same bound as a selection. */
+  clipboardTextChars: 1000,
   /** The whole engine budget: the placeholder goes out at once, the model has this long behind it. */
   providerTimeoutMs: 6000,
   /** Body text under this many chars marks a source tab as thin enough to screenshot. */

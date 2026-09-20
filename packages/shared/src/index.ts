@@ -41,6 +41,7 @@ export {
 } from './intents';
 export type { IntentEntity, IntentName, IntentSpec, ResolvedIntent } from './intents';
 export { DENYLIST_HOSTS, isDenylisted } from './denylist';
+export { looksSecret } from './secrets';
 export { truncate, normalizeWhitespace } from './truncate';
 export { fnv1a, hashText } from './hash';
 export { domainLabel, registrableDomain } from './hosts';

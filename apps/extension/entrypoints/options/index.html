@@ -187,7 +187,7 @@
           <span class="hint">Leave blank to use the same model with low reasoning. It gives a second opinion from text when the fast answer was unsure, and reads screenshots at capture time, so whatever runs here must accept images. Only used when screenshots are on.</span>
         </label>
 
-        <h2>Screenshots and display</h2>
+        <h2>Screenshots</h2>
 
         <label class="row">
           <input type="checkbox" name="screenshots" />
@@ -196,6 +196,18 @@
         <p class="hint" id="screenshots-help">
           Off unless you turn it on. When on, and a tab you are reading is mostly an image, a pasted screenshot or a canvas app, Carat takes one picture of that tab while it is in front and keeps it in session memory for at most three minutes, two pictures at most. When you switch away, the picture goes to the smart model, which writes down the text it can see plus a few facts it works out from the picture (dates resolved to the calendar, places, addresses, prices); the picture is deleted and only that text is kept, for 30 minutes like everything else. No picture is ever taken of a page Carat has offered to fill, of a page with a password field, or of a page on the denylist.
         </p>
+
+        <h2>Clipboard</h2>
+
+        <label class="row">
+          <input type="checkbox" name="clipboardRead" />
+          <span class="name">Read the system clipboard</span>
+        </label>
+        <p class="hint" id="clipboardRead-help">
+          Off unless you turn it on. When on, Carat reads whatever you last copied anywhere on this computer, including in other apps and other Chrome profiles, and keeps it as a note for an hour like anything else it reads. Chrome asks you for the permission when you tick the box, and Carat gives it back when you untick it. It reads at most once every five seconds, only when you switch tabs or a page loads, and never while the tab in front is on a bank, a login page or anything else on Carat's denylist. Text that looks like a password or a card number is thrown away unread. What you copy inside the browser is remembered whether this is on or off; that needs no permission.
+        </p>
+
+        <h2>Sound and display</h2>
 
         <label class="row">
           <input type="checkbox" name="sound" />

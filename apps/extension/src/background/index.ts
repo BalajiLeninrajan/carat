@@ -43,7 +43,17 @@ export type { CommittedDetails, NavigationEvents, TabEvents } from './history';
 export { createGoal, createGoalAsk, goalMessages, nextGoal, readGoalReply, GOAL_KEY, GOAL_LIMITS, GOAL_NONE, GOAL_PROMPT } from './goal';
 export type { Goal, GoalAsk, GoalDeps, GoalStore } from './goal';
 export { createNotes, fallbackFacts, NOTES_KEY, NOTES_LIMITS } from './notes';
-export type { Distill, Note, Notes, NotesDeps } from './notes';
+export type { CopiedText, Distill, Note, Notes, NotesDeps } from './notes';
+export { CLIPBOARD_TIMING, SYSTEM_ORIGIN, createClipboardReader, rememberCopy } from './clipboard';
+export type {
+  ActiveTab,
+  ClipboardDocument,
+  ClipboardReader,
+  ClipboardReaderDeps,
+  ClipboardVerdict,
+  CopySink,
+} from './clipboard';
+export { OFFSCREEN_PATH, chromeClipboardDocument } from './offscreen';
 export { KEEP_WARM_ALARM, KEEP_WARM_PERIOD_MINUTES, WARM_LIMITS, createKeepWarm, createWarmer, newestMark } from './warm';
 export type { AlarmsApi, KeepWarm, KeepWarmDeps, WarmDeps, Warmer } from './warm';
 export { describeTabs, describedTabs } from './tabs';

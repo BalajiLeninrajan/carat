@@ -1,6 +1,6 @@
 import { defineContentScript } from 'wxt/utils/define-content-script';
 import { createChip } from '../src/chip';
-import { createPageState, send, startActions, startCapture, startStatus } from '../src/content';
+import { createPageState, send, startActions, startCapture, startClipboard, startStatus } from '../src/content';
 import { startDebug } from '../src/debug';
 import { startGhost } from '../src/ghost';
 import { startFrameAgent } from '../src/frames';
@@ -50,6 +50,8 @@ export default defineContentScript({
     });
     // The page's own text is what a navigation chip is built from, so a new capture re-asks.
     startCapture(ctx, document, { page, onCaptured: () => suggestions.refresh() });
+    // What the user copies here is a note as it stands: no distillation, and no permission needed.
+    startClipboard(ctx, document, { onCopied: () => suggestions.refresh() });
     // What the user clicked and typed here, for the timeline the next request carries.
     startHistoryRecorder(ctx, document, { emit: (entry) => void send('history', { entries: [entry] }) });
     // The keyboard shortcut lands here from the background.

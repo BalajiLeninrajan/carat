@@ -42,6 +42,14 @@ describe('buildNextActionMessages', () => {
     expect(new Set(tails).size).toBe(EAGERNESS_LEVELS.length);
   });
 
+  it('tells the model what a fresh copy means, at every level', () => {
+    for (const level of EAGERNESS_LEVELS) {
+      expect(actionInstructions(level)).toContain(
+        'Text the user copied moments ago is the strongest hint of what they intend to paste or search for next.',
+      );
+    }
+  });
+
   it('forbids "none" at eager and allows it at the quieter levels', () => {
     expect(actionInstructions('eager')).toContain('always suggest an action');
     expect(actionInstructions('balanced')).toContain('"none"');

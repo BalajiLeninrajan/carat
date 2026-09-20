@@ -1,5 +1,5 @@
 import type { ContextItem } from '@carat/shared';
-import { normalizeWhitespace, truncate } from '@carat/shared';
+import { LIMITS, looksSecret, normalizeWhitespace, truncate } from '@carat/shared';
 import type { CandidateKind } from '@carat/providers';
 import { candidatesFrom } from '@carat/providers';
 import { relativeAge } from '../format/age';
@@ -29,6 +29,10 @@ export const NOTES_LIMITS = {
   /** Notes the request carries. */
   top: 8,
   factChars: 200,
+  /** One copy, as it is stored. */
+  clipboardChars: LIMITS.clipboardTextChars,
+  /** How long a copy outranks everything else in `top`. */
+  clipboardTopMs: 10 * 60_000,
   /** Text under this is not worth a model call. */
   minTextChars: 120,
   /** How long the distiller has before the offline path answers instead. */
@@ -42,6 +46,24 @@ export interface Note {
   tabId: number;
   title: string;
   text: string;
+  /**
+   * Set on a note that is text the user copied. Absent on a distilled fact,
+   * which is what every note was before the clipboard became one of them.
+   */
+  kind?: 'clipboard';
+}
+
+/**
+ * One copy, from the page the user made it on or from the system clipboard.
+ * `origin` is that page's origin, or the literal `clipboard` for text copied
+ * outside the browser, which has no page behind it.
+ */
+export interface CopiedText {
+  text: string;
+  origin: string;
+  tabId?: number;
+  title?: string;
+  at?: number;
 }
 
 /** The provider's distiller. The engine side implements it; without one the regex path answers. */
@@ -66,6 +88,21 @@ export interface Notes {
   onTabHidden(tabId: number): Promise<void>;
   /** Distil now and wait: the tab-hide path, and what the tests drive. */
   distilNow(item: ContextItem): Promise<Note[]>;
+  /**
+   * Remember text the user copied, as a note of its own. No distillation:
+   * what they copied is already the fact. Answers with the note, or null when
+   * the text was empty, secret-looking or the store is pinned.
+   */
+  noteCopied(copy: CopiedText): Promise<Note | null>;
+  /** The copies still held, newest first. What the popup lists with a "copied" tag. */
+  copies(): Promise<Note[]>;
+  /**
+   * Drop the copies, keeping the distilled facts. With an origin, only the
+   * copies made there: turning the system clipboard off drops what it read
+   * and leaves what the user copied in the browser, which was never its to
+   * take.
+   */
+  dropCopies(origin?: string): Promise<void>;
   /** The newest facts from other tabs, then this tab's own older ones, marked. */
   top(requester: Pick<Requester, 'tabId'>, now?: number): Promise<string[]>;
   /** The newest `n` facts across every tab, newest first. What the goal is derived from. */
@@ -136,7 +173,8 @@ export function createNotes(deps: NotesDeps): Notes {
     // identical fact from anywhere else is not repeated.
     await edit((list) => {
       const seen = new Set(notes.map((n) => key(n.text)));
-      const kept = list.filter((n) => n.origin !== item.origin && !seen.has(key(n.text)));
+      // A copy is not a reading of the page, so a fresh reading does not supersede it.
+      const kept = list.filter((n) => (n.kind === 'clipboard' || n.origin !== item.origin) && !seen.has(key(n.text)));
       return [...kept, ...notes];
     });
     return notes;
@@ -156,6 +194,24 @@ export function createNotes(deps: NotesDeps): Notes {
     }
   }
 
+  async function noteCopied(copy: CopiedText): Promise<Note | null> {
+    if (deps.pinned && (await deps.pinned())) return null;
+    const text = truncate(normalizeWhitespace(copy.text), NOTES_LIMITS.clipboardChars);
+    if (!text || looksSecret(text)) return null;
+    const note: Note = {
+      at: copy.at ?? now(),
+      origin: copy.origin,
+      tabId: copy.tabId ?? -1,
+      title: copy.title ?? '',
+      text,
+      kind: 'clipboard',
+    };
+    // One note per distinct text: copying the same thing again moves its clock
+    // rather than filling the list with it.
+    await edit((list) => [...list.filter((n) => key(n.text) !== key(text)), note]);
+    return note;
+  }
+
   return {
     onCapture(item, leaving = false) {
       if (item.kind === 'selection') return;
@@ -167,13 +223,26 @@ export function createNotes(deps: NotesDeps): Notes {
       if (item) await distilNow(item).catch(() => undefined);
     },
     distilNow,
+    noteCopied,
+    async copies() {
+      const list = await read();
+      return list.filter((n) => n.kind === 'clipboard').sort((a, b) => b.at - a.at);
+    },
+    dropCopies: (origin) =>
+      edit((list) => list.filter((n) => n.kind !== 'clipboard' || (origin !== undefined && n.origin !== origin))),
     async top(requester, at = now()) {
       const list = await read();
       const mine = requester.tabId;
       const newestFirst = [...list].sort((a, b) => b.at - a.at);
-      const others = newestFirst.filter((n) => n.tabId !== mine);
-      const own = mine === undefined ? [] : newestFirst.filter((n) => n.tabId === mine);
-      return [...others, ...own].slice(0, NOTES_LIMITS.top).map((n) => render(n, at, n.tabId === mine));
+      // A copy made in the last ten minutes is the freshest thing carat has,
+      // so it goes first; after that it queues with everything else.
+      const fresh = newestFirst.filter((n) => isFreshCopy(n, at));
+      const rest = newestFirst.filter((n) => !isFreshCopy(n, at));
+      const others = rest.filter((n) => n.tabId !== mine);
+      const own = mine === undefined ? [] : rest.filter((n) => n.tabId === mine);
+      return [...fresh, ...others, ...own]
+        .slice(0, NOTES_LIMITS.top)
+        .map((n) => render(n, at, n.kind !== 'clipboard' && n.tabId === mine));
     },
     async newest(n, at = now()) {
       const list = await read();
@@ -205,7 +274,14 @@ export function fallbackFacts(item: Pick<ContextItem, 'id' | 'text' | 'kind' | '
     .map((c) => `${CANDIDATE_FACT[c.kind]} mentioned: ${c.value}${where}`);
 }
 
+function isFreshCopy(note: Note, at: number): boolean {
+  return note.kind === 'clipboard' && at - note.at < NOTES_LIMITS.clipboardTopMs;
+}
+
 function render(note: Note, at: number, own: boolean): string {
+  if (note.kind === 'clipboard') {
+    return `copied ${relativeAge(note.at, at)} on ${hostOf(note.origin)}: "${note.text}"`;
+  }
   const where = own ? '(this tab' : `(read on ${hostOf(note.origin)}`;
   return `${note.text} ${where}, ${relativeAge(note.at, at)})`;
 }
