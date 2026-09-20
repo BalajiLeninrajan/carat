@@ -8,6 +8,7 @@ import { appendHistory, clearHistory, historyFor, sinceLastInteraction } from '.
 import { clearNotes, dropSystemCopies, notesFor, recordCopied, recordSeen } from '../src/engine/background/notes';
 import { chromeClipboardDocument } from '../src/engine/background/offscreen';
 import { buildOutline } from '../src/engine/background/outline';
+import { answerTask, confirmTask, hasTask, resumeTask, startTask, stopTask } from '../src/engine/background/task';
 import {
   acceptAction,
   alternativeAction,
@@ -28,7 +29,14 @@ import {
 // and Chrome's window focus, and turns what it hears into notes.
 import '../src/engine/background/listen';
 import '../src/engine/background/visits';
-import { PORT_NAME, type ActionKind, type ContentToWorker, type IdleMessage, type WorkerToContent } from '../src/engine/shared/protocol';
+import {
+  PORT_NAME,
+  TASK_REQ,
+  type ActionKind,
+  type ContentToWorker,
+  type IdleMessage,
+  type WorkerToContent,
+} from '../src/engine/shared/protocol';
 import { isBlocked, loadSettings, saveSettings, type Settings } from '../src/engine/shared/settings';
 import {
   DebugLog,
@@ -48,6 +56,7 @@ export const COMMANDS = {
   suggest: 'carat-suggest',
   clear: 'clearContext',
   debug: 'toggleDebug',
+  palette: 'open-palette',
 } as const;
 
 /** How often expired Elastic tasks are swept, in minutes. */
@@ -175,7 +184,24 @@ export default defineBackground(() => {
   });
 
   const pollClipboard = (): void => void clipboard.poll().catch(() => undefined);
-  chrome.tabs.onActivated.addListener(() => pollClipboard());
+  /** The tab the user is looking at, so a task's panel can follow them to it. */
+  let activeTabId: number | undefined;
+  void chrome.tabs.query({ active: true, lastFocusedWindow: true }).then(([t]) => (activeTabId = t?.id));
+  chrome.tabs.onActivated.addListener(({ tabId }) => {
+    activeTabId = tabId;
+    pollClipboard();
+    // A task running anywhere is worth showing here: this is the tab the user
+    // is watching, and it may be one the task opened.
+    const post = ports.get(tabId);
+    if (post) resumeTask(tabId, post);
+  });
+
+  /** Send a task message to the task's own tab and to the tab in front of the user. */
+  function toTaskViews(taskTabId: number, msg: WorkerToContent): void {
+    for (const id of new Set([taskTabId, activeTabId])) {
+      if (id != null) ports.get(id)?.(msg);
+    }
+  }
   chrome.tabs.onRemoved.addListener((tabId) => passwordTabs.delete(tabId));
   // A page the user just landed on is where what they copied elsewhere gets used.
   chrome.webNavigation.onCommitted.addListener((d) => {
@@ -194,6 +220,8 @@ export default defineBackground(() => {
       }
     };
     ports.set(tabId, post);
+    // A page load in a tab with a running task lost the panel with the old page.
+    resumeTask(tabId, post);
     port.onDisconnect.addListener(() => {
       void chrome.runtime.lastError;
       if (ports.get(tabId) === post) ports.delete(tabId);
@@ -211,6 +239,12 @@ export default defineBackground(() => {
           void event(tabId, msg.entry);
           break;
         case 'accept': {
+          // A task's own step, confirmed: the task is waiting on this, not the
+          // prediction path.
+          if (msg.reqId === TASK_REQ) {
+            confirmTask(tabId, true);
+            break;
+          }
           const chip = peekAction(tabId, msg.reqId);
           const result = await acceptAction(tabId, msg.reqId);
           post({ type: 'result', reqId: msg.reqId, ...result });
@@ -220,6 +254,10 @@ export default defineBackground(() => {
           break;
         }
         case 'dismiss': {
+          if (msg.reqId === TASK_REQ) {
+            confirmTask(tabId, false);
+            break;
+          }
           const chip = peekAction(tabId, msg.reqId);
           dismissAction(tabId, msg.reqId);
           void event(tabId, 'dismissed');
@@ -233,6 +271,17 @@ export default defineBackground(() => {
           if (chip) void recordChip(tabId, chip, 'alternative', msg.actual);
           break;
         }
+        case 'task':
+          void startTask(tabId, msg.goal, msg.url, toTaskViews);
+          void event(tabId, 'task started', msg.goal);
+          break;
+        case 'task-answer':
+          answerTask(tabId, msg.answer);
+          break;
+        case 'task-stop':
+          stopTask(tabId);
+          void event(tabId, 'task stopped');
+          break;
         case 'seen': {
           const settings = await loadSettings();
           if (!settings.enabled || !settings.memoryEnabled || !settings.apiKey || isBlocked(settings, msg.url)) break;
@@ -275,6 +324,8 @@ export default defineBackground(() => {
 
     const settings = await loadSettings();
     if (!settings.enabled || isBlocked(settings, msg.url)) return;
+    // The task is driving this tab; its steps are the suggestions.
+    if (hasTask(tabId)) return;
 
     const field = msg.field;
     const typing = !!field && !!field.typed.trim() && (msg.reason === 'input' || msg.reason === 'keydown');
@@ -475,6 +526,13 @@ export default defineBackground(() => {
     if (handleDebugCommand(command, tabId, { toggle: (id) => void toggleDebug(id) })) return;
     if (command === COMMANDS.suggest && tabId !== undefined) {
       await sendMessage('forceSuggest', undefined, tabId).catch(() => undefined);
+      return;
+    }
+    if (command === COMMANDS.palette) {
+      const id = tabId ?? activeTabId;
+      const post = id === undefined ? undefined : ports.get(id);
+      if (post) post({ type: 'palette' });
+      else console.warn('[carat] no content script on this tab (reload the page, or it is a chrome:// page)');
       return;
     }
     if (command === COMMANDS.clear) {

@@ -127,11 +127,24 @@ The popup shows what Carat currently knows and a few controls:
 - The goal, when there is one, with a × that drops it. The next derivation is free to find another.
 - Debug lines for the current tab: what happened to its last capture, and how its last request went — what answered first and how long the page waited, each provider's latency, the action's kind, the model's own label and reason, whether it asks for a second tap, why one was refused, what the second ask was for, whether the model replaced the placeholder, and, when the page ended up with no chip on it, why.
 
-Three keys, all of them changeable at `chrome://extensions/shortcuts`:
+Four keys, all of them changeable at `chrome://extensions/shortcuts`:
 
+- `Ctrl+Shift+K` opens the instruction box, and carat carries the instruction out step by step.
 - `Alt+Shift+C` asks again on the current page right now, past the 60-second cache and past anything dismissed with Esc.
 - `Alt+Shift+X` clears what carat remembers.
 - `Alt+Shift+D` opens the debug panel on the page, and closes it again.
+
+## Tasks
+
+A chip is one step. `Ctrl+Shift+K` is for the rest of them: type what you want done on this page and carat works at it until it is finished, stuck, or you stop it.
+
+The loop is plan-act-observe rather than a plan written once up front. Read the page as the same accessibility outline a chip comes from, decide one step, do it, wait for the page to settle, look again. That is what survives a dropdown opening, a validation error or a page load, none of which a plan written in advance can see coming. The model answers with one small step at a time: click, fill, select, submit, switch tab, open, wait, ask, or done. A step that leaves the page exactly as it was is reported back as such, so a button that ignores clicks is not pressed forever.
+
+A panel in the bottom-right corner lists the steps as they happen, with the model's own one-line reason beside each. Stop is always there. Esc stops it too.
+
+Two things it will not do by itself. Anything irreversible is offered rather than done: the control is ringed, the chip says what it would do, and nothing happens until you tap right Shift. Esc declines it, and a typed correction declines it *and* tells the task what to do instead, which it takes as the newest thing it knows and carries on from. And when the model cannot work out what you meant, it asks, in the panel, and waits for the answer.
+
+The task follows the work. A switch moves it to that tab, an open takes it to a new site, and the panel follows you: whichever tab you are looking at shows what the task is doing, and a page load rebuilds it rather than losing it. While a task is running in a tab, carat offers no chips of its own there; the task's steps are the suggestions.
 
 ## The debug panel
 
