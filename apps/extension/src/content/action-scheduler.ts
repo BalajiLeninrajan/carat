@@ -24,9 +24,15 @@ export const SNAPSHOT_TIMING = {
    * to settle: it goes out on the next frame, and this is the guard behind
    * that frame for the paint the change lands in.
    */
-  afterPerformMs: 60,
+  afterPerformMs: 16,
   /** No two requests closer together than this, whatever asked for them. */
   minGapMs: 500,
+  /**
+   * A Tab on a scroll this soon after the last one is the user paging
+   * through: the page jumps instead of gliding, so the next chip is not
+   * made to wait for the glide.
+   */
+  repeatScrollMs: 2000,
   /** The same outline, with nothing new in the timeline, is not asked about again inside this window. */
   identicalMs: 60_000,
   /**
@@ -118,6 +124,8 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
   const dismissed = new Set<string>();
   /** The control carat last acted on; the chip after it takes Tab from there too. */
   let lastActed: Element | null = null;
+  /** When carat last scrolled the page on a Tab; a Tab soon after jumps instead of gliding. */
+  let lastScrollAt = -Infinity;
   let pending = false;
 
   // The memo: the same outline with nothing new behind it is not asked about twice.
@@ -559,10 +567,18 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     cancelRetry();
   }
 
+  /** Whether this scroll follows another of carat's closely enough to be the user paging through. */
+  function repeating(): boolean {
+    const now = Date.now();
+    const soon = now - lastScrollAt < SNAPSHOT_TIMING.repeatScrollMs;
+    lastScrollAt = now;
+    return soon;
+  }
+
   /** Carry the action out. Returns 'partial' when a fill went in but the pick after it did not. */
   async function perform(action: NextAction, target: OutlineTarget | undefined): Promise<'done' | 'partial' | 'failed'> {
     if (action.kind === 'scroll') {
-      await scrollPageDown(win);
+      await scrollPageDown(win, { instant: repeating() });
       return 'done';
     }
     if (action.kind === 'open' || action.kind === 'switch') {
@@ -582,7 +598,7 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
       return reply.ok ? (reply.outcome ?? 'done') : 'failed';
     }
     // A control the chip sat on as a banner may be off screen; bring it into view before acting.
-    if (!inViewport(target.el, win)) await scrollToTarget(target.el, win);
+    if (!inViewport(target.el, win)) await scrollToTarget(target.el, win, { instant: repeating() });
     if (action.kind === 'fill') {
       const outcome = await performFill(target.el, action.value, doc.location.host, locale() ? { locale: locale()! } : {});
       return outcome ?? 'failed';

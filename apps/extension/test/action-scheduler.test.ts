@@ -834,19 +834,29 @@ describe('scroll, then scroll again', () => {
    * over several frames, as a smooth one does, and every frame is a scroll
    * event the page can hear.
    */
-  function threeScreens(): void {
+  const scrollBys: ScrollToOptions[] = [];
+
+  function threeScreens(screens = 3): void {
     const vh = window.innerHeight;
-    document.body.innerHTML = '<main><p>screen one</p><p>screen two</p><p>screen three</p><button>Save</button></main>';
+    document.body.innerHTML = `<main>${Array.from({ length: screens }, (_, i) => `<p>screen ${i + 1}</p>`).join('')}<button>Save</button></main>`;
     let y = 0;
+    scrollBys.length = 0;
     Object.defineProperty(window, 'scrollY', { get: () => y, configurable: true });
-    Object.defineProperty(document.documentElement, 'scrollHeight', { value: vh * 3, configurable: true });
+    Object.defineProperty(document.documentElement, 'scrollHeight', { value: vh * screens, configurable: true });
     [...document.querySelectorAll('p')].forEach((el, i) => {
       el.getBoundingClientRect = () => new DOMRect(0, vh * i - y, 300, 40);
     });
     document.querySelector('button')!.getBoundingClientRect = () => new DOMRect(0, 100 - y, 100, 30);
     window.scrollBy = ((opts: ScrollToOptions) => {
+      scrollBys.push(opts);
       const from = y;
-      const to = Math.min(y + (opts.top ?? 0), vh * 2);
+      const to = Math.min(y + (opts.top ?? 0), vh * (screens - 1));
+      if (opts.behavior === 'instant') {
+        // A jump: the page is there at once and says so once, on the next frame.
+        y = to;
+        window.setTimeout(() => window.dispatchEvent(new Event('scroll')), 16);
+        return;
+      }
       // Four frames, the last of them well past the settle window.
       for (let step = 1; step <= 4; step++) {
         window.setTimeout(() => {
@@ -926,6 +936,38 @@ describe('scroll, then scroll again', () => {
     expect(caratScrolling()).toBe(false);
     expect(asks()).toHaveLength(2);
     expect(chip.text).toBe('Scroll more');
+    chip.destroy();
+  });
+
+  it('jumps instead of gliding on a Tab soon after the last, and asks within a frame', async () => {
+    threeScreens(4);
+    answerScrolls();
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+
+    // The first Tab glides: nothing to compare it with yet.
+    tab();
+    await scrolledAndSettled();
+    expect(scrollBys[0]?.behavior).toBe('smooth');
+    expect(chip.text).toBe('Scroll more');
+    const before = asks().length;
+
+    // The second, inside the repeat window, jumps: the page is there and the question is out within a frame or two.
+    tab();
+    await tick(SNAPSHOT_TIMING.afterPerformMs + 40);
+    expect(scrollBys[1]?.behavior).toBe('instant');
+    expect(window.scrollY).toBe(window.innerHeight * 2);
+    expect(caratScrolling()).toBe(false);
+    expect(asks().length).toBe(before + 1);
+    expect(chip.visible).toBe(true);
+    expect(chip.text).toBe('Scroll more');
+
+    // Left alone past the window, the next Tab glides again.
+    await tick(SNAPSHOT_TIMING.repeatScrollMs + 1);
+    tab();
+    await tick(10);
+    expect(scrollBys[2]?.behavior).toBe('smooth');
     chip.destroy();
   });
 
