@@ -1,10 +1,12 @@
-import type { StatusInfo } from '../background/status';
+import type { StatusInfo } from './info';
 import { STATUS_CSS } from './styles';
 
 export interface StatusLine {
   update(info: StatusInfo): void;
   /** A suggestion request is in flight; the dot pulses until `setBusy(false)`. */
   setBusy(busy: boolean): void;
+  /** Milliseconds left of a Shift+Tab snooze, or null when carat is not in one. */
+  setQuiet(left: number | null): void;
   destroy(): void;
   readonly visible: boolean;
 }
@@ -13,9 +15,10 @@ const HOST_ATTR = 'data-carat-status';
 
 const REASON_TEXT: Record<NonNullable<StatusInfo['reason']>, string> = {
   disabled: 'off',
-  'site-off': 'off for this site',
-  denylisted: 'off here',
+  blocked: 'off for this site',
+  'no-key': 'no API key',
   'not-http': 'off here',
+  paused: 'paused (debugger banner dismissed)',
 };
 
 /**
@@ -44,6 +47,7 @@ export function createStatusLine(doc: Document = document): StatusLine {
 
   let visible = false;
   let busy = false;
+  let quiet: number | null = null;
   let info: StatusInfo | null = null;
 
   const mount = (): void => {
@@ -69,8 +73,9 @@ export function createStatusLine(doc: Document = document): StatusLine {
     host.style.display = 'block';
     visible = true;
     pill.classList.toggle('is-running', info.running);
-    pill.classList.toggle('is-busy', busy && info.running);
-    text.textContent = statusText(info, busy);
+    pill.classList.toggle('is-busy', busy && info.running && quiet === null);
+    pill.classList.toggle('is-quiet', quiet !== null && info.running);
+    text.textContent = statusText(info, busy, quiet);
   };
 
   return {
@@ -80,6 +85,10 @@ export function createStatusLine(doc: Document = document): StatusLine {
     },
     setBusy(next) {
       busy = next;
+      render();
+    },
+    setQuiet(left) {
+      quiet = left;
       render();
     },
     destroy() {
@@ -92,8 +101,15 @@ export function createStatusLine(doc: Document = document): StatusLine {
   };
 }
 
-export function statusText(info: StatusInfo, busy = false): string {
+export function statusText(info: StatusInfo, busy = false, quietLeft: number | null = null): string {
   if (!info.running) return `carat · ${REASON_TEXT[info.reason ?? 'disabled']}`;
-  const model = info.provider === 'local' ? 'local' : info.model;
-  return busy ? `carat · ${model} · thinking` : `carat · ${model}`;
+  // Nothing is in flight during a snooze, so the countdown is all there is to say.
+  if (quietLeft !== null) return `carat · quiet ${clock(quietLeft)}`;
+  return busy ? `carat · ${info.model} · thinking` : `carat · ${info.model}`;
+}
+
+/** What is left of the minute, as `0:42`. Rounded up, so the last second still reads 0:01. */
+function clock(ms: number): string {
+  const seconds = Math.max(0, Math.ceil(ms / 1000));
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 }

@@ -4,8 +4,81 @@ import { isHtml } from '../dom/tags';
 export const SCROLL_SETTLE_MS = 120;
 /** However long the page keeps scrolling, the chip follows after this. */
 export const SCROLL_MAX_MS = 1000;
+/** An instant scroll fires one event on the next frame; past this, it fired none. */
+export const INSTANT_SCROLL_CAP_MS = 50;
+
+export interface ScrollOptions {
+  /** Jump rather than glide: a repeated Tab, where the glide is the whole wait. */
+  instant?: boolean;
+}
 
 const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
+
+/** Scrolls carat started that have not stopped yet. */
+let running = 0;
+/** The tail after the last of them: frames still landing once the settle has resolved. */
+let tail: number | null = null;
+/** Waiting for the mark to come off, so the page is read after it has stopped moving. */
+let waiting: Array<() => void> = [];
+
+/**
+ * Whether the page is moving because carat moved it. A smooth scroll of one
+ * viewport takes longer than the window it is measured with, so the mark
+ * stands from the first pixel to a settle window past the last. A scroll
+ * event while it stands is not the user reading on: it neither dismisses the
+ * chip nor counts as the user acting.
+ */
+export function caratScrolling(): boolean {
+  return running > 0 || tail !== null;
+}
+
+/**
+ * Resolves the moment the mark comes off, or at once when it is not on. The
+ * question after a scroll carat performed waits on this rather than on a
+ * timer: the outline read while the page is still moving is the old one.
+ */
+export function caratScrollEnd(): Promise<void> {
+  if (!caratScrolling()) return Promise.resolve();
+  return new Promise((resolve) => {
+    waiting.push(resolve);
+  });
+}
+
+/** The mark is off; whoever was waiting for the page to stop may read it now. */
+function release(): void {
+  const woken = waiting;
+  waiting = [];
+  for (const resolve of woken) resolve();
+}
+
+/**
+ * Run a scroll of carat's own under that mark. A glide is watched until its
+ * events stop, then held for one more settle window for the frames still
+ * landing. A jump fires one event on the next frame and is over: the mark
+ * comes off as soon as that event has been heard, or after a short cap when
+ * the page had nowhere to go, so a repeated Tab is not made to wait out a
+ * settle that has nothing to settle.
+ */
+function own(win: Window, start: () => void, instant = false): Promise<void> {
+  running++;
+  if (tail !== null) {
+    win.clearTimeout(tail);
+    tail = null;
+  }
+  start();
+  if (instant) return jumped(win).then(() => {
+    running--;
+    if (running === 0) release();
+  });
+  return settled(win).then(() => {
+    running--;
+    if (running > 0) return;
+    tail = win.setTimeout(() => {
+      tail = null;
+      release();
+    }, SCROLL_SETTLE_MS);
+  });
+}
 
 /**
  * The element's box in `win`'s viewport coordinates. For an element inside a
@@ -52,12 +125,17 @@ export function inViewport(el: Element, win: Window): boolean {
  * Called only from a Tab on the scroll banner. Nothing else on the page is
  * touched; focus stays where it was.
  */
-export function scrollToTarget(el: Element, win: Window): Promise<void> {
-  const reduced = typeof win.matchMedia === 'function' && win.matchMedia(REDUCED_MOTION).matches;
-  if (typeof el.scrollIntoView === 'function') {
-    el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: reduced ? 'instant' : 'smooth' });
-  }
-  return settled(win);
+export function scrollToTarget(el: Element, win: Window, opts: ScrollOptions = {}): Promise<void> {
+  const instant = opts.instant === true || prefersReducedMotion(win);
+  return own(
+    win,
+    () => {
+      if (typeof el.scrollIntoView === 'function') {
+        el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: instant ? 'instant' : 'smooth' });
+      }
+    },
+    instant,
+  );
 }
 
 /**
@@ -65,12 +143,39 @@ export function scrollToTarget(el: Element, win: Window): Promise<void> {
  * of the `Scroll down? Tab` offer. Smooth, or instant under
  * prefers-reduced-motion. Focus stays where it was and nothing is clicked.
  */
-export function scrollPageDown(win: Window): Promise<void> {
-  const reduced = typeof win.matchMedia === 'function' && win.matchMedia(REDUCED_MOTION).matches;
-  if (typeof win.scrollBy === 'function') {
-    win.scrollBy({ top: win.innerHeight, left: 0, behavior: reduced ? 'instant' : 'smooth' });
-  }
-  return settled(win);
+export function scrollPageDown(win: Window, opts: ScrollOptions = {}): Promise<void> {
+  const instant = opts.instant === true || prefersReducedMotion(win);
+  return own(
+    win,
+    () => {
+      if (typeof win.scrollBy === 'function') {
+        win.scrollBy({ top: win.innerHeight, left: 0, behavior: instant ? 'instant' : 'smooth' });
+      }
+    },
+    instant,
+  );
+}
+
+function prefersReducedMotion(win: Window): boolean {
+  return typeof win.matchMedia === 'function' && win.matchMedia(REDUCED_MOTION).matches;
+}
+
+/** Resolves once the one event of a jump has been heard, or after the cap when none comes. */
+function jumped(win: Window): Promise<void> {
+  return new Promise((resolve) => {
+    let over = false;
+    const finish = (): void => {
+      if (over) return;
+      over = true;
+      win.clearTimeout(cap);
+      win.removeEventListener('scroll', onScroll, true);
+      resolve();
+    };
+    // The event is still dispatching when this runs; let it finish before the mark comes off.
+    const onScroll = (): void => void win.setTimeout(finish, 0);
+    const cap = win.setTimeout(finish, INSTANT_SCROLL_CAP_MS);
+    win.addEventListener('scroll', onScroll, { capture: true, passive: true });
+  });
 }
 
 /** The scrollable height of the document, never less than one viewport. */

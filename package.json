@@ -8,7 +8,6 @@
   "scripts": {
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
-    "build": "pnpm --filter extension build",
-    "eval": "pnpm --filter @carat/providers eval"
+    "build": "pnpm --filter extension build"
   }
 }
