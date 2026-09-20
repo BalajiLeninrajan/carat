@@ -592,25 +592,199 @@ describe('ElasticMemory', () => {
     expect(JSON.stringify(cleanupBody)).toContain('"lastSeenAt":{"lte":"now-5m"}');
   });
 
-  it('deletes matching unresolved tasks when an action is accepted or dismissed', async () => {
-    const bodies: Array<Record<string, unknown>> = [];
+  /** A cluster holding one open task, so an action can be run against it. */
+  const clusterWith = (fields: Array<{ name: string; value: string; done: boolean }>, actionType = 'calendar_event') => {
+    const writes: Array<[string, Record<string, unknown>]> = [];
+    const deletes: string[] = [];
+    const task = {
+      groupKey: 'calendar-event-seven-shores-cafe-friday',
+      actionType,
+      status: 'unresolved',
+      text: 'Dinner at Seven Shores Cafe on Friday at 6.',
+      texts: ['Dinner at Seven Shores Cafe on Friday at 6.'],
+      hosts: ['discord.com'],
+      sourceIds: ['ctx-1:0'],
+      timeValues: ['6'],
+      placeValues: ['Seven Shores Cafe'],
+      fields,
+      firstSeenAt: '2026-09-19T15:00:00.000Z',
+      lastSeenAt: '2026-09-19T15:00:00.000Z',
+    };
     const fetchImpl = vi.fn<typeof fetch>(async (url, init) => {
-      if (String(url).includes('_delete_by_query')) bodies.push(JSON.parse(String(init?.body)));
-      return Response.json({ acknowledged: true, deleted: 1 });
+      const path = String(url);
+      if (init?.method === 'DELETE') {
+        deletes.push(path);
+        return Response.json({ result: 'deleted' });
+      }
+      if (init?.method === 'PUT' && init.body) {
+        writes.push([path, JSON.parse(String(init.body))]);
+        return Response.json({ result: 'updated' });
+      }
+      if (path.includes('carat-test-tasks/_search')) return Response.json({ hits: { hits: [{ _source: task }] } });
+      if (init?.method === 'HEAD') return new Response(null, { status: 200 });
+      return Response.json({ hits: { hits: [] } });
     });
+    return { fetchImpl, writes, deletes };
+  };
+
+  it('completes only the field a fill entered and keeps the rest of the task', async () => {
+    const { fetchImpl, writes, deletes } = clusterWith([
+      { name: 'title', value: 'Dinner at Seven Shores Cafe', done: false },
+      { name: 'when', value: 'Friday at 6', done: false },
+      { name: 'location', value: 'Seven Shores Cafe', done: false },
+    ]);
+    const elastic = createElasticMemory({ settings: async () => settings(), fetchImpl });
+
+    await elastic.recordAction({
+      tabId: 1,
+      host: 'calendar.google.com',
+      kind: 'fill',
+      label: 'Fill Title with "Dinner at Seven Shores Cafe"',
+      value: 'Dinner at Seven Shores Cafe',
+      accepted: true,
+    });
+
+    const saved = writes.find(([url]) => url.includes('carat-test-tasks/_doc/'))?.[1] as
+      | { fields: Array<{ name: string; done: boolean }> }
+      | undefined;
+    expect(saved).toBeDefined();
+    expect(saved!.fields.find((f) => f.name === 'title')?.done).toBe(true);
+    // The two the user has not entered yet must survive to be filled next.
+    expect(saved!.fields.find((f) => f.name === 'when')?.done).toBe(false);
+    expect(saved!.fields.find((f) => f.name === 'location')?.done).toBe(false);
+    expect(deletes).toEqual([]);
+  });
+
+  it('closes the task once its last field is entered', async () => {
+    const { fetchImpl, deletes } = clusterWith([
+      { name: 'title', value: 'Dinner at Seven Shores Cafe', done: true },
+      { name: 'when', value: 'Friday at 6', done: true },
+      { name: 'location', value: 'Seven Shores Cafe', done: false },
+    ]);
+    const elastic = createElasticMemory({ settings: async () => settings(), fetchImpl });
+
+    await elastic.recordAction({
+      tabId: 1,
+      host: 'calendar.google.com',
+      kind: 'fill',
+      label: 'Fill Location with "Seven Shores Cafe"',
+      value: 'Seven Shores Cafe',
+      accepted: true,
+    });
+
+    expect(deletes.some((p) => p.includes('carat-test-tasks/_doc/'))).toBe(true);
+  });
+
+  it('keeps the task alive across a switch instead of consuming it', async () => {
+    const { fetchImpl, writes, deletes } = clusterWith(
+      [{ name: 'query', value: 'Seven Shores Cafe', done: false }],
+      'maps_lookup',
+    );
     const elastic = createElasticMemory({ settings: async () => settings(), fetchImpl });
 
     await elastic.recordAction({
       tabId: 1,
       host: 'www.google.com',
       kind: 'open',
-      label: 'Open "Seven Shores Cafe" in Maps',
-      value: 'maps:Seven Shores Cafe',
+      label: 'Open "Seven Shores Cafe"',
+      value: 'https://www.google.com/maps/search/Seven+Shores+Cafe',
+      accepted: true,
+    });
+
+    // Travelling to the surface is not entering anything: the field stays open,
+    // and lastSeenAt moves so the task survives the five-minute window.
+    const saved = writes.find(([url]) => url.includes('carat-test-tasks/_doc/'))?.[1] as
+      | { fields: Array<{ done: boolean }>; lastSeenAt: string }
+      | undefined;
+    expect(saved).toBeDefined();
+    expect(saved!.fields[0]?.done).toBe(false);
+    expect(saved!.lastSeenAt).not.toBe('2026-09-19T15:00:00.000Z');
+    expect(deletes).toEqual([]);
+  });
+
+  it('does not spend a field on a dismissal', async () => {
+    const { fetchImpl, writes, deletes } = clusterWith([
+      { name: 'title', value: 'Dinner at Seven Shores Cafe', done: false },
+    ]);
+    const elastic = createElasticMemory({ settings: async () => settings(), fetchImpl });
+
+    await elastic.recordAction({
+      tabId: 1,
+      host: 'calendar.google.com',
+      kind: 'fill',
+      label: 'Fill Title with "Dinner at Seven Shores Cafe"',
+      value: 'Dinner at Seven Shores Cafe',
       accepted: false,
     });
 
-    const cleanup = bodies.at(-1);
-    expect(JSON.stringify(cleanup)).toContain('"actionType":"maps_lookup"');
-    expect(JSON.stringify(cleanup)).toContain('Seven Shores Cafe');
+    const saved = writes.find(([url]) => url.includes('carat-test-tasks/_doc/'))?.[1] as
+      | { fields: Array<{ done: boolean }> }
+      | undefined;
+    expect(saved!.fields[0]?.done).toBe(false);
+    expect(deletes).toEqual([]);
+  });
+
+  it('names the outstanding fields and their values on the task line', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (url) => {
+      if (String(url).includes('carat-test-tasks/_search')) {
+        return Response.json({
+          hits: {
+            hits: [
+              {
+                _source: {
+                  groupKey: 'calendar-event-seven-shores-cafe-friday',
+                  status: 'unresolved',
+                  actionType: 'calendar_event',
+                  hosts: ['discord.com'],
+                  text: 'Dinner at Seven Shores Cafe on Friday at 6.',
+                  fields: [
+                    { name: 'title', value: 'Dinner at Seven Shores Cafe', done: true },
+                    { name: 'when', value: 'Friday at 6', done: false },
+                    { name: 'location', value: 'Seven Shores Cafe', done: false },
+                  ],
+                  lastSeenAt: '2026-09-19T15:02:00.000Z',
+                },
+              },
+            ],
+          },
+        });
+      }
+      return Response.json({ hits: { hits: [] } });
+    });
+    const elastic = createElasticMemory({ settings: async () => settings(), fetchImpl });
+
+    const lines = await elastic.retrieve(req(), 1);
+
+    // The filled one is gone from the line; the two left carry their values.
+    expect(lines[0]).toContain('still to enter: when="Friday at 6", location="Seven Shores Cafe"');
+    expect(lines[0]).not.toContain('title=');
+  });
+
+  it('derives the fields a calendar surface will ask for when the task is made', async () => {
+    const writes: Array<[string, Record<string, unknown>]> = [];
+    const fetchImpl = vi.fn<typeof fetch>(async (url, init) => {
+      if (init?.method === 'GET') return new Response(null, { status: 404 });
+      if (init?.method === 'PUT' && init.body) writes.push([String(url), JSON.parse(String(init.body))]);
+      return init?.method === 'HEAD' ? new Response(null, { status: 200 }) : Response.json({ acknowledged: true });
+    });
+    const elastic = createElasticMemory({ settings: async () => settings(), fetchImpl });
+
+    await elastic.indexFacts(item(), [
+      {
+        at: Date.parse('2026-09-19T15:01:00Z'),
+        source: 'read',
+        url: 'https://discord.com',
+        title: 'Discord',
+        text: 'Dinner at Seven Shores Cafe on Friday at 6.',
+      },
+    ]);
+
+    const task = writes.find(([url]) => url.includes('carat-test-tasks/_doc/'))?.[1] as
+      | { fields: Array<{ name: string; value: string; done: boolean }> }
+      | undefined;
+    expect(task!.fields.map((f) => f.name).sort()).toEqual(['location', 'title', 'when']);
+    expect(task!.fields.every((f) => !f.done)).toBe(true);
+    expect(task!.fields.find((f) => f.name === 'location')?.value).toBe('Seven Shores Cafe');
+    expect(task!.fields.find((f) => f.name === 'when')?.value).toMatch(/friday/i);
   });
 });

@@ -130,6 +130,7 @@ interface SearchHit {
     resolutionLabel?: string;
     timeValues?: string[];
     placeValues?: string[];
+    fields?: TaskField[];
     firstSeenAt?: string;
     capturedAt?: string;
     at?: string;
@@ -138,8 +139,23 @@ interface SearchHit {
   };
 }
 
+/**
+ * One thing still to enter before a task is done. A plan read on Discord names
+ * a place, a day and a time; the surface that finishes it has a field for each.
+ * Filling one field completes that field, not the whole task, so the rest
+ * survive to be filled after it.
+ */
+export interface TaskField {
+  /** Matched against a control's accessible name on the destination surface. */
+  name: 'query' | 'title' | 'location' | 'when' | 'to' | 'subject';
+  value: string;
+  done: boolean;
+}
+
 interface TaskDoc {
   groupKey: string;
+  /** What still needs entering. Empty for a task with nothing to decompose. */
+  fields: TaskField[];
   tabId?: number;
   actionType: string;
   status: 'unresolved' | 'conflict' | 'resolved';
@@ -422,7 +438,7 @@ export function createElasticMemory(deps: ElasticDeps): ElasticMemory {
     };
     const request: Record<string, unknown> = {
       size: 1,
-      _source: ['text', 'hosts', 'host', 'origin', 'status', 'actionType', 'conflictReason', 'sourceIds', 'lastSeenAt'],
+      _source: ['text', 'hosts', 'host', 'origin', 'status', 'actionType', 'conflictReason', 'sourceIds', 'fields', 'lastSeenAt'],
       ...(semanticEnabled(s)
         ? {
             retriever: {
@@ -531,6 +547,8 @@ export function createElasticMemory(deps: ElasticDeps): ElasticMemory {
     const conflictReason = conflictFor(existing, parsed, text);
     const doc: TaskDoc = {
       groupKey,
+      // A field already filled stays filled when a later source re-states the plan.
+      fields: mergeFields(existing?.fields ?? [], fieldsFor(parsed.actionType, parsed, text)),
       tabId: item.tabId,
       actionType: parsed.actionType,
       status: conflictReason ? 'conflict' : (existing?.status ?? 'unresolved'),
@@ -710,13 +728,69 @@ export function createElasticMemory(deps: ElasticDeps): ElasticMemory {
     await deleteByQuery(s, indices, request, 'deleted task docs older than 5 minutes');
   }
 
-  async function deleteMatchedTasks(s: ElasticSettings, action: { tabId?: number; kind: ActionKind; label: string; value?: string; accepted: boolean }): Promise<void> {
+  /**
+   * What a finished chip does to the task it belongs to. A fill or a select
+   * completes the one field it entered and leaves the rest of the task for the
+   * fields still to come; only the last field closes the task out. A switch or
+   * an open completes nothing — it is a step toward the task, so it refreshes
+   * the task instead, which is what carries it across the five-minute window
+   * onto the surface that finishes it.
+   */
+  async function advanceMatchedTasks(
+    s: ElasticSettings,
+    action: { tabId?: number; kind: ActionKind; label: string; value?: string; accepted: boolean },
+  ): Promise<void> {
     const actionType = actionTypeForCompletedAction(action);
     if (!actionType) return;
     const terms = completedActionTerms(action);
     if (terms.length === 0) return;
-    const indices = indexName(s, 'tasks');
+    const matches = await matchingTasks(s, actionType, terms, action.tabId);
+    if (matches.length === 0) return;
+    const terminal = TERMINAL_KINDS.has(action.kind);
+    const at = new Date(now()).toISOString();
+
+    for (const task of matches) {
+      // A dismissal is not a completion: the user said "not this", so the task
+      // stays exactly as it was rather than losing a field to it.
+      const fields = terminal && action.accepted ? completeFields(task.fields, terms, action.label) : task.fields;
+      const outstanding = fields.filter((f) => !f.done);
+      const finished = terminal && action.accepted && fields.length > 0 && outstanding.length === 0;
+      // Nothing to decompose and a terminal accept: the task is the action.
+      const consumed = terminal && action.accepted && fields.length === 0;
+
+      if (finished || consumed) {
+        await deleteTask(s, task.groupKey, `${action.accepted ? 'completed' : 'dropped'} ${actionType} task`, action.tabId);
+        continue;
+      }
+      await indexDoc(
+        s,
+        'tasks',
+        task.groupKey,
+        {
+          ...task,
+          fields,
+          lastSeenAt: at,
+          ...(semanticEnabled(s) ? { text_semantic: task.text } : {}),
+        },
+        action.tabId,
+      ).catch(() => undefined);
+      debug({
+        kind: 'index',
+        tabId: action.tabId,
+        path: `/${indexName(s, 'tasks')}/_doc/${task.groupKey}`,
+        ok: true,
+        summary: terminal
+          ? `advanced ${actionType} task, ${outstanding.length} field(s) left: ${outstanding.map((f) => f.name).join(', ') || 'none'}`
+          : `kept ${actionType} task alive across ${action.kind}, ${outstanding.length} field(s) left`,
+      });
+    }
+  }
+
+  /** Open tasks of this type whose text or entities the finished chip matches. */
+  async function matchingTasks(s: ElasticSettings, actionType: string, terms: string[], tabId?: number): Promise<TaskDoc[]> {
+    const index = await ensure(s, 'tasks');
     const request = {
+      size: 3,
       query: {
         bool: {
           filter: [
@@ -733,7 +807,37 @@ export function createElasticMemory(deps: ElasticDeps): ElasticMemory {
         },
       },
     };
-    await deleteByQuery(s, indices, request, `deleted ${action.accepted ? 'accepted' : 'dismissed'} ${actionType} task(s)`, action.tabId);
+    const path = `/${encodeURIComponent(index)}/_search?ignore_unavailable=true`;
+    try {
+      const res = await send(s, path, { method: 'POST', body: JSON.stringify(request) });
+      const json = (await responsePreview(res)) as { hits?: { hits?: SearchHit[] } };
+      debug({
+        kind: 'search',
+        tabId,
+        path,
+        ok: res.ok,
+        status: res.status,
+        summary: `${json.hits?.hits?.length ?? 0} open ${actionType} task(s) match the finished chip`,
+        request,
+        response: json,
+      });
+      if (!res.ok) return [];
+      return (json.hits?.hits ?? []).map((hit) => (hit._source ? taskFromHit(hit._source) : null)).filter((t): t is TaskDoc => t !== null);
+    } catch (err) {
+      debug({ kind: 'search', tabId, path, ok: false, summary: 'matching task search failed', request, response: errorMessage(err) });
+      return [];
+    }
+  }
+
+  async function deleteTask(s: ElasticSettings, groupKey: string, summary: string, tabId?: number): Promise<void> {
+    const index = indexName(s, 'tasks');
+    const path = `/${encodeURIComponent(index)}/_doc/${encodeURIComponent(groupKey)}`;
+    try {
+      const res = await send(s, path, { method: 'DELETE' });
+      debug({ kind: 'cleanup', tabId, path, ok: res.ok, status: res.status, summary });
+    } catch (err) {
+      debug({ kind: 'cleanup', tabId, path, ok: false, summary: `${summary} failed`, response: errorMessage(err) });
+    }
   }
 
   async function duplicateDistilledNote(s: ElasticSettings, note: Note, item: Observation, text: string): Promise<boolean> {
@@ -837,7 +941,7 @@ export function createElasticMemory(deps: ElasticDeps): ElasticMemory {
         at: new Date(at).toISOString(),
       };
       await indexDoc(s, 'actions', `${at}:${Math.random().toString(36).slice(2)}`, doc, action.tabId).catch(() => undefined);
-      await deleteMatchedTasks(s, action).catch(() => undefined);
+      await advanceMatchedTasks(s, action).catch(() => undefined);
     },
     async sweepExpiredTasks() {
       const s = await cfg();
@@ -933,6 +1037,7 @@ function indexDefinition(_kind: IndexKind, inferenceId: string): Record<string, 
         conflictReason: { type: 'text' },
         conflictCount: { type: 'integer' },
         texts: { type: 'text' },
+        fields: { type: 'object', enabled: false },
         hosts: { type: 'keyword' },
         sourceIds: { type: 'keyword' },
         timeValues: { type: 'keyword' },
@@ -1135,7 +1240,13 @@ function renderTask(hit: SearchHit): string {
   if (!source?.text || !source.status || !source.actionType) return '';
   const host = source.host || source.hosts?.[0] || hostOf(source.origin ?? '');
   const conflict = source.status === 'conflict' ? `, conflict (${source.conflictReason ?? 'sources disagree'})` : '';
-  return `${TASK_LINE_PREFIX} ${source.actionType} from ${host}${conflict}: ${truncate(normalizeWhitespace(source.text), EVIDENCE_CHARS)}`;
+  // Naming the outstanding fields and their values is what turns "here is a
+  // plan" into "put this string in that box".
+  const outstanding = (source.fields ?? []).filter((f) => !f.done);
+  const still = outstanding.length
+    ? ` — still to enter: ${outstanding.map((f) => `${f.name}="${truncate(f.value, 60)}"`).join(', ')}`
+    : '';
+  return `${TASK_LINE_PREFIX} ${source.actionType} from ${host}${conflict}: ${truncate(normalizeWhitespace(source.text), EVIDENCE_CHARS)}${still}`;
 }
 
 function evidenceSnippet(text: string, host: string): string {
@@ -1186,6 +1297,42 @@ function actionTypeForCompletedAction(action: { kind: ActionKind; value?: string
   return null;
 }
 
+/** Kinds that actually enter information. A switch or an open only travels. */
+const TERMINAL_KINDS = new Set<ActionKind>(['fill', 'select', 'submit']);
+
+/** What a control called "Location" or "Starts" is a field for. */
+const FIELD_NAMES: Record<TaskField['name'], RegExp> = {
+  title: /\b(title|name|summary|what)\b/i,
+  location: /\b(location|where|place|address|venue)\b/i,
+  when: /\b(when|date|time|start|starts|begins|day)\b/i,
+  to: /\b(to|recipients?|email)\b/i,
+  subject: /\b(subject)\b/i,
+  query: /\b(search|query|find)\b/i,
+};
+
+/**
+ * Mark the field this chip entered. The chip's label names the control it
+ * filled ("Fill Location with …"), and that is the reliable signal: matching
+ * on the value alone marks the location done when the title merely contains
+ * it. Only when the label names no field does the value decide, and then it
+ * has to match outright rather than be a substring of something longer.
+ */
+function completeFields(fields: TaskField[], terms: string[], label: string): TaskField[] {
+  const named = fields.find((f) => !f.done && FIELD_NAMES[f.name].test(fieldPartOf(label)));
+  if (named) return fields.map((f) => (f === named ? { ...f, done: true } : f));
+  const entered = terms.map((t) => keyText(t));
+  return fields.map((field) => {
+    if (field.done) return field;
+    const needle = keyText(field.value);
+    return needle.length >= 2 && entered.includes(needle) ? { ...field, done: true } : field;
+  });
+}
+
+/** The control's name in "Fill Location with \"…\"": everything before the value. */
+function fieldPartOf(label: string): string {
+  return label.split(/\bwith\b/i)[0] ?? label;
+}
+
 /** The phrases a finished chip is matched against, to find the task it closed. */
 function completedActionTerms(action: { value?: string; label: string }): string[] {
   const terms = new Set<string>();
@@ -1218,10 +1365,31 @@ function searchQueryOf(value: string): string {
   }
 }
 
+/** Keep what is done; take the new value for anything still outstanding. */
+function mergeFields(existing: TaskField[], fresh: TaskField[]): TaskField[] {
+  const out: TaskField[] = existing.filter((f) => f.done);
+  const claimed = new Set(out.map((f) => f.name));
+  for (const field of fresh) {
+    if (!claimed.has(field.name)) {
+      claimed.add(field.name);
+      out.push(field);
+    }
+  }
+  // A field the new reading dropped but the old one still wants is kept.
+  for (const field of existing) {
+    if (!claimed.has(field.name)) {
+      claimed.add(field.name);
+      out.push(field);
+    }
+  }
+  return out;
+}
+
 function taskFromHit(source: NonNullable<SearchHit['_source']>): TaskDoc | null {
   if (!source.groupKey || !source.text || !source.actionType || !isTaskStatus(source.status)) return null;
   return {
     groupKey: source.groupKey,
+    fields: source.fields ?? [],
     tabId: source.tabId,
     actionType: source.actionType,
     status: source.status,
@@ -1270,6 +1438,60 @@ function parseTask(text: string): ParsedTask {
     timeValues: extractTimes(cleaned),
     placeValues: place ? [place] : [],
   };
+}
+
+/**
+ * What the destination surface will ask for, derived once when the task is
+ * made. A Maps search wants one box; a calendar wants a title, a when and a
+ * where; an email wants a recipient and a subject. Only fields the note
+ * actually supports are listed — an empty one would invite the model to guess.
+ */
+function fieldsFor(actionType: string, parsed: ParsedTask, text: string): TaskField[] {
+  const clean = normalizeWhitespace(text);
+  const place = parsed.placeValues[0] ?? '';
+  const when = whenPhrase(clean);
+  const field = (name: TaskField['name'], value: string): TaskField[] =>
+    value ? [{ name, value, done: false }] : [];
+
+  if (actionType === 'maps_lookup') return field('query', place || extractCapitalPhrase(clean));
+  if (actionType === 'calendar_event') {
+    return [
+      ...field('title', eventTitle(clean, place)),
+      ...field('when', when),
+      ...field('location', place),
+    ];
+  }
+  if (actionType === 'email') {
+    const to = clean.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] ?? '';
+    return [...field('to', to), ...field('subject', eventTitle(clean, place))];
+  }
+  return [];
+}
+
+/** "Friday at 6", "tomorrow at 7pm": the day and the time as the note wrote them. */
+function whenPhrase(text: string): string {
+  const match = text.match(
+    /\b(today|tonight|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b(?:\s+at\s+([0-9][0-9:]*\s*(?:am|pm)?))?/i,
+  );
+  if (match) return normalizeWhitespace(match[0]);
+  const time = text.match(/\bat\s+([0-9][0-9:]*\s*(?:am|pm)?)\b/i);
+  return time ? normalizeWhitespace(time[0].replace(/^at\s+/i, '')) : '';
+}
+
+/**
+ * A short name for the thing: the note with its scheduling tail and its
+ * leading filler removed, so "Alex asked about dinner at Seven Shores Cafe on
+ * Friday at 6" becomes "dinner at Seven Shores Cafe".
+ */
+function eventTitle(text: string, place: string): string {
+  const trimmed = normalizeWhitespace(
+    text
+      .replace(/^.*?\b(asked about|wants|plans|suggested|invited (?:you|me|us) to|agreed to|is going to)\b\s*/i, '')
+      .replace(/\b(on|at|by)?\s*\b(today|tonight|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b.*$/i, '')
+      .replace(/\bat\s+[0-9][0-9:]*\s*(?:am|pm)?\s*\.?$/i, '')
+      .replace(/[.]+$/, ''),
+  );
+  return trimmed.length >= 3 ? truncate(trimmed, 80) : place;
 }
 
 function actionTypeFor(text: string): string {

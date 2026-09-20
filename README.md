@@ -173,6 +173,19 @@ accessibility tree, `buildOutline` renders it, and that text is what is
 indexed, so what Elasticsearch remembers and what the model reads are the same
 thing. Facts arrive from `recordSeen`, which hands back what it distilled.
 
+A task is not one step but the fields the destination will ask for. The plan
+above becomes a `calendar_event` carrying `title`, `when` and `location`, and
+those fields are what drive it home: the retrieved line names the ones still
+outstanding and the exact value for each, so the model puts a string in a box
+rather than being handed a paragraph and left to guess.
+
+What a finished chip does to a task depends on what the chip was. A `fill`,
+`select` or `submit` completes the one field it entered, and only the last
+field closes the task out. A `switch` or an `open` completes nothing — it is a
+step toward the task, not the doing of it — so it refreshes the task instead,
+which is what carries it across the five-minute window onto the surface that
+finishes it. A dismissal never spends a field.
+
 Distilled facts also pass through a small messy-context resolver. A fact like
 `Dinner at Seven Shores Cafe on Friday at 6` becomes an unresolved
 `calendar_event` task. If another source later says the same event is at 7,
