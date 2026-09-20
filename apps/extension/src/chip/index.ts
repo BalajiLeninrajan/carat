@@ -52,7 +52,7 @@ interface ChipText extends ChipCallbacks {
   preview?: string;
   /** Why it was offered; shown as the native tooltip on hover. */
   reason?: string;
-  /** The model may still replace this action; the chip carries a pulsing dot until `settle()`. */
+  /** The model may still replace this action; the chip carries a static dot until `settle()`. */
   pending?: boolean;
   /** Sending, paying, deleting: the first Tab arms the chip, the second acts. */
   irreversible?: boolean;
@@ -139,8 +139,6 @@ export const QUIET_HINT = 'Shift+Tab: quiet for a minute';
  * a flag shared with the scroller, which would leak between pages.
  */
 export const CHIP_SETTLE_MS = SCROLL_SETTLE_MS;
-/** A chip nobody has answered by now gets one pulse, and then lets it be. */
-export const ATTENTION_AFTER_MS = TIMING.attentionAfterMs;
 /** How long each exit runs before the pill is taken off screen. */
 const EXIT_MS: Record<Exit, number> = {
   collapse: TIMING.collapseMs,
@@ -229,7 +227,6 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
   // goes mid-spring takes its own frames with it.
   let enterTimer: ReturnType<typeof setTimeout> | undefined;
   let glowTimer: ReturnType<typeof setTimeout> | undefined;
-  let attentionTimer: ReturnType<typeof setTimeout> | undefined;
   let keyTimer: ReturnType<typeof setTimeout> | undefined;
   let exitTimer: ReturnType<typeof setTimeout> | undefined;
   // The frame loop that keeps the pill on its control, and the last box it saw.
@@ -478,27 +475,6 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
     pill.querySelector('.glow')?.remove();
   }
 
-  /** Nobody has answered. One pulse, scheduled once per chip and never again. */
-  function attention(): void {
-    attentionTimer = undefined;
-    if (!session) return;
-    if (reducedMotion()) {
-      pill.classList.add('is-noticed');
-      return;
-    }
-    pill.classList.add('is-attention');
-    attentionTimer = setTimeout(() => {
-      attentionTimer = undefined;
-      pill.classList.remove('is-attention');
-    }, TIMING.attentionMs);
-  }
-
-  function cancelAttention(): void {
-    if (attentionTimer !== undefined) clearTimeout(attentionTimer);
-    attentionTimer = undefined;
-    pill.classList.remove('is-attention', 'is-noticed');
-  }
-
   /** The keycap goes down under an accepted Tab, and back up on its own. */
   function press(): void {
     cancelKey();
@@ -568,7 +544,6 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
   function setPending(next: boolean): void {
     pending = next;
     spinner.hidden = !next;
-    spinner.classList.toggle('is-static', next && reducedMotion());
     const title = next ? (reason ? `${reason} · ${PENDING_HINT}` : PENDING_HINT) : reason;
     if (title) pill.setAttribute('title', title);
     else pill.removeAttribute('title');
@@ -578,9 +553,8 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
     const s = session;
     if (!s) return;
     label.textContent = armed ? `Press Tab again to ${lower(s.label)}` : s.label;
+    // Armed is a colour, not a motion: the pill goes amber and stays there.
     pill.classList.toggle('is-armed', armed);
-    // The one loop besides the waiting dot: amber, breathing, until the second Tab.
-    pill.classList.toggle('is-breathing', armed && !reducedMotion());
   }
 
   function mount(opts: ChipText): SessionBase {
@@ -603,7 +577,6 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
     win.addEventListener('focusin', onFocusIn, true);
     pill.addEventListener('click', onClick);
     pill.addEventListener('mousedown', onMousedown);
-    attentionTimer = setTimeout(attention, TIMING.attentionAfterMs);
     return {
       onAccept: opts.onAccept,
       onDismiss: opts.onDismiss,
@@ -731,7 +704,6 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
     endExit();
     clearRing();
     cancelEnter();
-    cancelAttention();
     cancelKey();
     fx.clear();
     onPeekOut();
@@ -763,10 +735,9 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
       doc.removeEventListener('input', onTyped, true);
     }
     setPending(false);
-    pill.classList.remove('is-still', 'is-breathing');
+    pill.classList.remove('is-still');
     if (exit && seen && !reducedMotion()) {
-      // An armed chip acts in amber, so the warning's colour stays on for the
-      // exit. The breathing does not: it animates the same pill the exit does.
+      // An armed chip acts in amber, so the warning's colour stays on for the exit.
       if (wasArmed) pill.classList.add('is-armed');
       leave(exit);
       return;

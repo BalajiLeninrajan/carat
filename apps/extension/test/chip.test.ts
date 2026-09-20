@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
-import { ARM_MS, ATTENTION_AFTER_MS, AUTO_DISMISS_MS, CHIP_SETTLE_MS, CORNER_INSET_PX, PENDING_HINT, createChip, type Chip, type DismissReason } from '../src/chip';
+import { ARM_MS, AUTO_DISMISS_MS, CHIP_SETTLE_MS, CORNER_INSET_PX, PENDING_HINT, createChip, type Chip, type DismissReason } from '../src/chip';
 import { placeAt } from '../src/chip/position';
-import { CHIP_CSS, KEYCAP, KEYFRAME_CLASSES, TIMING, TYPE } from '../src/chip/styles';
+import { CHIP_CSS, FX_CSS, KEYCAP, KEYFRAME_CLASSES, TIMING, TYPE } from '../src/chip/styles';
 import { Ring } from '../src/engine/content/ring';
 
 /** jsdom has no Web Audio; this is enough of a context to count how many were built. */
@@ -367,6 +367,18 @@ describe('chip', () => {
     expect(chip.pending).toBe(false);
   });
 
+  it('shows a dot that stands still while a better answer may land', () => {
+    show({ pending: true });
+    expect(chip.pending).toBe(true);
+    const rule = CHIP_CSS.slice(CHIP_CSS.indexOf('.pending {'), CHIP_CSS.indexOf('.pending[hidden]'));
+    expect(rule).not.toContain('animation');
+  });
+
+  it('loops nothing at all', () => {
+    expect(CHIP_CSS).not.toContain('infinite');
+    expect(FX_CSS).not.toContain('infinite');
+  });
+
   it('relays a key heard inside a child frame', () => {
     chip.showBanner({ label: 'Click "Pay now"', irreversible: true, onAccept, onDismiss });
     chip.relay('Tab');
@@ -439,12 +451,12 @@ describe('chip', () => {
       expect(chip.classes).not.toContain('is-leaving');
     });
 
-    it('breathes while armed and stops when it stands down', () => {
+    it('turns a static amber while armed and drops it when it stands down', () => {
       chip.show({ target, label: 'Click "Send reply"', irreversible: true, kind: 'click', onAccept, onDismiss });
       key(target, 'Tab');
-      expect(chip.classes).toEqual(expect.arrayContaining(['is-armed', 'is-breathing']));
-      vi.advanceTimersByTime(ARM_MS);
+      expect(chip.classes).toContain('is-armed');
       expect(chip.classes).not.toContain('is-breathing');
+      vi.advanceTimersByTime(ARM_MS);
       expect(chip.classes).not.toContain('is-armed');
     });
 
@@ -453,24 +465,17 @@ describe('chip', () => {
       key(target, 'Tab');
       key(target, 'Tab');
       expect(onAccept).toHaveBeenCalledTimes(1);
-      // The colour stays for the exit; the breathing cannot, it animates the same pill.
+      // The colour stays for the exit.
       expect(chip.classes).toEqual(expect.arrayContaining(['is-armed', 'is-leaving', 'exit-collapse']));
-      expect(chip.classes).not.toContain('is-breathing');
       vi.advanceTimersByTime(TIMING.collapseMs);
       expect(chip.classes).not.toContain('is-armed');
     });
 
-    it('pulses once when nobody has answered, and never again', () => {
+    it('does nothing at all while it waits to be answered', () => {
       show();
-      expect(chip.classes).not.toContain('is-attention');
-      vi.advanceTimersByTime(ATTENTION_AFTER_MS);
-      expect(chip.classes).toContain('is-attention');
-      vi.advanceTimersByTime(TIMING.attentionMs);
-      expect(chip.classes).not.toContain('is-attention');
-      // Still up, still ignored, and still only the one pulse.
-      vi.advanceTimersByTime(AUTO_DISMISS_MS - ATTENTION_AFTER_MS - TIMING.attentionMs - 1);
+      vi.advanceTimersByTime(AUTO_DISMISS_MS - 1);
       expect(chip.visible).toBe(true);
-      expect(chip.classes).not.toContain('is-attention');
+      for (const cls of KEYFRAME_CLASSES) expect(chip.classes).not.toContain(cls);
     });
 
     it('leaves the arrival mark to the ring, and marks the control when the offer is taken', () => {
@@ -492,13 +497,9 @@ describe('chip', () => {
       show();
       expect(chip.classes).toContain('is-still');
       for (const cls of KEYFRAME_CLASSES) expect(chip.classes).not.toContain(cls);
-
-      vi.advanceTimersByTime(ATTENTION_AFTER_MS);
-      expect(chip.classes).toContain('is-noticed');
-      expect(chip.classes).not.toContain('is-attention');
     });
 
-    it('arms in amber without breathing, and goes without an exit', () => {
+    it('arms in amber and goes without an exit', () => {
       chip.show({ target, label: 'Click "Send reply"', irreversible: true, kind: 'click', onAccept, onDismiss });
       key(target, 'Tab');
       expect(chip.classes).toContain('is-armed');
@@ -523,7 +524,7 @@ describe('chip', () => {
 
     it('builds no AudioContext until a Tab has actually been pressed', () => {
       show();
-      vi.advanceTimersByTime(ATTENTION_AFTER_MS);
+      vi.advanceTimersByTime(AUTO_DISMISS_MS - 1);
       expect(FakeAudioContext.built).toBe(0);
       key(target, 'Tab');
       expect(FakeAudioContext.built).toBe(1);

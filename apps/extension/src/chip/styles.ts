@@ -13,10 +13,6 @@ export const TIMING = {
   outlineMs: 900,
   /** The keycap's "that value just changed" bounce. */
   bumpMs: 80,
-  /** One gentle pulse, this long, after the chip has been ignored. */
-  attentionMs: 400,
-  /** How long a chip goes unanswered before that pulse. */
-  attentionAfterMs: 8000,
   /** The keycap held down under an accepted Tab. */
   pressMs: 90,
   /** The chip collapsing toward the control it just acted on. */
@@ -71,10 +67,9 @@ export const KEYCAP = {
 /**
  * Classes that only mean anything as an animation. Under
  * `prefers-reduced-motion` none of them is ever put on the pill; the static
- * states (`is-still`, `is-armed`, `is-noticed`, `is-press`) carry the meaning
- * instead.
+ * states (`is-still`, `is-armed`, `is-press`) carry the meaning instead.
  */
-export const KEYFRAME_CLASSES = ['is-entering', 'has-glow', 'is-attention', 'is-leaving', 'is-breathing'] as const;
+export const KEYFRAME_CLASSES = ['is-entering', 'has-glow', 'is-leaving'] as const;
 
 // Inline so the chip needs no web-accessible resources and no page CSS can reach it.
 export const CHIP_CSS = `
@@ -93,13 +88,11 @@ export const CHIP_CSS = `
   --carat-enter-ease: cubic-bezier(0.34, 1.4, 0.64, 1);
   --carat-glow-ms: ${TIMING.glowMs}ms;
   --carat-bump-ms: ${TIMING.bumpMs}ms;
-  --carat-attention-ms: ${TIMING.attentionMs}ms;
   --carat-press-ms: ${TIMING.pressMs}ms;
   --carat-collapse-ms: ${TIMING.collapseMs}ms;
   --carat-sweep-ms: ${TIMING.sweepMs}ms;
   --carat-shrink-ms: ${TIMING.shrinkMs}ms;
   --carat-dismiss-ms: ${TIMING.dismissMs}ms;
-  --carat-breathe-ms: 1400ms;
   /* Set from the target's side of the pill, so a collapse falls toward it. */
   --carat-origin: 50% 50%;
 }
@@ -131,7 +124,8 @@ export const CHIP_CSS = `
 .sub { font-size: 11px; line-height: 1.2; color: #a6adc8; overflow: hidden; text-overflow: ellipsis; }
 .sub[hidden] { display: none; }
 .value { font-weight: 600; color: #f5e0dc; }
-/* A better answer is still on its way, so the value on screen may yet change. */
+/* A better answer is still on its way, so the value on screen may yet change.
+   The dot says that standing still: nothing on the chip loops. */
 .pending {
   display: inline-block;
   flex: none;
@@ -140,15 +134,9 @@ export const CHIP_CSS = `
   margin-left: -2px;
   border-radius: 50%;
   background: var(--carat-accent);
-  animation: carat-pulse 1.1s ease-in-out infinite;
+  opacity: 0.8;
 }
 .pending[hidden] { display: none; }
-/* The dot still says "waiting" without moving, for anyone who asked for less motion. */
-.pending.is-static { animation: none; opacity: 0.8; }
-@keyframes carat-pulse {
-  0%, 100% { opacity: 0.25; transform: scale(0.75); }
-  50% { opacity: 1; transform: scale(1); }
-}
 /* A replaced value arrives on the spot the old one held, so only the word changes. */
 .value.is-fresh, .label.is-fresh { animation: carat-fade 180ms ease-out; }
 @keyframes carat-fade {
@@ -181,15 +169,6 @@ export const CHIP_CSS = `
   from { opacity: 0.6; transform: scale(1); }
   to { opacity: 0; transform: scale(1.3); }
 }
-/* Eight seconds unanswered: one pulse, and then the chip lets it be. */
-.chip.is-attention { animation: carat-attention var(--carat-attention-ms) ease-in-out; }
-@keyframes carat-attention {
-  0%, 100% { transform: scale(1); }
-  45% { transform: scale(1.03); }
-}
-/* What that pulse says when it may not move: a steady accent edge. */
-.chip.is-noticed { box-shadow: 0 6px 18px rgba(17, 17, 27, 0.35), 0 0 0 2px rgba(137, 180, 250, 0.55); }
-
 /* --- the press --- */
 kbd.is-press { transform: translateY(1px); background: #232334; color: #9399b2; }
 .chip.is-armed kbd.is-press { background: #11111b; color: #d8c48d; }
@@ -217,9 +196,8 @@ kbd.is-bump { animation: carat-bump var(--carat-bump-ms) ease-out; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pending { animation: none; opacity: 0.8; }
   .value.is-fresh, .label.is-fresh { animation: none; }
-  .chip.is-entering, .chip.is-banner.is-entering, .chip.is-attention, .chip.is-armed.is-breathing, kbd.is-bump { animation: none; }
+  .chip.is-entering, .chip.is-banner.is-entering, kbd.is-bump { animation: none; }
   .chip.is-leaving.exit-collapse, .chip.is-leaving.exit-sweep, .chip.is-leaving.exit-shrink, .chip.is-leaving.exit-soft { animation: none; }
   .glow { display: none; }
   kbd.is-press { transform: none; }
@@ -230,12 +208,6 @@ kbd.is-bump { animation: carat-bump var(--carat-bump-ms) ease-out; }
 .chip.is-armed .value { color: #1e1e2e; }
 .chip.is-armed .sub { color: #4c4f69; }
 .chip.is-armed kbd { background: #1e1e2e; color: var(--carat-amber); border-color: #1e1e2e; }
-/* The one thing allowed to loop besides the waiting dot: an armed chip breathes until the second Tab. */
-.chip.is-armed.is-breathing { animation: carat-breathe var(--carat-breathe-ms) ease-in-out infinite; }
-@keyframes carat-breathe {
-  0%, 100% { box-shadow: 0 6px 18px rgba(249, 226, 175, 0.3), 0 0 0 1px rgba(30, 30, 46, 0.2), 0 0 0 0 rgba(249, 226, 175, 0.5); }
-  50% { box-shadow: 0 6px 18px rgba(249, 226, 175, 0.5), 0 0 0 1px rgba(30, 30, 46, 0.2), 0 0 0 8px rgba(249, 226, 175, 0); }
-}
 /* The tab offer has no field to sit beside, so it reads as a banner: larger type, wider, centred. */
 .chip.is-banner {
   max-width: min(640px, calc(100vw - 32px));
