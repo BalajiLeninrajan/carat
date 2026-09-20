@@ -50,6 +50,19 @@ describe('the ring reads the page behind its target', () => {
     expect(toneBehind(input)).toBe('dark');
   });
 
+  it('has a red for an armed control that is not the amber the pill wears', () => {
+    // Red is the ring's alone: the pill and the ring's own hint stay amber.
+    expect(RING.alarm).toBe('#f38ba8');
+    expect(RING.onLight.alarm).toBe('#d20f39');
+    expect(RING.alarm).not.toBe(RING.armed);
+    expect(RING.onLight.alarm).not.toBe(RING.onLight.armed);
+    const red = (hex: string): boolean => {
+      const at = (i: number): number => parseInt(hex.slice(i, i + 2), 16);
+      return at(1) > at(3) && at(1) > at(5);
+    };
+    expect([red(RING.alarm), red(RING.onLight.alarm)]).toEqual([true, true]);
+  });
+
   it('picks the palette when it goes on, and keeps the two apart', () => {
     const input = document.createElement('input');
     document.body.append(input);
