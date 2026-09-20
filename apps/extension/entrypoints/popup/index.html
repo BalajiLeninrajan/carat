@@ -15,6 +15,9 @@
         --subtext0: #a6adc8;
         --blue: #89b4fa;
         --teal: #94e2d5;
+        --green: #a6e3a1;
+        --peach: #fab387;
+        --mauve: #cba6f7;
         color-scheme: dark;
       }
       * { box-sizing: border-box; }
@@ -39,6 +42,26 @@
       .site { padding: 6px 12px; border-bottom: 1px solid var(--surface0); font-size: 12px; }
       .site[hidden] { display: none; }
       #site-host { color: var(--text); }
+      .tabs {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+        padding: 10px 12px 0;
+      }
+      .tab {
+        padding: 6px 8px;
+        border: 1px solid var(--surface0);
+        background: var(--mantle);
+        color: var(--subtext0);
+        border-radius: 7px;
+      }
+      .tab[aria-selected="true"] {
+        border-color: var(--blue);
+        color: var(--text);
+        background: color-mix(in srgb, var(--blue) 18%, var(--surface0));
+      }
+      .panel { display: none; }
+      .panel.active { display: block; }
       #clear { width: calc(100% - 24px); margin: 10px 12px 0; padding: 6px 10px; font-size: 12px; }
       #clear[data-state="working"] { color: var(--subtext0); }
       #clear[data-state="done"] { border-color: var(--teal); color: var(--teal); }
@@ -50,6 +73,40 @@
         color: var(--subtext0);
         overflow-wrap: anywhere;
       }
+      .analytics {
+        padding: 10px 12px 0;
+        display: grid;
+        gap: 10px;
+      }
+      .metric-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+      .metric {
+        border: 1px solid var(--surface0);
+        background: var(--mantle);
+        border-radius: 8px;
+        padding: 8px;
+      }
+      .metric b { display: block; font-size: 18px; line-height: 1.1; }
+      .metric span { display: block; margin-top: 3px; font-size: 10px; color: var(--subtext0); }
+      .bars, .facts, .recent { display: grid; gap: 7px; }
+      .bar-row { display: grid; gap: 4px; }
+      .bar-top { display: flex; justify-content: space-between; gap: 10px; font-size: 11px; color: var(--subtext0); }
+      .bar-label { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .bar-track { height: 7px; border-radius: 999px; background: var(--surface0); overflow: hidden; }
+      .bar-fill { display: block; height: 100%; border-radius: inherit; background: var(--green); }
+      .fact, .recent-row {
+        border: 1px solid var(--surface0);
+        background: color-mix(in srgb, var(--surface0) 58%, transparent);
+        border-radius: 8px;
+        padding: 8px;
+      }
+      .fact { color: var(--text); font-size: 12px; }
+      .recent-row { display: grid; gap: 3px; font-size: 11px; }
+      .recent-row b { font-size: 12px; font-weight: 600; }
+      .recent-row span { color: var(--subtext0); }
+      .outcome-accepted { color: var(--green); }
+      .outcome-dismissed { color: var(--peach); }
+      .outcome-alternative { color: var(--mauve); }
+      .empty { color: var(--subtext0); font-size: 12px; text-align: center; padding: 12px 4px; }
       footer {
         display: flex;
         align-items: center;
@@ -76,6 +133,8 @@
       main[data-state="offline"] #offline { display: block; }
       main[data-state="offline"] #clear,
       main[data-state="offline"] #model,
+      main[data-state="offline"] .tabs,
+      main[data-state="offline"] .panel,
       main[data-state="offline"] .site,
       main[data-state="offline"] footer { display: none; }
     </style>
@@ -96,14 +155,27 @@
         <button type="button" id="retry">Retry</button>
       </div>
 
-      <label class="toggle site" id="site-row" hidden>
-        <input type="checkbox" id="site-enabled" />
-        <span>On for <span id="site-host"></span></span>
-      </label>
+      <div class="tabs" role="tablist" aria-label="Carat popup">
+        <button class="tab" type="button" role="tab" id="tab-home" aria-controls="panel-home" aria-selected="true">Control</button>
+        <button class="tab" type="button" role="tab" id="tab-analytics" aria-controls="panel-analytics" aria-selected="false">Analytics</button>
+      </div>
 
-      <button type="button" id="clear" data-state="idle">Clear what carat remembers</button>
+      <section class="panel active" id="panel-home" role="tabpanel" aria-labelledby="tab-home">
+        <label class="toggle site" id="site-row" hidden>
+          <input type="checkbox" id="site-enabled" />
+          <span>On for <span id="site-host"></span></span>
+        </label>
 
-      <p id="model"></p>
+        <button type="button" id="clear" data-state="idle">Clear what carat remembers</button>
+
+        <p id="model"></p>
+      </section>
+
+      <section class="panel" id="panel-analytics" role="tabpanel" aria-labelledby="tab-analytics">
+        <div class="analytics" id="analytics">
+          <div class="empty">Loading analytics…</div>
+        </div>
+      </section>
 
       <footer>
         <a href="#" id="options">Settings</a>

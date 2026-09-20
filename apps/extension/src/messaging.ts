@@ -1,6 +1,7 @@
 import type { GetDataType, GetReturnType } from '@webext-core/messaging';
 import { defineExtensionMessaging } from '@webext-core/messaging';
 import type { DebugSnapshot } from './debug/log';
+import type { ActionAnalytics } from './background/elastic';
 import type { Settings } from './engine/shared/settings';
 import type { StatusInfo } from './status/info';
 
@@ -34,6 +35,8 @@ export interface Protocol {
   toggleDebug(): void;
   /** What the status line on a page may show: running or not, and the model in use. Never the key. */
   getStatus(): StatusInfo;
+  /** Recent suggestion outcomes and trends for the popup analytics tab. */
+  getAnalytics(): ActionAnalytics;
   getSettings(): Settings;
   setSettings(s: Partial<Settings>): Settings;
   /**
