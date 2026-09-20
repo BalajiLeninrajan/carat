@@ -36,6 +36,8 @@ What the model is given, in this order, so that everything but the last part is 
 6. **`<tabs>`** — the open tabs, so `switch` has something to name.
 7. **The page**, last: an accessibility-style outline read from the DOM, landmarks indented, text inline, every control the user could operate numbered `[n]` with its role, name, value and state, the focused one marked. At most 9000 characters, or 4000 when the caller wants a first fast ask, trimmed by distance from the focus.
 
+A line the form wrote to say a field is wrong (`required`, `cannot be empty`, `please enter`) is marked `(field message)` in the outline: the model still reads it, and it never grounds a value, because it says the field is empty without saying what belongs in it.
+
 Carat never writes a comment, a reply, a message or a post. A textarea or an editor named for one, and any contenteditable with a toolbar or a submit button beside it, is marked in the outline and refused as a `fill` target; the ghost still continues what the user has typed there themselves.
 
 The instructions rank that evidence and the orchestrator then checks the answer against it: the current page and the focus weigh most, then this tab's newest history lines, then the newest notes, with old notes last, and a fill whose value appears in none of the notes, the history, the outline or the user's own typing is refused with `value not grounded in what the user read or typed` and put back to the model once.

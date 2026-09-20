@@ -54,6 +54,7 @@ describe('buildNextActionMessages', () => {
       expect(text).toContain('If the page gives no reason to type a particular value, do not fill');
       expect(text).toContain('a search box on an unrelated site is not a place for a note about dinner');
       expect(text).toContain('carat never writes a comment, reply, message or post for the user');
+      expect(text).toContain('(field message)');
       expect(text).toContain('A page title, a site name, a tab name');
       expect(text).toContain('the next step is almost never a search fill');
       // And it says so before it says anything else about choosing.

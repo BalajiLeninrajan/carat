@@ -129,6 +129,27 @@ describe('buildOutline', () => {
     expect(named(controls, 'Save')?.risky).toBeUndefined();
   });
 
+  it('marks a form’s own validation message, and marks a composer as one', () => {
+    document.body.innerHTML = `
+      <main>
+        <p>Brunch was worth the queue.</p>
+        <div contenteditable="true" aria-label="Join the conversation"></div>
+        <p role="alert">The field is required and cannot be empty</p>
+        <label for="postcode">Postcode</label><input id="postcode">
+        <p>Please enter a valid postcode</p>
+      </main>
+    `;
+    const { outline, controls } = buildOutline(document);
+
+    expect(outline).toContain('text: The field is required and cannot be empty (field message)');
+    expect(outline).toContain('text: Please enter a valid postcode (field message)');
+    // Prose the page wrote for a reader is left alone.
+    expect(outline).toContain('text: Brunch was worth the queue.');
+    expect(outline).not.toContain('Brunch was worth the queue. (field message)');
+    expect(named(controls, 'Join the conversation')?.composer).toBe(true);
+    expect(named(controls, 'Postcode')?.composer).toBeUndefined();
+  });
+
   it('carries required, checked and disabled as the control state', () => {
     document.body.innerHTML = `
       <form aria-label="Order">

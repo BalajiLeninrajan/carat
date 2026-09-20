@@ -309,6 +309,12 @@ describe('validation is safety only', () => {
     expect(validate(fill('Quarry Lane Tavern'), page, s)?.kind).toBe('fill');
   });
 
+  it('never takes a value out of the page’s own validation message', () => {
+    const outline = ['main:', '  [1] textbox "Postcode"', '  text: Please enter a valid postcode (field message)'].join('\n');
+    const page = request({ outline, controls: [{ n: 1, role: 'textbox', name: 'Postcode' }], focused: 1 });
+    expect(validate(action({ kind: 'fill', target: 1, value: 'a valid postcode' }), page, s)).toBeNull();
+  });
+
   it('refuses a page name, a tab name or a site name as a value to type', () => {
     const feed = redditFeed();
     const diag: SuggestDiag = { at: 0, host: 'www.reddit.com', controls: 3, gate: 'ok', eagerness: 'eager' };

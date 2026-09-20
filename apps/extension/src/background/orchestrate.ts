@@ -488,7 +488,7 @@ function grounded(value: string, req: NextActionRequest): boolean {
 }
 
 /** A paragraph, a heading, a list item, a line of an article: what the page says. */
-const PROSE_LINE = /^\s*(?:text: |heading\(\d\) )/;
+const PROSE_LINE = /^\s*(?:text: |h[1-6] |heading\(\d\) )/;
 
 /** A line the page put there to tell the user their field is wrong; see `prose`. */
 const FIELD_MESSAGE = /\(field message\)\s*$/;

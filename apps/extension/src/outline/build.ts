@@ -30,6 +30,18 @@ export const OUTLINE_LIMITS = {
   foldMargin: 0.25,
 } as const;
 
+/**
+ * A form telling the user a field is wrong. It is prose by every structural
+ * measure, and it reads like an instruction, but all it says is that a field
+ * is empty: it never says what to put in it. Marked in the outline so the
+ * model can weigh it and the validator can refuse to ground a value in it.
+ */
+const FIELD_MESSAGE = /\b(?:is required|required field|cannot be empty|can't be empty|must not be empty|is invalid|invalid entry|please enter|please provide|please select|please choose|this field)\b/i;
+
+export function isFieldMessage(text: string): boolean {
+  return FIELD_MESSAGE.test(text);
+}
+
 /** Never described: they carry no text a reader sees. */
 const SKIP_TAGS = new Set([
   'script', 'style', 'noscript', 'template', 'svg', 'canvas', 'head', 'link', 'meta',
@@ -267,7 +279,7 @@ export function buildOutline(doc: Document, win: Window | null = doc.defaultView
     const at = bufferAt;
     buffer = [];
     bufferAt = null;
-    if (text) push('text', `text: ${truncate(text, OUTLINE_LIMITS.textChars)}`, at);
+    if (text) push('text', `text: ${truncate(text, OUTLINE_LIMITS.textChars)}${isFieldMessage(text) ? ' (field message)' : ''}`, at);
   };
 
   const noteAnchor = (el: Element): void => {
