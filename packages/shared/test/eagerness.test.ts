@@ -12,8 +12,6 @@ describe('EAGERNESS', () => {
     const [c, b, e] = EAGERNESS_LEVELS.map((l) => EAGERNESS[l]);
     expect(c!.minConfidence).toBeGreaterThan(b!.minConfidence);
     expect(b!.minConfidence).toBeGreaterThan(e!.minConfidence);
-    expect(c!.jevGateMin).toBeGreaterThan(b!.jevGateMin);
-    expect(b!.jevGateMin).toBeGreaterThan(e!.jevGateMin);
     expect(c!.maxSuggestions).toBeLessThanOrEqual(b!.maxSuggestions);
     expect(b!.maxSuggestions).toBeLessThan(e!.maxSuggestions);
     expect(c!.sameOriginContext).toBe(false);
@@ -37,7 +35,7 @@ describe('EAGERNESS', () => {
 
   it('keeps the old numbers as conservative', () => {
     expect(EAGERNESS.conservative).toMatchObject({ minConfidence: 0.7, maxSuggestions: 2 });
-    expect(EAGERNESS.eager).toMatchObject({ minConfidence: 0.35, jevGateMin: 0.25, maxSuggestions: 4 });
+    expect(EAGERNESS.eager).toMatchObject({ minConfidence: 0.35, maxSuggestions: 4 });
   });
 
   it('says what weak means at each level: under the next stricter floor', () => {

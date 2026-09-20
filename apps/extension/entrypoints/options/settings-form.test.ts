@@ -8,7 +8,7 @@ import {
   normalizeSettings,
 } from './settings-form';
 
-const base = { enabled: true, provider: 'openai', baseURL: '', apiKey: '', model: '', statusLine: false, sound: true, cfAccountId: '', cfApiToken: '', smartModel: '', screenshots: false, eagerness: 'eager' };
+const base = { enabled: true, provider: 'openai', baseURL: '', apiKey: '', model: '', statusLine: false, sound: true, smartModel: '', screenshots: false, eagerness: 'eager' };
 
 describe('normalizeSettings', () => {
   it('fills blank baseURL and model with the defaults', () => {
@@ -47,17 +47,10 @@ describe('normalizeSettings', () => {
       DEFAULT_SETTINGS.provider,
     );
     expect(normalizeSettings({ ...base, provider: 'local' }).provider).toBe('local');
-    expect(normalizeSettings({ ...base, provider: 'cloudflare' }).provider).toBe('cloudflare');
+    expect(normalizeSettings({ ...base, provider: 'baseten' }).provider).toBe('baseten');
     expect(normalizeSettings({ ...base, enabled: false }).enabled).toBe(false);
   });
 
-  it('trims the Cloudflare account id and token and keeps them empty otherwise', () => {
-    const s = normalizeSettings({ ...base, provider: 'cloudflare', cfAccountId: ' 0123abcd ', cfApiToken: ' cf-x ' });
-    expect(s.cfAccountId).toBe('0123abcd');
-    expect(s.cfApiToken).toBe('cf-x');
-    expect(normalizeSettings(base).cfAccountId).toBe('');
-    expect(normalizeSettings(base).cfApiToken).toBe('');
-  });
 
   it('saves the level the slider is on, whatever the thumb reports', () => {
     // The page hands normalizeSettings what the range input is on, as main.ts does.

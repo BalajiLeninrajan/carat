@@ -92,13 +92,13 @@ export class RaceProvider implements Provider {
     return this.run?.bestProvider;
   }
 
-  /** Whether anything in here has a prefix to warm at all: the regex placeholder and Jev have none. */
+  /** Whether anything in here has a prefix to warm at all: the regex placeholder has none. */
   get warms(): boolean {
     return this.providers.some((p) => p.warm !== undefined);
   }
 
   /**
-   * Warm every provider that has a prefix to warm; the placeholder and Jev
+   * Warm every provider that has a prefix to warm; the placeholder
    * have none, so in practice this is the chat model alone. Never rejects,
    * and never disturbs a run in flight: a warm-up carries its own signal.
    */

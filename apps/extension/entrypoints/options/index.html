@@ -157,10 +157,9 @@
           <select name="provider">
             <option value="openai">OpenAI</option>
             <option value="baseten">Baseten (OpenAI-compatible)</option>
-            <option value="cloudflare">Cloudflare Jev first, then the model below</option>
             <option value="local">Local (regex only, no network)</option>
           </select>
-          <span class="hint">Local runs when there is no key or the network call fails, whatever you pick here. Cloudflare asks TypeSafe's Jev to pick from what the regexes found, and only calls the model below when Jev has nothing.</span>
+          <span class="hint">Local runs when there is no key or the network call fails, whatever you pick here.</span>
         </label>
 
         <h2>Chat model (OpenAI-compatible)</h2>
@@ -186,20 +185,6 @@
           <span class="name">Smart model (optional)</span>
           <input type="text" name="smartModel" placeholder="same as Model" autocomplete="off" spellcheck="false" />
           <span class="hint">Leave blank to use the same model with low reasoning. It gives a second opinion from text when the fast answer was unsure, and reads screenshots at capture time, so whatever runs here must accept images. Only used when screenshots are on.</span>
-        </label>
-
-        <h2>Fast picker (Cloudflare Jev)</h2>
-
-        <label>
-          <span class="name">Cloudflare account ID</span>
-          <input type="text" name="cfAccountId" autocomplete="off" spellcheck="false" />
-          <span class="hint">Only used by the Cloudflare provider. The Workers AI account id from the Cloudflare dashboard.</span>
-        </label>
-
-        <label>
-          <span class="name">Cloudflare API token</span>
-          <input type="password" name="cfApiToken" autocomplete="off" spellcheck="false" />
-          <span class="hint">A token with the Workers AI permission. Stored like the API key above: local extension storage, background worker only. Jev only picks among regex candidates; it never reads a screenshot and never gives the second opinion. Those go to the chat model above.</span>
         </label>
 
         <h2>Screenshots and display</h2>
