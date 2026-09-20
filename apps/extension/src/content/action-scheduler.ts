@@ -4,6 +4,7 @@ import { QUIET_HINT } from '../chip';
 import { previewLine } from '../chip/preview';
 import { fromSurface } from '../dom/surfaces';
 import { performFill } from '../fill';
+import type { GhostHandle } from '../ghost';
 import type { FrameHub, KnownFrame } from '../frames';
 import { createFrameHub } from '../frames';
 import type { Undo } from '../interact';
@@ -75,7 +76,7 @@ export const SNAPSHOT_TIMING = {
 type Trigger = 'first' | 'quiet' | 'evidence' | 'focus' | 'performed' | 'settled' | 'user' | 'retry' | 'lost' | 'silent' | 'force';
 
 /** Why an ask did not go out. `snoozed` is the one the user chose. */
-type Refusal = 'gone' | 'snoozed' | 'performing' | 'awaiting' | 'queued';
+type Refusal = 'gone' | 'snoozed' | 'ghosting' | 'performing' | 'awaiting' | 'queued';
 
 export interface ActionsHandle {
   /** The page's own text changed; ask again unless a chip is already up. */
@@ -113,6 +114,12 @@ export interface ActionOptions extends RequestObserver {
   page?: PageState;
   /** The top frame's hub for cross-origin child frames; built here when not given. */
   hub?: FrameHub;
+  /**
+   * The grey text after the caret. It is told when the focus moves and when
+   * the user types, and while it has something on screen Tab is its and no
+   * chip goes up.
+   */
+  ghost?: GhostHandle;
 }
 
 /**
@@ -255,6 +262,8 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     // Shift+Tab bought a minute of silence, and nothing buys its way past that:
     // the shortcut ends the snooze itself before it asks.
     if (quietUntil !== 0) return 'snoozed';
+    // Grey text is on screen in a field: Tab is the ghost's until it goes.
+    if (opts.ghost?.visible && trigger !== 'force') return 'ghosting';
     // The focus moving because carat filled a field is not the user moving it.
     if (performing && trigger !== 'force') return 'performing';
     // After Esc, only the user and the retry timer get carat talking again.
@@ -335,6 +344,8 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
           return;
         }
       }
+      // The ghost asks about the same page; it reads the outline from here rather than building its own.
+      opts.ghost?.noteOutline(request.outline);
       lastHash = hash;
       lastAt = now;
       lastEvents = events;
@@ -401,6 +412,11 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
   function present(action: NextAction | null): void {
     if (!action) {
       if (!chip.visible) chip.hide();
+      return;
+    }
+    // The chip stays off a field the ghost is writing in; that Tab is spoken for.
+    if (opts.ghost?.visible) {
+      chip.hide();
       return;
     }
     // Taken here, where the offer is made: a scroll's key holds the position
@@ -767,7 +783,12 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     afterUser.soon();
   };
   // A click, a keystroke or a scroll of the user's own: ask again once they pause.
-  for (const type of ['click', 'input'] as const) ctx.addEventListener(doc, type, onUser);
+  ctx.addEventListener(doc, 'click', onUser);
+  // Typing is the ghost's cue as much as this scheduler's; it owns what happens inside the field.
+  ctx.addEventListener(doc, 'input', (e) => {
+    opts.ghost?.typed();
+    onUser(e);
+  });
   // Carat's own smooth scroll fires these too; that one is not the user moving.
   const onScrolled = (e: Event): void => {
     if (caratScrolling()) return;
@@ -779,6 +800,8 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
   ctx.addEventListener(win, 'keydown', (e) => undoDesk.handle(e), { capture: true });
   // The focus moving is the strongest signal there is; that one does not wait.
   ctx.addEventListener(doc, 'focusin', (e) => {
+    // The field lost the focus whatever took it, so the grey text goes either way.
+    opts.ghost?.focused();
     // Clicking into the debug panel moves the focus, but not the user's place on the page.
     if (fromSurface(e)) return;
     userActed();

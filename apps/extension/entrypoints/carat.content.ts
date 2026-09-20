@@ -2,6 +2,7 @@ import { defineContentScript } from 'wxt/utils/define-content-script';
 import { createChip } from '../src/chip';
 import { createPageState, send, startActions, startCapture, startStatus } from '../src/content';
 import { startDebug } from '../src/debug';
+import { startGhost } from '../src/ghost';
 import { startFrameAgent } from '../src/frames';
 import { startHistoryRecorder } from '../src/history';
 import { createStatusLine } from '../src/status';
@@ -29,8 +30,12 @@ export default defineContentScript({
     });
     // Alt+Shift+D. Nothing is collected on either side until it has been opened once here.
     const debug = startDebug(ctx, document);
+    // The other half of Tab. It is built first so its key listener sits in
+    // front of the chip's, and it hands Tab back the moment it has nothing.
+    const ghost = startGhost(ctx, document, { onIdle: () => suggestions.refresh() });
     const suggestions = startActions(ctx, chip, document, {
       page,
+      ghost,
       onRequest: () => status.setBusy(true),
       onAnswer: () => {
         status.setBusy(false);
