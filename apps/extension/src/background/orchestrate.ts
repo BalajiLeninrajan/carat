@@ -1,6 +1,7 @@
 import type { NextAction, NextActionRequest, OpenTab, OutlineControl, Settings } from '@carat/shared';
 import {
   EAGERNESS,
+  EXAMPLE_VALUES,
   INTENT_REGISTRY,
   LIMITS,
   fnv1a,
@@ -405,6 +406,8 @@ export function validate(action: NextAction | null, req: NextActionRequest, sett
     case 'fill': {
       if (action.value === '') return refuse('a fill needs a value');
       if (echoes(action.value, control!)) return refuse("that is the field's own name");
+      if (fromAnExample(action.value)) return refuse(FROM_AN_EXAMPLE);
+      if (!grounded(action.value, req)) return refuse(UNGROUNDED);
       break;
     }
     case 'select':
@@ -423,6 +426,59 @@ export function validate(action: NextAction | null, req: NextActionRequest, sett
       break;
   }
   return { ...action, target: control?.n ?? null, irreversible, label: action.label || fallbackLabel(action, control, req) };
+}
+
+/** Why a fill was refused when nothing in the request accounts for its value. */
+export const UNGROUNDED = 'value not grounded in what the user read or typed';
+
+/** Why a fill was refused when it repeats something out of the prompt's own examples. */
+export const FROM_AN_EXAMPLE = 'that value came from an example in the prompt, not from this user';
+
+/**
+ * Lowercase, trimmed, punctuation gone, spaces collapsed. Both sides of every
+ * comparison go through it, so "Seven Shores Cafe." and "seven shores cafe"
+ * are the same string and a hyphenated host matches the outline that spells
+ * it out.
+ */
+function norm(s: string): string {
+  return normalizeWhitespace(s)
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+const EXAMPLE_NEEDLES: readonly string[] = EXAMPLE_VALUES.map(norm).filter(Boolean);
+
+/**
+ * The prompt's examples are invented, so a value that repeats one is the
+ * model copying its homework rather than reading the page. Both the list and
+ * the text it mirrors live in `@carat/shared`, beside each other.
+ */
+function fromAnExample(value: string): boolean {
+  const v = norm(value);
+  return v !== '' && EXAMPLE_NEEDLES.some((needle) => v.includes(needle));
+}
+
+/**
+ * Everywhere a fill value is allowed to have come from: what the user read in
+ * other tabs, what they have done in this one, what is on the page in front
+ * of them, and what they have typed into the field they are in. A value in
+ * none of those was made up, whatever the model's confidence says, and a made
+ * up value in a search box is the worst kind of wrong chip: it looks like an
+ * answer.
+ *
+ * Only fills are asked this. A `select` names an option, which is on the page
+ * and so is in the outline anyway, and the ghost is a continuation of the
+ * user's own sentence rather than a value put in front of them, so neither
+ * comes through here.
+ */
+function grounded(value: string, req: NextActionRequest): boolean {
+  const needle = norm(value);
+  if (needle === '') return false;
+  const typed = req.focused === undefined ? undefined : req.controls.find((c) => c.n === req.focused)?.value;
+  const sources = [...req.notes, ...req.history, req.outline, ...(typed ? [typed] : [])];
+  return sources.some((source) => norm(source).includes(needle));
 }
 
 /** How long the line under a chip may run before it is clipped. */

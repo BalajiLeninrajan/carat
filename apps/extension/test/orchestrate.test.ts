@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Eagerness, NextAction, NextActionRequest, OpenTab, OutlineControl, Settings } from '@carat/shared';
-import { DEFAULT_SETTINGS } from '@carat/shared';
+import { DEFAULT_SETTINGS, EXAMPLE_VALUES } from '@carat/shared';
 import type { NextOptions, Provider } from '@carat/providers';
 import { RefineQueue } from '../src/background/refine';
 import type { SuggestDiag } from '../src/background/diag';
-import { clearActionCache, nextAction, nudgeLine, pick, validate } from '../src/background/orchestrate';
+import { FROM_AN_EXAMPLE, UNGROUNDED, clearActionCache, nextAction, nudgeLine, pick, validate } from '../src/background/orchestrate';
 import { LAST_RESORT_CONFIDENCE, lastResort } from '../src/background/last-resort';
 import type { PageSnapshot } from '../src/messaging';
 
@@ -13,6 +13,11 @@ const CONTROLS: OutlineControl[] = [
   { n: 2, role: 'button', name: 'Directions' },
   { n: 3, role: 'button', name: 'Pay $312.40', risky: true },
 ];
+
+const READ_NOTE = 'Dinner at Seven Shores Cafe on Friday at 6. (read on discord.com, 2m ago)';
+
+/** A fill is only allowed a value the user read or typed; these deps supply the reading. */
+const fromNotes = { lines: async () => [READ_NOTE] };
 
 const snapshot = (over: Partial<PageSnapshot> = {}): PageSnapshot => ({
   page: { host: 'www.google.com', title: 'Google Maps', path: '/maps', scroll: { y: 0, pages: 1, more: false } },
@@ -92,6 +97,7 @@ describe('one action per page', () => {
       settings: async () => settings(),
       localProvider: new Fixed(placeholder),
       createProvider: () => new Fixed(model, 0, 2),
+      notes: fromNotes,
       refine,
     });
     expect(res.action?.value).toBe('Seven Shores Cafe');
@@ -108,6 +114,7 @@ describe('one action per page', () => {
       settings: async () => settings(),
       localProvider: new Fixed(placeholder),
       createProvider: () => new Fixed(action({ confidence: 0.6 })),
+      notes: fromNotes,
       refine,
     });
     expect(res.action?.value).toBe('Seven Shores Cafe');
@@ -175,7 +182,42 @@ describe('validation is safety only', () => {
   it('never fills a control with its own name, or with nothing', () => {
     expect(validate(action({ kind: 'fill', target: 1, value: 'Search Google Maps' }), request(), s)).toBeNull();
     expect(validate(action({ kind: 'fill', target: 1, value: '' }), request(), s)).toBeNull();
-    expect(validate(action({ kind: 'fill', target: 1, value: 'Seven Shores Cafe' }), request(), s)?.value).toBe('Seven Shores Cafe');
+    expect(validate(action({ kind: 'fill', target: 1, value: 'Seven Shores Cafe' }), request({ notes: [READ_NOTE] }), s)?.value).toBe('Seven Shores Cafe');
+  });
+
+  it('refuses a fill nothing the user read, did or typed accounts for', () => {
+    const made_up = action({ kind: 'fill', target: 1, value: 'Quarry Lane Tavern' });
+    expect(validate(made_up, request(), s)).toBeNull();
+    const diag: SuggestDiag = { at: 0, host: 'x', controls: 3, gate: 'ok', eagerness: 'eager' };
+    validate(made_up, request(), s, diag);
+    expect(diag.refused).toBe(UNGROUNDED);
+  });
+
+  it('takes the value from a note, a timeline line, the page or the field the user is typing in', () => {
+    const fill = (value: string) => action({ kind: 'fill', target: 1, value });
+    expect(validate(fill('Seven Shores Cafe'), request({ notes: [READ_NOTE] }), s)?.value).toBe('Seven Shores Cafe');
+    expect(validate(fill('ABX-4417'), request({ history: ['1m ago: read order ABX-4417'] }), s)?.value).toBe('ABX-4417');
+    const onPage = request({ outline: 'main:\n  text: platform 9 3/4\n  [1] textbox "Platform"' });
+    expect(validate(fill('platform 9 3/4'), onPage, s)?.value).toBe('platform 9 3/4');
+    const typing = request({ controls: [{ n: 1, role: 'searchbox', name: 'Search', value: 'quarry lane tavern, 7pm' }] });
+    expect(validate(fill('Quarry Lane Tavern'), typing, s)?.value).toBe('Quarry Lane Tavern');
+    expect(validate(fill('Quarry Lane Bakery'), typing, s)).toBeNull();
+  });
+
+  it('refuses a value lifted out of the prompt’s own examples, however well it reads', () => {
+    const diag: SuggestDiag = { at: 0, host: 'x', controls: 3, gate: 'ok', eagerness: 'eager' };
+    for (const value of EXAMPLE_VALUES) {
+      // Even with the example value sitting in a note, which is what a model
+      // that had copied its homework would produce.
+      expect(validate(action({ kind: 'fill', target: 1, value }), request({ notes: [`Dinner at ${value}.`] }), s, diag)).toBeNull();
+      expect(diag.refused).toBe(FROM_AN_EXAMPLE);
+    }
+  });
+
+  it('leaves a select alone: its value is an option, which is on the page', () => {
+    const controls: OutlineControl[] = [{ n: 1, role: 'combobox', name: 'Size' }];
+    const page = request({ controls, focused: undefined, outline: 'main:\n  [1] combobox "Size": Small, Medium, Large' });
+    expect(validate(action({ kind: 'select', target: 1, value: 'Medium' }), page, s)?.value).toBe('Medium');
   });
 
   it('scrolls only when there is more page below', () => {
@@ -263,6 +305,7 @@ describe('how fast the chip goes up', () => {
         settings: async () => settings(),
         localProvider: new Fixed(placeholder),
         createProvider: () => new Fixed(action({ confidence: 0.9 }), 2000, 2),
+        notes: fromNotes,
         refine,
         warmed: () => true,
         onDiag: (d) => diags.push(d),
@@ -328,6 +371,28 @@ describe('never silent at eager', () => {
       createProvider: () => offPage,
     });
     expect(seen[1]?.history.at(-1)).toBe(nudgeLine('no such control on the page'));
+  });
+
+  it('puts an ungrounded fill back to the model once, saying what was wrong with it', async () => {
+    const seen: NextActionRequest[] = [];
+    const invents: Provider = {
+      id: 'openai',
+      next: async (req) => {
+        seen.push(req);
+        return seen.length === 1 ? action({ kind: 'fill', target: 1, value: 'Quarry Lane Tavern', confidence: 0.9 }) : action();
+      },
+    };
+    const diags: SuggestDiag[] = [];
+    const res = await nextAction(snapshot(), { tabId: 1, origin: 'x' }, {
+      settings: async () => settings(),
+      localProvider: nothing,
+      createProvider: () => invents,
+      onDiag: (d) => diags.push(d),
+    });
+    expect(seen).toHaveLength(2);
+    expect(seen[1]?.history.at(-1)).toBe(nudgeLine(UNGROUNDED));
+    expect(diags.at(-1)?.reasked).toBe(UNGROUNDED);
+    expect(res.action?.label).toBe('Click "Directions"');
   });
 
   it('scrolls rather than say nothing when both tries come back empty', async () => {

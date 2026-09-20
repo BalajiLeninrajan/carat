@@ -75,6 +75,19 @@ describe('the ghost runner', () => {
     expect(await third).toEqual({ text: ' Shores Cafe', more: false });
   });
 
+  it('is exempt from the grounding a fill goes through: a continuation is the user’s own sentence', async () => {
+    const model = scripted();
+    const { runner: r } = runner({ completer: model.completer });
+    const first = r.handle({ ...input, prefix: 'The place I mean is ' }, caller);
+    await Promise.resolve();
+    await Promise.resolve();
+    // Nothing in the notes, the outline or the timeline says this, and the
+    // ghost hands it over anyway: the user is mid-sentence, not being offered
+    // a value out of somewhere they have been.
+    model.token('somewhere nobody wrote down');
+    expect(await first).toEqual({ text: 'somewhere nobody wrote down', more: true });
+  });
+
   it('carries the notes, the outline and the field name to the model', async () => {
     const model = scripted();
     const { runner: r } = runner({ completer: model.completer });
