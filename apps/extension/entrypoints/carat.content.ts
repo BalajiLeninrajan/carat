@@ -16,7 +16,7 @@ import { isSensitiveField, looksSecret, maskSensitive } from '../src/engine/shar
 import { onMessage, safeSendMessage } from '../src/messaging';
 import { createQuiet } from '../src/quiet';
 import { caratScrolling, hasMoreBelow, scrollPageDown } from '../src/scroll';
-import { createStatusLine } from '../src/status';
+import { createStatusLine, PAUSED_NOTICE } from '../src/status';
 
 /** How long the user must be still, after interacting, before Carat looks at the page. */
 const IDLE_MS = 500;
@@ -24,6 +24,8 @@ const IDLE_MS = 500;
 const TYPING_IDLE_MS = 250;
 /** How often the status pill re-asks the worker what it should say. */
 const STATUS_POLL_MS = 5000;
+/** How long a paused tab shows the pill it would otherwise be keeping hidden. */
+const PAUSE_NOTICE_MS = 4000;
 /** A highlight settles before it counts as one: dragging a selection fires all the way. */
 const SELECTION_MS = 300;
 /** How still the page has to be, after the user scrolls it, before Carat asks about what is now on screen. */
@@ -903,11 +905,21 @@ export default defineContentScript({
     // -----------------------------------------------------------------------
     // The status pill, and the two shortcuts the worker relays here
 
+    /** Whether this page has already been told about the pause it is under. */
+    let pauseNoted = false;
+
     async function refreshStatus(): Promise<void> {
       const info = await safeSendMessage('getStatus', undefined);
       if (!info || !ctx.isValid) return;
       status.update(info);
       chip.setSound(info.sound);
+      // With the pill off, a pause looks exactly like carat having nothing to
+      // say. Break that silence once, then leave the page alone.
+      if (info.reason !== 'paused') pauseNoted = false;
+      else if (!info.show && !pauseNoted) {
+        pauseNoted = true;
+        status.notice(PAUSED_NOTICE, PAUSE_NOTICE_MS);
+      }
     }
     void refreshStatus();
     const statusTimer = setInterval(() => void refreshStatus(), STATUS_POLL_MS);

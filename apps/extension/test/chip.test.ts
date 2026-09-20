@@ -365,9 +365,17 @@ describe('chip', () => {
     it('centres the ink rather than the em box, so the cap sits on the line', () => {
       // A cap and an arrow have nothing below the baseline; the descender
       // space the font reserves under them would otherwise ride them high.
-      expect(CHIP_CSS).toContain('text-box-trim: trim-both');
-      expect(CHIP_CSS).toContain('text-box-edge: cap alphabetic');
       expect(KEYCAP_CSS).toContain('text-box-trim: trim-both');
+      expect(KEYCAP_CSS).toContain('text-box-edge: cap alphabetic');
+    });
+
+    it('never trims the label, which has descenders and a clipped overflow', () => {
+      // Trimming to the baseline plus `overflow: hidden` cuts the tail off a
+      // "g". The label keeps its whole line box; only the keycap is trimmed.
+      const rule = CHIP_CSS.slice(CHIP_CSS.indexOf('.label {'), CHIP_CSS.indexOf('.sub {'));
+      expect(rule).toContain('overflow: hidden');
+      expect(rule).not.toContain('text-box-trim');
+      expect(rule).not.toContain('text-box-edge');
     });
 
     it("is a fixed box exactly one text line tall, with the glyph centred in it", () => {

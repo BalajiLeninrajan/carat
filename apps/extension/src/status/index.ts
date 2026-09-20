@@ -3,6 +3,12 @@ import { STATUS_CSS } from './styles';
 
 export interface StatusLine {
   update(info: StatusInfo): void;
+  /**
+   * Say one thing for `ms`, then go back to whatever the settings allow. This
+   * is the only way the pill speaks while it is switched off, so it is for
+   * news the page cannot otherwise get: carat has stopped, and why.
+   */
+  notice(text: string, ms: number): void;
   /** A suggestion request is in flight; the dot pulses until `setBusy(false)`. */
   setBusy(busy: boolean): void;
   /** Milliseconds left of a Shift+Tab snooze, or null when carat is not in one. */
@@ -20,6 +26,9 @@ const REASON_TEXT: Record<NonNullable<StatusInfo['reason']>, string> = {
   'not-http': 'off here',
   paused: 'paused (debugger banner dismissed)',
 };
+
+/** What a paused tab says once, out loud, even when the pill is switched off. */
+export const PAUSED_NOTICE = 'carat · paused, click the icon to resume';
 
 /**
  * A small pill in the bottom-left corner, clear of the tab-offer banner at the bottom centre.
@@ -49,6 +58,8 @@ export function createStatusLine(doc: Document = document): StatusLine {
   let busy = false;
   let quiet: number | null = null;
   let info: StatusInfo | null = null;
+  let notice: string | null = null;
+  let noticeTimer: ReturnType<typeof setTimeout> | undefined;
 
   const mount = (): void => {
     if (host.isConnected) return;
@@ -60,7 +71,7 @@ export function createStatusLine(doc: Document = document): StatusLine {
   };
 
   const render = (): void => {
-    if (!info || !info.show) {
+    if (notice === null && (!info || !info.show)) {
       host.style.display = 'none';
       visible = false;
       return;
@@ -72,15 +83,25 @@ export function createStatusLine(doc: Document = document): StatusLine {
     }
     host.style.display = 'block';
     visible = true;
-    pill.classList.toggle('is-running', info.running);
-    pill.classList.toggle('is-busy', busy && info.running && quiet === null);
-    pill.classList.toggle('is-quiet', quiet !== null && info.running);
-    text.textContent = statusText(info, busy, quiet);
+    const running = notice === null && info !== null && info.running;
+    pill.classList.toggle('is-running', running);
+    pill.classList.toggle('is-busy', busy && running && quiet === null);
+    pill.classList.toggle('is-quiet', quiet !== null && running);
+    text.textContent = notice ?? (info ? statusText(info, busy, quiet) : '');
   };
 
   return {
     update(next) {
       info = next;
+      render();
+    },
+    notice(next, ms) {
+      notice = next;
+      clearTimeout(noticeTimer);
+      noticeTimer = setTimeout(() => {
+        notice = null;
+        render();
+      }, ms);
       render();
     },
     setBusy(next) {
@@ -92,6 +113,7 @@ export function createStatusLine(doc: Document = document): StatusLine {
       render();
     },
     destroy() {
+      clearTimeout(noticeTimer);
       host.remove();
       visible = false;
     },
