@@ -20,11 +20,12 @@ import type { ActionKind } from "../shared/protocol";
  * marks on a control need the accent at several opacities.
  */
 export const RING = {
-  accent: "#89b4fa",
-  accentRgb: "137, 180, 250",
+  // Mauve, the design system's accent, so the ring reads as part of carat rather than a browser focus ring.
+  accent: "#cba6f7",
+  accentRgb: "203, 166, 247",
   armed: "#f9e2af",
   armedRgb: "249, 226, 175",
-  widthPx: 2,
+  widthPx: 3,
   radiusPx: 7,
   padPx: 3,
 } as const;
