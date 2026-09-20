@@ -170,6 +170,43 @@ describe('the one-chip scheduler', () => {
     chip.destroy();
   });
 
+  it('shows a refused answer as a hint that takes no Tab', async () => {
+    document.body.innerHTML = '<main><input aria-label="Title"><button>Save</button></main>';
+    layAll();
+    const pageTab = vi.fn();
+    document.addEventListener('keydown', pageTab);
+    answer(
+      action({
+        kind: 'none',
+        target: null,
+        label: 'Carat wanted: Fill From with "Toronto"',
+        reason: 'carat could not carry that out: no such control on the page',
+        confidence: 0,
+        hint: true,
+      }),
+    );
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames });
+    await firstAsk();
+
+    expect(chip.visible).toBe(true);
+    expect(chip.text).toBe('Carat wanted: Fill From with "Toronto"');
+    expect(chip.classes).toContain('is-hint');
+
+    // Tab reaches the page: the hint is not offering anything to accept.
+    tab();
+    await tick(0);
+    expect(pageTab.mock.calls.some(([e]) => !(e as KeyboardEvent).defaultPrevented)).toBe(true);
+    expect(chip.visible).toBe(true);
+
+    // Esc is the one key it answers to.
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await tick(0);
+    expect(chip.visible).toBe(false);
+    document.removeEventListener('keydown', pageTab);
+    chip.destroy();
+  });
+
   it('sends an open through the background, which rebuilds the URL', async () => {
     document.body.innerHTML = '<main><button>Save</button></main>';
     layAll();

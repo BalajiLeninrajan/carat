@@ -4,7 +4,7 @@ import { DEFAULT_SETTINGS } from '@carat/shared';
 import type { NextOptions, Provider } from '@carat/providers';
 import { RefineQueue } from '../src/background/refine';
 import type { SuggestDiag } from '../src/background/diag';
-import { clearActionCache, nextAction, nudgeLine, pick, validate } from '../src/background/orchestrate';
+import { clearActionCache, nextAction, nudgeLine, pick, unknownTargetLine, validate } from '../src/background/orchestrate';
 import { LAST_RESORT_CONFIDENCE, lastResort } from '../src/background/last-resort';
 import type { PageSnapshot } from '../src/messaging';
 
@@ -315,6 +315,23 @@ describe('never silent at eager', () => {
 
   it('carries the validator’s own words into the re-ask', async () => {
     const seen: NextActionRequest[] = [];
+    const underFloor: Provider = {
+      id: 'openai',
+      next: async (req) => {
+        seen.push(req);
+        return seen.length === 1 ? action({ confidence: 0.1 }) : action();
+      },
+    };
+    await nextAction(snapshot(), { tabId: 1, origin: 'x' }, {
+      settings: async () => settings(),
+      localProvider: nothing,
+      createProvider: () => underFloor,
+    });
+    expect(seen[1]?.history.at(-1)).toBe(nudgeLine('under the floor'));
+  });
+
+  it('names the number when the model targets a control the page never described', async () => {
+    const seen: NextActionRequest[] = [];
     const offPage: Provider = {
       id: 'openai',
       next: async (req) => {
@@ -322,12 +339,80 @@ describe('never silent at eager', () => {
         return seen.length === 1 ? action({ target: 99 }) : action();
       },
     };
-    await nextAction(snapshot(), { tabId: 1, origin: 'x' }, {
+    const diags: SuggestDiag[] = [];
+    const res = await nextAction(snapshot(), { tabId: 1, origin: 'x' }, {
       settings: async () => settings(),
       localProvider: nothing,
       createProvider: () => offPage,
+      onDiag: (d) => diags.push(d),
     });
-    expect(seen[1]?.history.at(-1)).toBe(nudgeLine('no such control on the page'));
+    expect(seen[1]?.history.at(-1)).toBe(unknownTargetLine(99));
+    // The second answer was usable, so the failure cost one extra call and
+    // nothing else: a chip went up, and the diag says why it was asked twice.
+    expect(res.action?.label).toBe('Click "Directions"');
+    expect(diags.at(-1)?.reasked).toBe('no such control on the page');
+    expect(diags.at(-1)?.silent).toBeUndefined();
+  });
+
+  it('shows what the model wanted as a hint, never as a scroll, when the target is not on the list', async () => {
+    const diags: SuggestDiag[] = [];
+    const offPage: Provider = {
+      id: 'openai',
+      next: async () => action({ target: 99, label: 'Fill From with "Toronto"' }),
+    };
+    // There is a viewport below, so the stand-in would have answered `scroll`.
+    const res = await nextAction(scrollable(), { tabId: 1, origin: 'x' }, {
+      settings: async () => settings(),
+      localProvider: nothing,
+      createProvider: () => offPage,
+      onDiag: (d) => diags.push(d),
+    });
+    expect(res.action).toMatchObject({ kind: 'none', hint: true, label: 'Carat wanted: Fill From with "Toronto"' });
+    expect(res.action?.target).toBeNull();
+    expect(diags.at(-1)?.source).toBe('hint');
+    expect(diags.at(-1)?.silent).toBe('target not described: 99');
+  });
+
+  it('still stands the page’s plainest step in when the model itself said nothing', async () => {
+    const diags: SuggestDiag[] = [];
+    const res = await nextAction(scrollable(), { tabId: 1, origin: 'x' }, {
+      settings: async () => settings(),
+      localProvider: nothing,
+      createProvider: () => ({ id: 'openai', next: async () => action({ kind: 'none', target: null, label: '', confidence: 0 }) }),
+      onDiag: (d) => diags.push(d),
+    });
+    expect(res.action?.kind).toBe('scroll');
+    expect(diags.at(-1)?.source).toBe('fallback');
+  });
+
+  it('stands the page’s plainest step in when the provider errored', async () => {
+    const res = await nextAction(scrollable(), { tabId: 1, origin: 'x' }, {
+      settings: async () => settings(),
+      localProvider: nothing,
+      createProvider: () => ({
+        id: 'openai',
+        next: async () => {
+          throw new Error('timeout');
+        },
+      }),
+    });
+    expect(res.action?.kind).toBe('scroll');
+  });
+
+  it('shows a refusal that is not about the target as a hint too', async () => {
+    const diags: SuggestDiag[] = [];
+    const disabled = snapshot({
+      page: { ...snapshot().page, scroll: { y: 0.4, pages: 3, more: true } },
+      controls: [...CONTROLS, { n: 4, role: 'button', name: 'Continue', state: 'disabled' }],
+    });
+    const res = await nextAction(disabled, { tabId: 1, origin: 'x' }, {
+      settings: async () => settings(),
+      localProvider: nothing,
+      createProvider: () => ({ id: 'openai', next: async () => action({ target: 4, label: 'Click "Continue"' }) }),
+      onDiag: (d) => diags.push(d),
+    });
+    expect(res.action).toMatchObject({ hint: true, label: 'Carat wanted: Click "Continue"' });
+    expect(diags.at(-1)?.silent).toBe('the answer was refused: the control is disabled');
   });
 
   it('scrolls rather than say nothing when both tries come back empty', async () => {

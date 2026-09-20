@@ -195,6 +195,18 @@ kbd.is-bump { animation: carat-bump var(--carat-bump-ms) ease-out; }
 .chip.is-armed .value { color: #1e1e2e; }
 .chip.is-armed .sub { color: #4c4f69; }
 .chip.is-armed kbd { background: #1e1e2e; color: var(--carat-amber); border-color: #1e1e2e; }
+/* A hint: not an offer, so it is grey, flat and offers no cursor. It says what
+   carat wanted and could not do, and Esc is the only thing it answers to. */
+.chip.is-hint {
+  background: #313244;
+  color: #9399b2;
+  box-shadow: 0 4px 12px rgba(17, 17, 27, 0.25), 0 0 0 1px rgba(205, 214, 244, 0.06);
+  cursor: default;
+  padding-right: 12px;
+}
+.chip.is-hint:hover { background: #313244; }
+.chip.is-hint .value { color: #9399b2; }
+.chip.is-hint .sub { color: #7f849c; }
 /* The one thing allowed to loop besides the waiting dot: an armed chip breathes until the second Tab. */
 .chip.is-armed.is-breathing { animation: carat-breathe var(--carat-breathe-ms) ease-in-out infinite; }
 @keyframes carat-breathe {

@@ -48,6 +48,7 @@ const ORIGIN: Record<AnswerOrigin, string> = {
   placeholder: 'the offline placeholder answered first',
   model: 'the model answered',
   fallback: 'nobody answered, so the page’s plainest step stood in',
+  hint: 'the model answered and carat could not carry it out, so the chip says what it wanted',
 };
 
 /**

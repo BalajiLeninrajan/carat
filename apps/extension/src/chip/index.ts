@@ -63,6 +63,13 @@ interface ChipText extends ChipCallbacks {
    * quieter than a first offer, not louder.
    */
   retry?: boolean;
+  /**
+   * Not an offer. The model answered, carat could not carry the answer out,
+   * and this says what it wanted: greyed, no keycap, and Tab belongs to the
+   * page. Esc is the only thing it answers to. A failure carat can see is
+   * worth more to the user than a plainer step they never asked for.
+   */
+  hint?: boolean;
 }
 
 export interface ChipShowOptions extends ChipText {
@@ -161,6 +168,8 @@ interface SessionBase extends ChipCallbacks {
   kind: ChipKind | null;
   /** A second try after a refusal: same entrance, no glow. */
   retry: boolean;
+  /** Says what carat could not do; it takes no key but Esc. */
+  hint: boolean;
   /** The window of a same-origin child frame the target lives in; its keys never reach the top window. */
   targetWin: Window | null;
 }
@@ -260,8 +269,11 @@ export function createChip(doc: Document = document): Chip {
       return;
     }
     const bare = !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey;
-    // A banner has no control of its own to defer to; Tab is its whole interface.
-    const deferred = session.target !== null && !shouldInterceptTab(deepActiveElement(doc), session.target, session.interceptFrom);
+    // A banner has no control of its own to defer to; Tab is its whole
+    // interface. A hint is the other way round: it offers nothing, so Tab is
+    // never taken from the page.
+    const deferred =
+      session.hint || (session.target !== null && !shouldInterceptTab(deepActiveElement(doc), session.target, session.interceptFrom));
     if (e.key === 'Tab' && bare && !deferred) {
       e.preventDefault();
       e.stopImmediatePropagation();
@@ -529,7 +541,7 @@ export function createChip(doc: Document = document): Chip {
   function endExit(): void {
     if (exitTimer !== undefined) clearTimeout(exitTimer);
     exitTimer = undefined;
-    pill.classList.remove('is-leaving', 'exit-collapse', 'exit-sweep', 'exit-shrink', 'exit-soft', 'is-armed');
+    pill.classList.remove('is-leaving', 'exit-collapse', 'exit-sweep', 'exit-shrink', 'exit-soft', 'is-armed', 'is-hint');
     host.style.display = 'none';
   }
 
@@ -561,6 +573,11 @@ export function createChip(doc: Document = document): Chip {
     reason = opts.reason ?? '';
     setPending(opts.pending === true);
     key.textContent = 'Tab';
+    // Nothing to press, so no keycap and no pill that looks pressable.
+    const hint = opts.hint === true;
+    key.hidden = hint;
+    pill.classList.toggle('is-hint', hint);
+    pill.setAttribute('role', hint ? 'status' : 'button');
     label.classList.remove('is-fresh');
     if (!host.isConnected) doc.documentElement.appendChild(host);
     // Capture phase so the page's own Tab handlers never see an accepted Tab.
@@ -585,6 +602,7 @@ export function createChip(doc: Document = document): Chip {
       label: opts.label,
       kind: opts.kind ?? null,
       retry: opts.retry === true,
+      hint: opts.hint === true,
       targetWin: null,
       shownAt: Date.now(),
       timer: setTimeout(() => dismiss('timeout'), AUTO_DISMISS_MS),
@@ -784,6 +802,8 @@ export function createChip(doc: Document = document): Chip {
   function accept(): void {
     const s = session;
     if (!s) return;
+    // There is nothing behind a hint to accept.
+    if (s.hint) return;
     // Anything that cannot be undone takes a second Tab, and says so in between.
     if (s.irreversible && !armed) {
       arm();

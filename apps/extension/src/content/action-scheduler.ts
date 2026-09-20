@@ -416,6 +416,10 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     // it was offered from, not the one the page has moved on to.
     const key = actionKey(action, win, doc);
     if (done.has(key) || dismissed.has(key)) return;
+    if (action.hint) {
+      presentHint(action, key);
+      return;
+    }
     const target = action.target === null ? undefined : registry.get(action.target);
     if (['fill', 'click', 'select'].includes(action.kind) && !target?.el.isConnected) return;
     // Something is going up; whatever silence came before it is over.
@@ -455,6 +459,28 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     } else {
       chip.showBanner({ ...shared, ...(el ? { target: el } : {}) });
     }
+  }
+
+  /**
+   * The model answered and the service worker could not carry the answer out.
+   * What it wanted goes up as a greyed banner that takes no Tab and offers
+   * nothing: a failure the user can see, rather than a step carat invented to
+   * cover one. Esc puts it away and starts the usual retry, so the page is
+   * asked again with the dismissal behind it.
+   */
+  function presentHint(action: NextAction, key: string): void {
+    silentAsks = 0;
+    chip.showBanner({
+      label: action.label,
+      reason: action.reason,
+      kind: 'none',
+      hint: true,
+      pending: false,
+      irreversible: false,
+      // There is nothing to accept; the chip never calls this.
+      onAccept: () => undefined,
+      onDismiss: (why: string) => onDismiss(why, action, undefined, key),
+    });
   }
 
   /**
@@ -795,6 +821,9 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
  */
 function actionKey(action: NextAction, win: Window, doc: Document): string {
   if (action.kind === 'scroll') return `scroll|${viewportsOf(win, doc).y}`;
+  // A hint carries no target and no value, so what makes one hint different
+  // from the next is the thing the model asked for.
+  if (action.hint) return `hint|${action.label}`;
   return `${action.kind}|${action.target ?? ''}|${action.value}`;
 }
 

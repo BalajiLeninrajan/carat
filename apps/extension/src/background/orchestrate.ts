@@ -4,6 +4,7 @@ import {
   INTENT_REGISTRY,
   LIMITS,
   fnv1a,
+  hintLabel,
   isIntentDestination,
   isIrreversibleLabel,
   normalizeWhitespace,
@@ -156,28 +157,25 @@ export async function nextAction(input: PageSnapshot, requester: Requester, deps
   // With no ticket there is nowhere to put a later answer, so the reply waits for the model itself.
   const keepRaw = watching ? (text: string) => (raw = text) : undefined;
   if (!deps.refine) {
-    const model = checked(
-      'model',
-      await answer(
-        provider,
-        req,
-        deps,
-        () => {
-          diag.partialMs ??= now() - started;
-        },
-        keepRaw,
-      ),
+    // The model's own answer, before the validator had an opinion about it.
+    // What it said is what a refusal has to show, so it is kept rather than
+    // collapsed into the null `checked` returns.
+    const said = await answer(
+      provider,
       req,
-      settings,
-      diag,
-      validations,
+      deps,
+      () => {
+        diag.partialMs ??= now() - started;
+      },
+      keepRaw,
     );
+    const model = checked('model', said, req, settings, diag, validations);
     diag.finalMs = now() - started;
     const first = pick(placeholder, model);
     diag.source = first === placeholder && placeholder !== null ? 'placeholder' : 'model';
     if (provider instanceof RaceProvider) diag.attempts = [...provider.attempts];
     // Eager owes the user a chip: nothing here is an answer, it is a reason to ask again.
-    const chosen = enrich(await insist(first, provider, req, settings, deps, diag, validations), req);
+    const chosen = enrich(await insist(first, said, provider, req, settings, deps, diag, validations), req);
     diag.ms = now() - started;
     void cache.set(key, { at: started, action: chosen });
     report(diag, chosen);
@@ -197,33 +195,27 @@ export async function nextAction(input: PageSnapshot, requester: Requester, deps
   void (async () => {
     let settled: NextAction | null = placeholder;
     try {
-      const model = checked(
-        'model',
-        await answer(
-          provider,
-          req,
-          deps,
-          (target) => {
-            // The ring moves to the control the model named before it has finished naming what to do there.
-            diag.partialMs ??= now() - started;
-            if (req.controls.some((c) => c.n === target)) ticket.push({ target });
-          },
-          keepRaw,
-        ),
+      const said = await answer(
+        provider,
         req,
-        settings,
-        diag,
-        validations,
+        deps,
+        (target) => {
+          // The ring moves to the control the model named before it has finished naming what to do there.
+          diag.partialMs ??= now() - started;
+          if (req.controls.some((c) => c.n === target)) ticket.push({ target });
+        },
+        keepRaw,
       );
+      const model = checked('model', said, req, settings, diag, validations);
       diag.finalMs = now() - started;
       if (provider instanceof RaceProvider) diag.attempts = [...provider.attempts];
       // Eager owes the user a chip: nothing here is a reason to ask again, not an answer.
-      const chosen = enrich(await insist(pick(placeholder, model), provider, req, settings, deps, diag, validations), req);
+      const chosen = enrich(await insist(pick(placeholder, model), said, provider, req, settings, deps, diag, validations), req);
       settled = chosen;
       void cache.set(key, { at: now(), action: chosen });
       if (chosen !== placeholder) {
         diag.replaced = true;
-        if (diag.source !== 'fallback') diag.source = 'model';
+        if (diag.source !== 'fallback' && diag.source !== 'hint') diag.source = 'model';
         report(diag, chosen);
         ticket.push({ action: chosen });
       }
@@ -308,6 +300,18 @@ export function nudgeLine(why: string): string {
 }
 
 /**
+ * The line the re-ask puts in the timeline when the model named a control the
+ * outline never described. It says which number and where the numbers come
+ * from, so the second answer is picked off the list rather than invented
+ * again. A number the page did not describe is the outline's failure as much
+ * as the model's: the control may well be there and simply not have reached
+ * the request.
+ */
+export function unknownTargetLine(n: number): string {
+  return `carat: control ${n} is not on this page's list; choose from the numbered controls`;
+}
+
+/**
  * Why a request that never reached a provider ended with no chip, in plain
  * words. The same wording the popup's gate line uses, so the two never
  * disagree in front of the user.
@@ -325,12 +329,24 @@ const SILENT_GATE: Record<Exclude<GateVerdict, 'ok'>, string> = {
  * `none`, an answer the validator refused, one under the floor, a provider
  * that failed or timed out, a race in which everything came back empty — is
  * put back to the model once, with the reason written into the timeline it
- * reads. If that answers nothing too, the plainest step the page itself
- * offers stands in. At the quieter levels nothing is nothing, and this
- * returns it unchanged.
+ * reads. At the quieter levels nothing is nothing, and this returns it
+ * unchanged.
+ *
+ * What happens when the second answer is no good either depends on whether
+ * the model said anything at all:
+ *
+ * - It said nothing, twice: the plainest step the page itself offers stands
+ *   in. That is what the stand-in is for.
+ * - It answered and carat refused the answer: the refusal is shown as a
+ *   refusal. The model's own label goes up as a greyed line the user can only
+ *   dismiss. Standing something else in here is how a model asking to fill
+ *   the origin station on a booking form came out as "Scroll down", which
+ *   reads as carat's judgement of the page rather than as carat failing to
+ *   describe it.
  */
 async function insist(
   chosen: NextAction | null,
+  said: NextAction | null,
   provider: Provider,
   req: NextActionRequest,
   settings: Settings,
@@ -340,14 +356,39 @@ async function insist(
 ): Promise<NextAction | null> {
   if (chosen || settings.eagerness !== 'eager') return chosen;
   const why = diag.refused ?? 'none';
+  // A number the outline never described is worth naming on its own: it is
+  // the one refusal that says the page was described badly, not answered badly.
+  const unknown = unknownTarget(said, req);
+  if (unknown !== null) diag.silent = `target not described: ${unknown}`;
   diag.reasked = why;
   delete diag.refused;
   lines?.push(`asked again after "${why}"`);
-  const again: NextActionRequest = { ...req, history: [...req.history, nudgeLine(why)] };
-  const second = checked('second ask', await answer(provider, again, deps), again, settings, diag, lines);
+  const nudge = unknown !== null ? unknownTargetLine(unknown) : nudgeLine(why);
+  const again: NextActionRequest = { ...req, history: [...req.history, nudge] };
+  const saidAgain = await answer(provider, again, deps);
+  const second = checked('second ask', saidAgain, again, settings, diag, lines);
   // A race keeps only its latest run's attempts, and this was a run of its own.
   if (provider instanceof RaceProvider) diag.attempts = [...(diag.attempts ?? []), ...provider.attempts];
   if (second) return second;
+
+  const refused = refusedLabel(said) ?? refusedLabel(saidAgain);
+  if (refused) {
+    diag.source = 'hint';
+    diag.silent ??= `the answer was refused: ${diag.refused ?? why}`;
+    lines?.push(`shown as a hint: ${refused}`);
+    delete diag.refused;
+    return {
+      kind: 'none',
+      target: null,
+      value: '',
+      label: hintLabel(refused),
+      irreversible: false,
+      confidence: 0,
+      reason: `carat could not carry that out: ${why}`,
+      hint: true,
+    };
+  }
+
   const fallback = checked('the page’s plainest step', lastResort(req), req, settings, diag, lines);
   if (fallback) {
     diag.source = 'fallback';
@@ -356,8 +397,32 @@ async function insist(
   return fallback;
 }
 
+/** The control the model named, when the page never described one by that number. */
+function unknownTarget(action: NextAction | null, req: NextActionRequest): number | null {
+  if (!action || action.target === null) return null;
+  if (!['fill', 'click', 'select'].includes(action.kind)) return null;
+  return req.controls.some((c) => c.n === action.target) ? null : action.target;
+}
+
+/**
+ * What the model asked for, worded for the hint chip. Its own label when it
+ * wrote one; otherwise the action itself, so a refusal is still visible when
+ * the reply came back without words.
+ */
+function refusedLabel(action: NextAction | null): string | undefined {
+  if (!action || action.kind === 'none') return undefined;
+  const label = normalizeWhitespace(action.label);
+  if (label) return truncate(label, SOURCE_CHARS);
+  const target = action.target === null ? '' : ` control ${action.target}`;
+  const value = action.value ? ` "${normalizeWhitespace(action.value)}"` : '';
+  return truncate(`${action.kind}${target}${value}`, SOURCE_CHARS);
+}
+
 /** Records why there is no chip, and clears the note when there is one. */
 function sayWhySilent(diag: SuggestDiag, action: NextAction | null): void {
+  // A hint is not an offer: it is the refusal made visible, and the reason
+  // for it was written where it happened. Leave it standing.
+  if (action?.hint) return;
   if (action) {
     delete diag.silent;
     return;

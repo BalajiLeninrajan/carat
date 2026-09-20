@@ -51,8 +51,12 @@ export interface CaptureDiag {
   verdict: CaptureVerdict;
 }
 
-/** Where the action the chip showed first came from. */
-export type AnswerOrigin = 'cache' | 'placeholder' | 'model' | 'fallback';
+/**
+ * Where the action the chip showed first came from. `hint` is the one that is
+ * not an offer: the model answered, carat could not carry the answer out, and
+ * the chip says so instead of standing something else in.
+ */
+export type AnswerOrigin = 'cache' | 'placeholder' | 'model' | 'fallback' | 'hint';
 
 export interface SuggestDiag {
   at: number;
