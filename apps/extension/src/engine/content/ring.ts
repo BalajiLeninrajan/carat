@@ -9,23 +9,107 @@
 
 import type { ActionKind } from "../shared/protocol";
 
+/**
+ * The one description of the ring: its colour, width, radius and how far
+ * outside the control it sits. The chip is drawn against the same record, so
+ * there is a single accent in the extension and the ring, the control and the
+ * pill read as one mark rather than three.
+ *
+ * The geometry is the prototype's. The colours are carat's own, which is why
+ * the rgb triples are here too: CSS cannot take a hex colour apart, and the
+ * marks on a control need the accent at several opacities.
+ */
+export const RING = {
+  // Mauve, the design system's accent, so the ring reads as part of carat
+  // rather than a browser focus ring. These are the dark-page values (Mocha);
+  // a light page gets the same hues from Latte, which hold up on white.
+  accent: "#cba6f7",
+  accentRgb: "203, 166, 247",
+  /** The armed pill and its keycap: a warning, not an alarm. */
+  armed: "#f9e2af",
+  armedRgb: "249, 226, 175",
+  /** The ring alone goes red when a chip is armed: the control is about to do
+      something that cannot be undone, and the mark on it should say so
+      louder than the pill beside it. */
+  alarm: "#f38ba8",
+  alarmRgb: "243, 139, 168",
+  onLight: {
+    accent: "#8839ef",
+    accentRgb: "136, 57, 239",
+    armed: "#df8e1d",
+    armedRgb: "223, 142, 29",
+    alarm: "#d20f39",
+    alarmRgb: "210, 15, 57",
+  },
+  widthPx: 3,
+  radiusPx: 7,
+  padPx: 3,
+} as const;
+
+export type Tone = "dark" | "light";
+
+const RGB = /rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)(?:[\s,/]+([\d.]+%?))?\s*\)/;
+
+/** The relative brightness of a CSS colour, 0 to 1, or null when it is transparent or unreadable. */
+function brightness(color: string): number | null {
+  const m = RGB.exec(color);
+  if (!m) return null;
+  if (m[4] !== undefined) {
+    const a = m[4].endsWith("%") ? parseFloat(m[4]) / 100 : parseFloat(m[4]);
+    if (a < 0.5) return null;
+  }
+  const r = Number(m[1]), g = Number(m[2]), b = Number(m[3]);
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+}
+
+/**
+ * Whether the page behind a control is dark or light: the first ancestor
+ * that paints a background decides. A page that paints nothing is white,
+ * unless it has asked for a dark colour scheme.
+ */
+export function toneBehind(el: Element): Tone {
+  const doc = el.ownerDocument;
+  const view = doc.defaultView;
+  if (!view) return "light";
+  for (let node: Element | null = el; node; node = node.parentElement) {
+    let bg = "";
+    try {
+      bg = view.getComputedStyle(node).backgroundColor;
+    } catch {
+      break;
+    }
+    const y = brightness(bg);
+    if (y !== null) return y < 0.5 ? "dark" : "light";
+  }
+  for (const node of [doc.body, doc.documentElement]) {
+    if (!node) continue;
+    let scheme = "";
+    try {
+      scheme = view.getComputedStyle(node).colorScheme ?? "";
+    } catch {
+      break;
+    }
+    if (scheme.includes("dark") && !scheme.includes("light")) return "dark";
+  }
+  return "light";
+}
+
 const CSS = `
   :host { all: initial; }
   .ring {
-    position: fixed; box-sizing: border-box; border-radius: 7px; pointer-events: none;
-    border: 2px solid #7c3aed; box-shadow: 0 0 0 4px rgba(124, 58, 237, .18);
-    transition: opacity .12s, border-color .12s, box-shadow .12s;
+    position: fixed; box-sizing: border-box; border-radius: ${RING.radiusPx}px; pointer-events: none;
+    border: ${RING.widthPx}px solid ${RING.accent}; box-shadow: 0 0 0 4px rgba(${RING.accentRgb}, .18);
   }
+  .ring.on-light { border-color: ${RING.onLight.accent}; box-shadow: 0 0 0 4px rgba(${RING.onLight.accentRgb}, .16); }
   .ring.pending { border-style: dashed; opacity: .55; box-shadow: none; }
-  .ring.armed { border-color: #d97706; box-shadow: 0 0 0 4px rgba(217, 119, 6, .25); }
+  .ring.armed { border-color: ${RING.alarm}; box-shadow: 0 0 0 4px rgba(${RING.alarmRgb}, .25); }
+  .ring.on-light.armed { border-color: ${RING.onLight.alarm}; box-shadow: 0 0 0 4px rgba(${RING.onLight.alarmRgb}, .22); }
   .chip {
     position: fixed; display: flex; align-items: center; gap: 6px; white-space: nowrap;
-    font: 600 12px/1 system-ui, -apple-system, "Segoe UI", sans-serif; color: #fff;
-    background: #7c3aed; padding: 5px 8px 5px 5px; border-radius: 6px;
+    font: 600 12px/1 system-ui, -apple-system, "Segoe UI", sans-serif; color: #cdd6f4;
+    background: #1e1e2e; padding: 5px 8px 5px 5px; border-radius: 6px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, .25); pointer-events: none; max-width: 320px;
-    transition: background .12s;
   }
-  .chip.armed { background: #d97706; }
   .chip.error { background: #b91c1c; }
   .chip span.label { overflow: hidden; text-overflow: ellipsis; }
   kbd {
@@ -52,7 +136,11 @@ export class Ring {
   private frame = 0;
   private action: RingAction | null = null;
   private armed = false;
+  /** Dark or light, read off the page behind the target when the ring goes on. */
+  private tone: Tone = "dark";
   private message: string | null = null;
+  /** The action has landed, even though another surface is the one saying what it is. */
+  private settled = false;
 
   /** The host element, so the page MutationObserver can ignore it. */
   get element(): HTMLElement | null {
@@ -89,8 +177,10 @@ export class Ring {
     this.mount();
     this.floating = false;
     this.target = target;
+    this.tone = toneBehind(target);
     this.action = null;
     this.armed = false;
+    this.settled = false;
     this.message = null;
     this.render();
     this.ring.hidden = false;
@@ -104,6 +194,15 @@ export class Ring {
 
   setAction(action: RingAction): void {
     this.action = action;
+    this.render();
+  }
+
+  /**
+   * The ring stops looking provisional without taking an action of its own:
+   * the chip is up and saying what the action is, so the ring only rings.
+   */
+  solid(): void {
+    this.settled = true;
     this.render();
   }
 
@@ -123,9 +222,15 @@ export class Ring {
     this.target = null;
     this.floating = false;
     this.action = null;
+    this.settled = false;
     if (!this.host) return;
     this.ring.hidden = true;
     this.chip.hidden = true;
+  }
+
+  /** Which palette the ring is drawn in; the shadow root is closed, so tests read it here. */
+  get toneShown(): Tone {
+    return this.tone;
   }
 
   get visible(): boolean {
@@ -141,7 +246,8 @@ export class Ring {
 
   private render(): void {
     if (!this.host) return;
-    this.ring.className = "ring" + (this.action ? "" : " pending") + (this.armed ? " armed" : "");
+    this.ring.className =
+      "ring" + (this.tone === "light" ? " on-light" : "") + (this.action || this.settled ? "" : " pending") + (this.armed ? " armed" : "");
     this.chip.className = "chip" + (this.armed ? " armed" : "") + (this.message ? " error" : "");
     const a = this.action;
     if (!a && !this.message) {
@@ -183,7 +289,7 @@ export class Ring {
       return;
     }
     const r = t.getBoundingClientRect();
-    const pad = 3;
+    const pad = RING.padPx;
     Object.assign(this.ring.style, {
       left: `${r.left - pad}px`,
       top: `${r.top - pad}px`,
@@ -198,7 +304,8 @@ export class Ring {
     const chipW = this.chip.offsetWidth || 120;
     let top = r.top - pad - chipH - 6;
     if (top < 4) top = r.bottom + pad + 6;
-    let left = Math.min(Math.max(4, r.left - pad), innerWidth - chipW - 4);
+    // Centred on the control, like the chip, so ring, control and hint line up.
+    let left = Math.max(4, Math.min(r.left + r.width / 2 - chipW / 2, innerWidth - chipW - 4));
     let arrow = "";
     if (r.bottom < 0) {
       top = 8;

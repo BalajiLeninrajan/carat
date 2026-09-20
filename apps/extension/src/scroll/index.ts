@@ -8,7 +8,7 @@ export const SCROLL_MAX_MS = 1000;
 export const INSTANT_SCROLL_CAP_MS = 50;
 
 export interface ScrollOptions {
-  /** Jump rather than glide: a repeated Tab, where the glide is the whole wait. */
+  /** Jump rather than glide: a repeated tap, where the glide is the whole wait. */
   instant?: boolean;
 }
 
@@ -56,7 +56,7 @@ function release(): void {
  * events stop, then held for one more settle window for the frames still
  * landing. A jump fires one event on the next frame and is over: the mark
  * comes off as soon as that event has been heard, or after a short cap when
- * the page had nowhere to go, so a repeated Tab is not made to wait out a
+ * the page had nowhere to go, so a repeated tap is not made to wait out a
  * settle that has nothing to settle.
  */
 function own(win: Window, start: () => void, instant = false): Promise<void> {
@@ -122,7 +122,7 @@ export function inViewport(el: Element, win: Window): boolean {
 /**
  * Bring one element to the middle of the viewport and resolve once the page
  * has stopped moving: smoothly, or at once under prefers-reduced-motion.
- * Called only from a Tab on the scroll banner. Nothing else on the page is
+ * Called only from an accepted scroll banner. Nothing else on the page is
  * touched; focus stays where it was.
  */
 export function scrollToTarget(el: Element, win: Window, opts: ScrollOptions = {}): Promise<void> {
@@ -140,7 +140,7 @@ export function scrollToTarget(el: Element, win: Window, opts: ScrollOptions = {
 
 /**
  * Move the page one viewport down and resolve once it has stopped: the whole
- * of the `Scroll down? Tab` offer. Smooth, or instant under
+ * of the `Scroll down` offer. Smooth, or instant under
  * prefers-reduced-motion. Focus stays where it was and nothing is clicked.
  */
 export function scrollPageDown(win: Window, opts: ScrollOptions = {}): Promise<void> {

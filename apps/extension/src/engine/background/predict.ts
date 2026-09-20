@@ -14,7 +14,7 @@ import { partialAction, streamResponse } from "./llm";
 import type { Candidate, Outline } from "./outline";
 import { buildActionRequest, type ResponsesRequest } from "./prompts";
 
-/** Labels that mean "this cannot be undone": two Tabs, whatever the model says. */
+/** Labels that mean "this cannot be undone": two taps, whatever the model says. */
 const IRREVERSIBLE = /\b(send|submit|pay|purchase|buy|order|place|checkout|delete|remove|discard|publish|post|confirm|transfer|sign ?out|log ?out|unsubscribe|cancel (my )?(subscription|order|account))\b/i;
 
 interface Pending {

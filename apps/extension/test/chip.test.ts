@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
-import { ARM_MS, ATTENTION_AFTER_MS, AUTO_DISMISS_MS, CHIP_SETTLE_MS, CORNER_INSET_PX, PENDING_HINT, createChip, type Chip, type DismissReason } from '../src/chip';
-import { KEYFRAME_CLASSES, TIMING } from '../src/chip/styles';
+import { ARM_MS, AUTO_DISMISS_MS, CHIP_SETTLE_MS, CORNER_INSET_PX, PENDING_HINT, createChip, type Chip, type DismissReason } from '../src/chip';
+import { placeAt } from '../src/chip/position';
+import { ACCEPT_CODE, ACCEPT_GLYPH, ACCEPT_KEY_NAME } from '../src/chip/accept-key';
+import { CHIP_CSS, FX_CSS, KEYCAP, KEYCAP_CSS, KEYFRAME_CLASSES, LINE_PX, PILL, TIMING, TYPE } from '../src/chip/styles';
+import { RING, Ring } from '../src/engine/content/ring';
 
 /** jsdom has no Web Audio; this is enough of a context to count how many were built. */
 class FakeAudioContext {
@@ -41,22 +44,44 @@ function key(target: EventTarget, k: string, init: KeyboardEventInit = {}): Keyb
   return e;
 }
 
+/** Carat's key: the right Shift pressed and let go with nothing in between. */
+function tap(target: EventTarget, init: KeyboardEventInit = {}): KeyboardEvent {
+  const shape = { key: 'Shift', code: ACCEPT_CODE, location: 2, shiftKey: true, bubbles: true, cancelable: true, ...init };
+  target.dispatchEvent(new KeyboardEvent('keydown', shape));
+  const up = new KeyboardEvent('keyup', { ...shape, shiftKey: false });
+  target.dispatchEvent(up);
+  return up;
+}
+
+/** The right Shift held down while another key is pressed: a chord, not a tap. */
+function chord(target: EventTarget, k: string): KeyboardEvent {
+  target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', code: ACCEPT_CODE, location: 2, shiftKey: true, bubbles: true, cancelable: true }));
+  const inner = new KeyboardEvent('keydown', { key: k, shiftKey: true, bubbles: true, cancelable: true });
+  target.dispatchEvent(inner);
+  target.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', code: ACCEPT_CODE, location: 2, bubbles: true, cancelable: true }));
+  return inner;
+}
+
 function hosts(): NodeListOf<Element> {
   return document.querySelectorAll('[data-carat-chip]');
 }
 
-function rings(): NodeListOf<Element> {
-  return document.querySelectorAll('[data-carat-ring]');
+function ringHosts(): NodeListOf<Element> {
+  return document.querySelectorAll('carat-ring');
 }
 
 // jsdom reports zero-size rects; give the target a viewport position.
-function onScreen(el: Element): void {
+function onScreen(el: Element, top = 100, left = 20): void {
   el.getBoundingClientRect = () =>
-    ({ top: 100, left: 20, bottom: 130, right: 220, width: 200, height: 30 }) as DOMRect;
+    ({ top, left, bottom: top + 30, right: left + 200, width: 200, height: 30 }) as DOMRect;
 }
+
+/** One animation frame, which is how often the pill re-reads its control's box. */
+const FRAME_MS = 20;
 
 describe('chip', () => {
   let chip: Chip;
+  let ring: Ring;
   let target: HTMLInputElement;
   let other: HTMLInputElement;
   let onAccept: Mock<() => void>;
@@ -68,7 +93,8 @@ describe('chip', () => {
     other = document.createElement('input');
     onScreen(target);
     document.body.append(target, other);
-    chip = createChip();
+    ring = new Ring();
+    chip = createChip(document, ring);
     onAccept = vi.fn<() => void>();
     onDismiss = vi.fn<(reason: DismissReason) => void>();
   });
@@ -91,22 +117,58 @@ describe('chip', () => {
     expect(hosts()).toHaveLength(1);
   });
 
-  it('takes Tab from the target and acts once', () => {
+  it('takes a right Shift tap from the target and acts once', () => {
     show();
-    const e = key(target, 'Tab');
+    const e = tap(target);
     expect(e.defaultPrevented).toBe(true);
     expect(onAccept).toHaveBeenCalledTimes(1);
     expect(chip.visible).toBe(false);
-    key(target, 'Tab');
+    tap(target);
     expect(onAccept).toHaveBeenCalledTimes(1);
   });
 
-  it('lets Tab through when the user is in another text field', () => {
-    show();
+  it('takes the tap even when the user is in another text field', () => {
     other.focus();
-    const e = key(other, 'Tab');
+    show();
+    const e = tap(other);
+    expect(e.defaultPrevented).toBe(true);
+    expect(onAccept).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves Tab to the page, and takes the chip down with the focus it moves', () => {
+    show();
+    const e = key(target, 'Tab');
     expect(e.defaultPrevented).toBe(false);
     expect(onAccept).not.toHaveBeenCalled();
+    other.focus();
+    expect(chip.visible).toBe(false);
+  });
+
+  it('does not accept a right Shift held down as part of a chord', () => {
+    show();
+    // Shift+Tab is carat's too, so a chord the page owns makes the point better.
+    const e = chord(target, 'a');
+    expect(e.defaultPrevented).toBe(false);
+    expect(onAccept).not.toHaveBeenCalled();
+  });
+
+  it('acts once on a held key, not once per repeat', () => {
+    show();
+    const down = { key: 'Shift', code: ACCEPT_CODE, location: 2, shiftKey: true, bubbles: true, cancelable: true };
+    target.dispatchEvent(new KeyboardEvent('keydown', down));
+    target.dispatchEvent(new KeyboardEvent('keydown', { ...down, repeat: true }));
+    target.dispatchEvent(new KeyboardEvent('keydown', { ...down, repeat: true }));
+    expect(onAccept).not.toHaveBeenCalled();
+    target.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', code: ACCEPT_CODE, location: 2, bubbles: true, cancelable: true }));
+    expect(onAccept).toHaveBeenCalledTimes(1);
+  });
+
+  it('is not tapped by the left Shift', () => {
+    show();
+    target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', code: 'ShiftLeft', location: 1, shiftKey: true, bubbles: true }));
+    target.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', code: 'ShiftLeft', location: 1, bubbles: true }));
+    expect(onAccept).not.toHaveBeenCalled();
+    expect(chip.visible).toBe(true);
   });
 
   it('dismisses on Escape, on typing in the target, and on its own after the timeout', () => {
@@ -123,35 +185,46 @@ describe('chip', () => {
     expect(onDismiss).toHaveBeenCalledWith('timeout');
   });
 
+  it('asks for a quiet minute on Shift+Tab, and stands an armed chip down first', () => {
+    chip.show({ target, label: 'Click "Send reply"', irreversible: true, onAccept, onDismiss });
+    tap(target);
+    expect(chip.armed).toBe(true);
+    const e = key(target, 'Tab', { shiftKey: true });
+    expect(e.defaultPrevented).toBe(true);
+    expect(chip.armed).toBe(false);
+    expect(onAccept).not.toHaveBeenCalled();
+    expect(onDismiss).toHaveBeenCalledWith('snoozed');
+  });
+
   describe('an action that cannot be undone', () => {
     const showRisky = (): void =>
       chip.show({ target, label: 'Click "Send reply"', irreversible: true, onAccept, onDismiss });
 
     it('arms on the first Tab, says so, and acts on the second', () => {
       showRisky();
-      key(target, 'Tab');
+      tap(target);
       expect(onAccept).not.toHaveBeenCalled();
       expect(chip.armed).toBe(true);
-      expect(chip.text).toBe('Press Tab again to click "Send reply"');
-      key(target, 'Tab');
+      expect(chip.text).toBe('Press again to click "Send reply"');
+      tap(target);
       expect(onAccept).toHaveBeenCalledTimes(1);
       expect(chip.visible).toBe(false);
     });
 
     it('stands down after four seconds, so a later Tab only arms it again', () => {
       showRisky();
-      key(target, 'Tab');
+      tap(target);
       vi.advanceTimersByTime(ARM_MS);
       expect(chip.armed).toBe(false);
       expect(chip.text).toBe('Click "Send reply"');
-      key(target, 'Tab');
+      tap(target);
       expect(onAccept).not.toHaveBeenCalled();
       expect(chip.armed).toBe(true);
     });
 
     it('stands down on any other key', () => {
       showRisky();
-      key(target, 'Tab');
+      tap(target);
       expect(chip.armed).toBe(true);
       key(target, 'a');
       expect(chip.armed).toBe(false);
@@ -160,22 +233,97 @@ describe('chip', () => {
 
     it('still dismisses on Escape while armed', () => {
       showRisky();
-      key(target, 'Tab');
+      tap(target);
       key(target, 'Escape');
       expect(onDismiss).toHaveBeenCalledWith('escape');
       expect(onAccept).not.toHaveBeenCalled();
     });
   });
 
-  it('rings the control it is about, and rings one early with no chip on it yet', () => {
+  it('rings the control it is about, keeps the ring for the whole offer, and takes it with it', () => {
+    // The engine's ring, up the moment a target streams in, before there is
+    // anything to say about it.
     chip.ring(target);
-    expect(rings()).toHaveLength(1);
-    expect((rings()[0] as HTMLElement).style.display).toBe('block');
+    expect(ring.visible).toBe(true);
+    expect(ringHosts()).toHaveLength(1);
     expect(chip.visible).toBe(false);
+    // The offer lands on the same ring rather than a second one.
     show();
-    expect((rings()[0] as HTMLElement).style.display).toBe('block');
+    expect(ring.visible).toBe(true);
+    expect(ringHosts()).toHaveLength(1);
     chip.hide();
-    expect((rings()[0] as HTMLElement).style.display).toBe('none');
+    expect(ring.visible).toBe(false);
+  });
+
+  it('rings the target of every action that has one', () => {
+    chip.show({ target, label: 'Click "Pay"', kind: 'click', onAccept, onDismiss });
+    expect(ring.visible).toBe(true);
+    tap(target);
+    expect(ring.visible).toBe(false);
+  });
+
+  describe('where the pill sits', () => {
+    const box = (left: number, width: number): DOMRect =>
+      ({ top: 100, left, bottom: 130, right: left + width, width, height: 30 }) as DOMRect;
+
+    it('centres the pill on the control', () => {
+      // A 200px control at x=300 is centred on 400; a 300px pill starts at 250.
+      expect(placeAt(box(300, 200), 300, 40, 1000, 800).left).toBe(250);
+    });
+
+    it('clamps to the viewport at either edge, so the pill is never half off screen', () => {
+      expect(placeAt(box(0, 40), 300, 40, 1000, 800).left).toBe(8);
+      expect(placeAt(box(960, 40), 300, 40, 1000, 800).left).toBe(1000 - 300 - 8);
+    });
+
+    it('sits under the control, and above it when there is no room below', () => {
+      expect(placeAt(box(300, 200), 300, 40, 1000, 800).top).toBe(136);
+      const tight = { ...box(300, 200), top: 700, bottom: 730 } as DOMRect;
+      expect(placeAt(tight, 300, 40, 1000, 760).top).toBe(700 - 6 - 40);
+    });
+
+    it('is nowhere when the control has scrolled off any edge', () => {
+      expect(placeAt(box(-400, 200), 300, 40, 1000, 800).visible).toBe(false);
+      expect(placeAt(box(1200, 200), 300, 40, 1000, 800).visible).toBe(false);
+    });
+
+    it('puts the pill on the control it is about', () => {
+      show();
+      const host = hosts()[0] as HTMLElement;
+      // jsdom lays nothing out, so the pill measures zero wide: its left edge
+      // is its centre, and that is the control's centre.
+      expect(host.style.left).toBe('120px');
+      expect(host.style.top).toBe('136px');
+    });
+
+    it('follows its control when a container scrolls under it, within one frame', () => {
+      const scroller = document.createElement('div');
+      document.body.append(scroller);
+      scroller.append(target);
+      show();
+      expect((hosts()[0] as HTMLElement).style.top).toBe('136px');
+
+      // The container scrolls: the event reaches the window in the capture phase.
+      onScreen(target, 40, 20);
+      scroller.dispatchEvent(new Event('scroll', { bubbles: false }));
+      expect((hosts()[0] as HTMLElement).style.top).toBe('76px');
+
+      // And a shift that fires no event at all is picked up on the next frame.
+      onScreen(target, 40, 300);
+      vi.advanceTimersByTime(FRAME_MS);
+      expect((hosts()[0] as HTMLElement).style.left).toBe('400px');
+    });
+
+    it('goes when its control leaves the viewport and comes back when it returns', () => {
+      show();
+      onScreen(target, -400);
+      vi.advanceTimersByTime(FRAME_MS);
+      expect((hosts()[0] as HTMLElement).style.display).toBe('none');
+      onScreen(target, 100);
+      vi.advanceTimersByTime(FRAME_MS);
+      expect((hosts()[0] as HTMLElement).style.display).toBe('block');
+      expect((hosts()[0] as HTMLElement).style.top).toBe('136px');
+    });
   });
 
   it('sits at the bottom centre as a banner, and takes Tab from anywhere', () => {
@@ -184,7 +332,7 @@ describe('chip', () => {
     expect(host.style.bottom).toBe(`${CORNER_INSET_PX}px`);
     expect(host.style.left).toBe('50%');
     expect(chip.text).toBe('Scroll down');
-    const e = key(document.body, 'Tab');
+    const e = tap(document.body);
     expect(e.defaultPrevented).toBe(true);
     expect(onAccept).toHaveBeenCalledTimes(1);
   });
@@ -198,9 +346,52 @@ describe('chip', () => {
     expect(chip.visible).toBe(true);
     expect(host.style.display).toBe('block');
     expect(host.style.bottom).toBe(`${CORNER_INSET_PX}px`);
-    const e = key(document.body, 'Tab');
+    const e = tap(document.body);
     expect(e.defaultPrevented).toBe(true);
     expect(onAccept).toHaveBeenCalledTimes(1);
+  });
+
+  describe('the Tab keycap', () => {
+    it("is set in the label's size", () => {
+      expect(KEYCAP.fontPx).toBe(TYPE.fontPx);
+      expect(CHIP_CSS).toContain(`font: 600 ${KEYCAP.fontPx}px/1`);
+    });
+
+    it('centres the ink rather than the em box, so the cap sits on the line', () => {
+      // A cap and an arrow have nothing below the baseline; the descender
+      // space the font reserves under them would otherwise ride them high.
+      expect(CHIP_CSS).toContain('text-box-trim: trim-both');
+      expect(CHIP_CSS).toContain('text-box-edge: cap alphabetic');
+      expect(KEYCAP_CSS).toContain('text-box-trim: trim-both');
+    });
+
+    it("is a fixed box exactly one text line tall, with the glyph centred in it", () => {
+      expect(KEYCAP.heightPx).toBe(LINE_PX);
+      expect(LINE_PX).toBe(TYPE.fontPx * TYPE.lineHeight);
+      expect(CHIP_CSS).toContain(`height: ${LINE_PX}px`);
+      expect(CHIP_CSS).toContain('align-items: center');
+      expect(CHIP_CSS).toContain(`.label { line-height: ${LINE_PX}px;`);
+    });
+
+    it('shows the right Shift glyph and names the key for a reader', () => {
+      show();
+      expect(chip.keycap.glyph).toBe(ACCEPT_GLYPH);
+      expect(ACCEPT_GLYPH).toBe('R\u21E7');
+      expect(chip.keycap.name).toBe(ACCEPT_KEY_NAME);
+    });
+
+    it("has a radius that fits its box and sits inside the pill's own", () => {
+      expect(KEYCAP.radiusPx * 2).toBeLessThan(KEYCAP.heightPx);
+      expect(KEYCAP.radiusPx).toBeLessThan(PILL.radiusPx);
+    });
+
+    it("takes the pill's box from the prototype's hint, and leaves the ring rounder", () => {
+      expect(PILL.radiusPx).toBe(6);
+      expect(RING.radiusPx).toBe(7);
+      expect(TYPE.fontPx).toBe(12);
+      expect(CHIP_CSS).toContain(`border-radius: ${PILL.radiusPx}px`);
+      expect(CHIP_CSS).not.toContain('999px');
+    });
   });
 
   describe('the user getting on with the page', () => {
@@ -257,18 +448,30 @@ describe('chip', () => {
     });
   });
 
-  it('carries the waiting dot until it settles, and puts the reason on the tooltip', () => {
+  it('stays pending until it settles, and puts the reason on the tooltip', () => {
     show({ pending: true, reason: 'the note names the place' });
     expect(chip.pending).toBe(true);
     chip.settle();
     expect(chip.pending).toBe(false);
   });
 
+  it('puts nothing on the pill for pending: no dot, no spinner', () => {
+    show({ pending: true });
+    expect(chip.pending).toBe(true);
+    expect(CHIP_CSS).not.toContain('.pending');
+    expect(chip.classes).not.toContain('pending');
+  });
+
+  it('loops nothing at all', () => {
+    expect(CHIP_CSS).not.toContain('infinite');
+    expect(FX_CSS).not.toContain('infinite');
+  });
+
   it('relays a key heard inside a child frame', () => {
     chip.showBanner({ label: 'Click "Pay now"', irreversible: true, onAccept, onDismiss });
-    chip.relay('Tab');
+    chip.relay('RightShift');
     expect(chip.armed).toBe(true);
-    chip.relay('Tab');
+    chip.relay('RightShift');
     expect(onAccept).toHaveBeenCalledTimes(1);
 
     chip.showBanner({ label: 'Scroll down', onAccept, onDismiss });
@@ -281,52 +484,49 @@ describe('chip', () => {
     chip.ring(target);
     chip.destroy();
     expect(hosts()).toHaveLength(0);
-    expect(rings()).toHaveLength(0);
+    expect(ringHosts()).toHaveLength(0);
     expect(document.querySelectorAll('[data-carat-fx]')).toHaveLength(0);
   });
 
   describe('how it feels', () => {
-    it('springs in with one glow ring, and drops both when it settles', () => {
+    it('fades up on arrival, with no glow ring behind it', () => {
       show();
-      expect(chip.classes).toEqual(expect.arrayContaining(['is-entering', 'has-glow']));
-      vi.advanceTimersByTime(TIMING.enterMs);
-      expect(chip.classes).not.toContain('is-entering');
-      vi.advanceTimersByTime(TIMING.glowMs);
-      expect(chip.classes).not.toContain('has-glow');
-    });
-
-    it('arrives without the ring when the offer before it was refused', () => {
-      show({ retry: true });
       expect(chip.classes).toContain('is-entering');
       expect(chip.classes).not.toContain('has-glow');
+      vi.advanceTimersByTime(TIMING.enterMs);
+      expect(chip.classes).not.toContain('is-entering');
     });
 
-    it('cancels the arrival when the chip goes mid-spring', () => {
+    it('cancels the arrival when the chip goes mid-fade', () => {
       show();
       vi.advanceTimersByTime(TIMING.enterMs / 2);
       key(target, 'Escape');
       expect(chip.classes).not.toContain('is-entering');
-      expect(chip.classes).not.toContain('has-glow');
       // Esc is the user answering, so the chip has a moment to get out of the way.
-      expect(chip.classes).toEqual(expect.arrayContaining(['is-leaving', 'exit-soft']));
-      vi.advanceTimersByTime(TIMING.dismissMs);
+      expect(chip.classes).toContain('is-leaving');
+      vi.advanceTimersByTime(TIMING.exitMs);
       expect(chip.classes).not.toContain('is-leaving');
     });
 
-    it('leaves the way the action goes', () => {
-      chip.show({ target, label: 'Click "Pay"', kind: 'click', onAccept, onDismiss });
-      key(target, 'Tab');
-      expect(chip.classes).toEqual(expect.arrayContaining(['is-leaving', 'exit-collapse']));
-      vi.advanceTimersByTime(TIMING.collapseMs);
+    it('leaves the same way whatever the action was', () => {
+      for (const kind of ['click', 'scroll', 'open'] as const) {
+        chip.showBanner({ label: 'Do the thing', kind, onAccept, onDismiss });
+        tap(document.body);
+        expect([kind, chip.classes.includes('is-leaving')]).toEqual([kind, true]);
+        expect(chip.classes.filter((c) => c.startsWith('exit-'))).toEqual([]);
+        vi.advanceTimersByTime(TIMING.exitMs);
+        expect([kind, chip.classes.includes('is-leaving')]).toEqual([kind, false]);
+      }
+    });
 
-      chip.showBanner({ label: 'Scroll down', kind: 'scroll', onAccept, onDismiss });
-      key(document.body, 'Tab');
-      expect(chip.classes).toContain('exit-sweep');
-      vi.advanceTimersByTime(TIMING.sweepMs);
-
-      chip.showBanner({ label: 'Open "Seven Shores Cafe" in Google Maps', kind: 'open', onAccept, onDismiss });
-      key(document.body, 'Tab');
-      expect(chip.classes).toContain('exit-shrink');
+    it('keeps every animation short, still and one-shot', () => {
+      const durations = [...CHIP_CSS.matchAll(/(\d+)ms/g)].map((m) => Number(m[1]));
+      expect(durations.length).toBeGreaterThan(0);
+      expect(Math.max(...durations)).toBeLessThanOrEqual(200);
+      // The only movement left is the 2px the pill rises on arrival.
+      const shifts = [...CHIP_CSS.matchAll(/translateY\((-?[\d.]+)px\)/g)].map((m) => Math.abs(Number(m[1])));
+      expect(Math.max(0, ...shifts)).toBeLessThanOrEqual(2);
+      expect(CHIP_CSS).not.toContain('scale(');
     });
 
     it('gets on with the page instantly when the user does, with no exit at all', () => {
@@ -336,47 +536,43 @@ describe('chip', () => {
       expect(chip.classes).not.toContain('is-leaving');
     });
 
-    it('breathes while armed and stops when it stands down', () => {
+    it('marks itself armed without taking on a colour, and drops the mark when it stands down', () => {
       chip.show({ target, label: 'Click "Send reply"', irreversible: true, kind: 'click', onAccept, onDismiss });
-      key(target, 'Tab');
-      expect(chip.classes).toEqual(expect.arrayContaining(['is-armed', 'is-breathing']));
+      tap(target);
+      expect(chip.classes).toContain('is-armed');
+      expect(chip.classes).not.toContain('is-breathing');
+      // The pill keeps its own colour: the red ring on the control is the warning.
+      expect(CHIP_CSS).not.toContain('.chip.is-armed {');
+      expect(CHIP_CSS).not.toContain('--carat-amber');
       vi.advanceTimersByTime(ARM_MS);
-      expect(chip.classes).not.toContain('is-breathing');
       expect(chip.classes).not.toContain('is-armed');
     });
 
-    it('plays the accept in amber on the second Tab', () => {
+    it('leaves the same way on the second Tab, with no colour to carry out', () => {
       chip.show({ target, label: 'Click "Send reply"', irreversible: true, kind: 'click', onAccept, onDismiss });
-      key(target, 'Tab');
-      key(target, 'Tab');
+      tap(target);
+      tap(target);
       expect(onAccept).toHaveBeenCalledTimes(1);
-      // The colour stays for the exit; the breathing cannot, it animates the same pill.
-      expect(chip.classes).toEqual(expect.arrayContaining(['is-armed', 'is-leaving', 'exit-collapse']));
-      expect(chip.classes).not.toContain('is-breathing');
-      vi.advanceTimersByTime(TIMING.collapseMs);
+      expect(chip.classes).toContain('is-leaving');
       expect(chip.classes).not.toContain('is-armed');
+      vi.advanceTimersByTime(TIMING.exitMs);
+      expect(chip.classes).not.toContain('is-leaving');
     });
 
-    it('pulses once when nobody has answered, and never again', () => {
+    it('does nothing at all while it waits to be answered', () => {
       show();
-      expect(chip.classes).not.toContain('is-attention');
-      vi.advanceTimersByTime(ATTENTION_AFTER_MS);
-      expect(chip.classes).toContain('is-attention');
-      vi.advanceTimersByTime(TIMING.attentionMs);
-      expect(chip.classes).not.toContain('is-attention');
-      // Still up, still ignored, and still only the one pulse.
-      vi.advanceTimersByTime(AUTO_DISMISS_MS - ATTENTION_AFTER_MS - TIMING.attentionMs - 1);
+      vi.advanceTimersByTime(AUTO_DISMISS_MS - 1);
       expect(chip.visible).toBe(true);
-      expect(chip.classes).not.toContain('is-attention');
+      for (const cls of KEYFRAME_CLASSES) expect(chip.classes).not.toContain(cls);
     });
 
-    it('marks the control it is about, and marks it again when the offer is taken', () => {
+    it('leaves the arrival mark to the ring, and outlines the control once the offer is taken', () => {
       const fx = (): string => document.querySelector('[data-carat-fx]')?.getAttribute('data-carat-fx') ?? '';
       chip.show({ target, label: 'Fill Search with "x"', kind: 'fill', onAccept, onDismiss });
-      expect(fx()).toBe('outline');
-      key(target, 'Tab');
-      // The arrival mark goes with the chip; the receipt stays a moment longer.
-      expect(fx().split(' ').sort()).toEqual(['flash', 'tint']);
+      expect(fx()).toBe('');
+      tap(target);
+      // One outline, no tint and no ripple, and it is gone inside 200ms.
+      expect(fx()).toBe('flash');
       vi.advanceTimersByTime(TIMING.flashMs);
       expect(fx()).toBe('');
     });
@@ -389,25 +585,21 @@ describe('chip', () => {
       show();
       expect(chip.classes).toContain('is-still');
       for (const cls of KEYFRAME_CLASSES) expect(chip.classes).not.toContain(cls);
-
-      vi.advanceTimersByTime(ATTENTION_AFTER_MS);
-      expect(chip.classes).toContain('is-noticed');
-      expect(chip.classes).not.toContain('is-attention');
     });
 
-    it('arms in amber without breathing, and goes without an exit', () => {
+    it('arms and goes without an exit', () => {
       chip.show({ target, label: 'Click "Send reply"', irreversible: true, kind: 'click', onAccept, onDismiss });
-      key(target, 'Tab');
+      tap(target);
       expect(chip.classes).toContain('is-armed');
       expect(chip.classes).not.toContain('is-breathing');
-      key(target, 'Tab');
+      tap(target);
       expect(onAccept).toHaveBeenCalledTimes(1);
       expect(chip.classes).not.toContain('is-leaving');
     });
 
-    it('leaves no ripple on a click', () => {
+    it('still marks the control it acted on, standing still', () => {
       chip.show({ target, label: 'Click "Pay"', kind: 'click', onAccept, onDismiss });
-      key(target, 'Tab');
+      tap(target);
       expect(document.querySelector('[data-carat-fx]')?.getAttribute('data-carat-fx')).toBe('flash');
     });
   });
@@ -420,16 +612,16 @@ describe('chip', () => {
 
     it('builds no AudioContext until a Tab has actually been pressed', () => {
       show();
-      vi.advanceTimersByTime(ATTENTION_AFTER_MS);
+      vi.advanceTimersByTime(AUTO_DISMISS_MS - 1);
       expect(FakeAudioContext.built).toBe(0);
-      key(target, 'Tab');
+      tap(target);
       expect(FakeAudioContext.built).toBe(1);
     });
 
     it('builds none at all with the sound turned off', () => {
       chip.setSound(false);
       show();
-      key(target, 'Tab');
+      tap(target);
       show();
       key(target, 'Escape');
       expect(FakeAudioContext.built).toBe(0);
@@ -437,9 +629,9 @@ describe('chip', () => {
 
     it('reuses the one context across arming and accepting', () => {
       chip.show({ target, label: 'Click "Send reply"', irreversible: true, onAccept, onDismiss });
-      key(target, 'Tab');
+      tap(target);
       expect(FakeAudioContext.built).toBe(1);
-      key(target, 'Tab');
+      tap(target);
       expect(FakeAudioContext.built).toBe(1);
     });
   });

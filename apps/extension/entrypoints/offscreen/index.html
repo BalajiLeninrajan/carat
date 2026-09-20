@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Carat offscreen</title>
+  </head>
+  <body>
+    <!--
+      Never shown, and there is only ever one of it. Only a page may read the
+      clipboard or hold a microphone, so the service worker opens this one and
+      asks it for whichever it needs.
+    -->
+    <textarea id="sink" aria-hidden="true"></textarea>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
