@@ -58,7 +58,7 @@ interface Sent {
 
 /**
  * The model is asked the same thing on every page: the instructions, the
- * few-shots, the notes, the timeline and the open tabs, and only then the
+ * examples, the notes, the timeline and the open tabs, and only then the
  * outline. All of that is known the moment Chrome commits a navigation,
  * seconds before the content script has an outline to send. So it is sent
  * then, with a placeholder where the outline goes and room for one token of

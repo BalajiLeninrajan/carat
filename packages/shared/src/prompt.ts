@@ -9,7 +9,26 @@ export interface ChatMessage {
 }
 
 /**
- * The instructions are static and the few-shots come before anything from the
+ * Every value that appears inside <examples> and nowhere else. The examples
+ * are written out of invented places, people and hosts so that a model
+ * copying one is obvious rather than plausible, and the orchestrator refuses
+ * a fill that repeats one. The list lives beside the text it is drawn from so
+ * the two cannot drift apart.
+ */
+export const EXAMPLE_VALUES: readonly string[] = [
+  'Marigold Test Bistro',
+  'Sample Grill',
+  'Avery Example',
+  '10 Sample Street',
+  'Sample Street to Test Campus',
+  'example-shop.test',
+  'example-forum.test',
+  'example-chat.test',
+  'maps.example.test',
+];
+
+/**
+ * The instructions are static and the examples come before anything from the
  * page, so every request on every site shares one prefix and the provider's
  * prompt cache hits. Only the last paragraph moves, and only with the
  * eagerness setting; each level's text is built once below.
@@ -21,7 +40,7 @@ Kinds:
 - "fill": type \`value\` into text field [n]. Only when the value is clearly implied by the page, the notes or the history (a search term, a quantity, a name the user just read, a reference number). Never invent personal data: names, addresses, emails, phone numbers, passwords, card numbers.
 - "select": choose the option whose exact text is \`value\` in combobox or select [n].
 - "scroll": read on, one viewport down. \`target\` is null, \`value\` is "". Only when there is more page below and reading is the step.
-- "open": a destination that is not on this page. \`target\` is null; \`value\` names one of Carat's destinations and the thing to look up, as "maps:Seven Shores Cafe", "calendar:Dinner at Seven Shores Cafe|2026-09-18T18:00|Seven Shores Cafe" or "gmail:dana.lee@acme.com". Never write a URL: Carat builds it from the name.
+- "open": a destination that is not on this page. \`target\` is null; \`value\` names one of Carat's destinations and the thing to look up, as "maps:Marigold Test Bistro", "calendar:Dinner with Avery Example|2026-09-18T18:00|Marigold Test Bistro" or "gmail:avery@example-shop.test". Never write a URL: Carat builds it from the name. Those are shapes, not values; the thing to look up comes from the page, the notes or the history.
 - "switch": bring one of the tabs in <tabs> forward. \`target\` is null, \`value\` is that tab's id as a string.
 
 How to decide:
@@ -39,7 +58,7 @@ Output fields:
 - target: the [n] of the control for fill, click and select; null for scroll, open, switch and none.
 - kind: one of the kinds above.
 - value: as described per kind; "" when the kind takes none.
-- label: what the chip says, in the imperative, at most 60 characters: 'Open "Waterloo to McMaster"', 'Fill Search Google Maps with "Seven Shores Cafe"', 'Click "Proceed to checkout"'.
+- label: what the chip says, in the imperative, at most 60 characters: 'Open "Sample Street to Test Campus"', 'Fill Search Example Maps with "Marigold Test Bistro"', 'Click "Proceed to checkout"'.
 - irreversible: true when the action sends, submits, posts, publishes, pays, buys, orders, deletes or otherwise cannot be undone. Carat then asks for a second keypress.
 - confidence: 0 to 1, how likely this is the thing the user wants next.
 - reason: one short clause, for the tooltip.`;
@@ -55,135 +74,144 @@ const LAST_RULE: Record<Eagerness, string> = {
   conservative: `Answer only when you are sure. Use \`kind: "none"\` (target null, value "", confidence 0) whenever your best guess is under ${EAGERNESS.conservative.minConfidence}: here no suggestion beats a wrong one.`,
 };
 
+const shot = (action: NextAction): string => JSON.stringify(action);
+
+const example = (request: string, action: NextAction): string => `<example>\n<request>\n${request}\n</request>\n<answer>\n${shot(action)}\n</answer>\n</example>`;
+
+/**
+ * The first line of the block, and the reason the block exists. The examples
+ * used to be sent as real user and assistant turns, which put an invented
+ * cafe in the transcript where the model reads its own history: it filled
+ * that cafe into search boxes on sites that had never heard of it. They are
+ * quoted inside the instructions now, and said to be quotations.
+ */
+const EXAMPLES_PREAMBLE = `These are illustrations of the format and the reasoning only. Nothing in them is about the current user. Never reuse a value from an example; a fill value must come from the current page's outline, the notes, the history, or the user's own typing.`;
+
+/** A link in the body of what the user is reading. */
+const EXAMPLE_LINK = example(
+  `<notes>
+(none)
+</notes>
+<history>
+- 2m ago: visited example-forum.test/f/sample
+- 15s ago: scrolled down
+</history>
+<tabs>
+(none)
+</tabs>
+<page host="example-forum.test" path="/f/sample/thread/1">
+Where should we eat? : sample
+(0.8 screens above)
+banner:
+  [1] link "Example Forum" -> example-forum.test
+  [2] searchbox "Search Example Forum"
+main:
+  heading(1) "Where should we eat?"
+  text: Marigold Test Bistro was the pick last week. The menu is here:
+  [3] link "Marigold Test Bistro menu" -> example-shop.test
+  [4] button "Reply"
+contentinfo:
+  [5] link "Forum rules"
+(1.6 more screens below; 9 controls not shown)
+</page>`,
+  {
+    kind: 'click',
+    target: 3,
+    value: '',
+    label: 'Open "Marigold Test Bistro menu"',
+    irreversible: false,
+    confidence: 0.72,
+    reason: 'the post points at the menu the user is reading about',
+  },
+);
+
+/** The card that answers a query the user just typed. */
+const EXAMPLE_CARD = example(
+  `<notes>
+(none)
+</notes>
+<history>
+- 50s ago: filled searchbox "Search Example Maps" with "marigold test bistro"
+- 48s ago: clicked button "Search"
+</history>
+<tabs>
+(none)
+</tabs>
+<page host="maps.example.test" path="/search/marigold+test+bistro">
+marigold test bistro - Example Maps
+search:
+  [1] searchbox "Search Example Maps" = "marigold test bistro"
+main:
+  heading(1) "Results"
+  group "Marigold Test Bistro":
+    text: 4.6 (312) · Bistro · 10 Sample Street
+    [2] button "Directions"
+    [3] link "Order online" -> example-shop.test
+  group "Sample Grill":
+    text: 4.2 (88) · Steakhouse
+    [4] button "Directions"
+</page>`,
+  {
+    kind: 'click',
+    target: 3,
+    value: '',
+    label: 'Click "Order online"',
+    irreversible: false,
+    confidence: 0.64,
+    reason: 'the first result is the place the user searched for',
+  },
+);
+
+/**
+ * A note from another tab dropped into the field in front of the user. The
+ * value is in the notes, the focused box asks for that kind of value, and the
+ * answer says so: that pairing is what the example is for, not the place.
+ */
+const EXAMPLE_FILL = example(
+  `<notes>
+- Avery Example suggested dinner at Marigold Test Bistro on Friday at 6. (read on example-chat.test, 2m ago)
+</notes>
+<history>
+- 2m ago: read example-chat.test/rooms/1/2
+- 4s ago: opened a new tab on maps.example.test
+</history>
+<tabs>
+- [tab 8] example-chat.test — Example Chat | #sample-room
+</tabs>
+<page host="maps.example.test" path="/">
+Example Maps
+search:
+  >> FOCUSED [1] searchbox "Search Example Maps"
+main:
+  [2] button "Directions"
+  [3] button "Saved"
+</page>`,
+  {
+    kind: 'fill',
+    target: 1,
+    value: 'Marigold Test Bistro',
+    label: 'Fill Search Example Maps with "Marigold Test Bistro"',
+    irreversible: false,
+    confidence: 0.91,
+    reason: 'the note names the place and the focused box takes a place name',
+  },
+);
+
+/**
+ * Three shapes the engine has to get right, quoted rather than acted out. The
+ * block sits in the system message, so nothing in it can be mistaken for
+ * something this user did.
+ */
+export const EXAMPLES = `<examples>\n${EXAMPLES_PREAMBLE}\n\n${[EXAMPLE_LINK, EXAMPLE_CARD, EXAMPLE_FILL].join('\n\n')}\n</examples>`;
+
 const ACTION_INSTRUCTIONS: Record<Eagerness, string> = Object.fromEntries(
-  EAGERNESS_LEVELS.map((level) => [level, `${ACTION_INSTRUCTIONS_HEAD}\n\n${LAST_RULE[level]}`]),
+  EAGERNESS_LEVELS.map((level) => [level, `${ACTION_INSTRUCTIONS_HEAD}\n\n${EXAMPLES}\n\n${LAST_RULE[level]}`]),
 ) as Record<Eagerness, string>;
 
 /** The instructions for one eagerness level. The same string every call, byte for byte. */
 export function actionInstructions(eagerness: Eagerness): string {
   return ACTION_INSTRUCTIONS[eagerness];
 }
-
-const shot = (action: NextAction): string => JSON.stringify(action);
-
-const FEW_SHOT_LINK_USER = `<notes>
-(none)
-</notes>
-<history>
-- 2m ago: visited reddit.com/r/waterloo
-- 15s ago: scrolled down
-</history>
-<tabs>
-(none)
-</tabs>
-<page host="www.reddit.com" path="/r/waterloo/comments/1a2b3c/best_brunch">
-Best brunch in Waterloo? : waterloo
-(0.8 screens above)
-banner:
-  [1] link "reddit" -> reddit.com
-  [2] searchbox "Search Reddit"
-main:
-  heading(1) "Best brunch in Waterloo?"
-  text: We went to Seven Shores last weekend and it was excellent. Their menu is here:
-  [3] link "Seven Shores Cafe menu" -> sevenshores.ca
-  text: 42 comments
-  [4] button "Reply"
-contentinfo:
-  [5] link "Reddit Rules"
-(1.6 more screens below; 9 controls not shown)
-</page>`;
-
-const FEW_SHOT_CARD_USER = `<notes>
-(none)
-</notes>
-<history>
-- 50s ago: filled searchbox "Search Google Maps" with "seven shores cafe"
-- 48s ago: clicked button "Search"
-</history>
-<tabs>
-(none)
-</tabs>
-<page host="www.google.com" path="/maps/search/seven+shores+cafe">
-seven shores cafe - Google Maps
-search:
-  [1] searchbox "Search Google Maps" = "seven shores cafe"
-main:
-  heading(1) "Results"
-  group "Seven Shores Cafe":
-    text: 4.6 (312) · Cafe · 10 Regina St N
-    [2] button "Directions"
-    [3] link "Order online" -> sevenshores.ca
-  group "Shore Club":
-    text: 4.2 (88) · Steakhouse
-    [4] button "Directions"
-</page>`;
-
-const FEW_SHOT_FILL_USER = `<notes>
-- Alex asked about dinner at Seven Shores Cafe on Friday at 6. (read 2m ago on discord.com, "#general | Waterloo Friends")
-</notes>
-<history>
-- 2m ago: read discord.com/channels/1/2
-- 4s ago: opened a new tab on www.google.com/maps
-</history>
-<tabs>
-- [tab 8] discord.com — Discord | #general | Waterloo Friends
-</tabs>
-<page host="www.google.com" path="/maps">
-Google Maps
-search:
-  >> FOCUSED [1] searchbox "Search Google Maps"
-main:
-  [2] button "Directions"
-  [3] button "Saved"
-  [4] button "Recents"
-</page>`;
-
-/**
- * Three answers, one per shape the engine has to get right: a link in the
- * body of what the user is reading, the card that answers a query they just
- * typed, and a note from another tab dropped into the field in front of them.
- */
-export const FEW_SHOTS: readonly ChatMessage[] = [
-  { role: 'user', content: FEW_SHOT_LINK_USER },
-  {
-    role: 'assistant',
-    content: shot({
-      kind: 'click',
-      target: 3,
-      value: '',
-      label: 'Open "Seven Shores Cafe menu"',
-      irreversible: false,
-      confidence: 0.72,
-      reason: 'the post points at the menu the user is reading about',
-    }),
-  },
-  { role: 'user', content: FEW_SHOT_CARD_USER },
-  {
-    role: 'assistant',
-    content: shot({
-      kind: 'click',
-      target: 3,
-      value: '',
-      label: 'Click "Order online"',
-      irreversible: false,
-      confidence: 0.64,
-      reason: 'the first result is the place the user searched for',
-    }),
-  },
-  { role: 'user', content: FEW_SHOT_FILL_USER },
-  {
-    role: 'assistant',
-    content: shot({
-      kind: 'fill',
-      target: 1,
-      value: 'Seven Shores Cafe',
-      label: 'Fill Search Google Maps with "Seven Shores Cafe"',
-      irreversible: false,
-      confidence: 0.91,
-      reason: 'the Discord plan names the place; the focused box takes a place name',
-    }),
-  },
-];
 
 const BLOCK_EMPTY = '(none)';
 
@@ -243,14 +271,14 @@ export function renderRequest(req: NextActionRequest): string {
 }
 
 /**
- * One request for one action: the static instructions, the few-shots, then
- * the page. Deterministic — the same request at the same level produces the
- * same bytes, which is what makes the prefix cacheable and the eval stable.
+ * One request for one action: the static instructions with the examples
+ * quoted inside them, then the page. Deterministic: the same request at the
+ * same level produces the same bytes, which is what makes the prefix
+ * cacheable and the eval stable.
  */
 export function buildNextActionMessages(req: NextActionRequest): ChatMessage[] {
   return [
     { role: 'system', content: actionInstructions(req.eagerness) },
-    ...FEW_SHOTS,
     { role: 'user', content: renderRequest(req) },
   ];
 }
@@ -264,7 +292,7 @@ export const WARMUP_OUTLINE = 'main: (warming the cache; the page has not been r
 /**
  * The same request with the outline replaced by one placeholder line. Sent
  * with a one-token cap on navigation, so the static instructions, the
- * few-shots, the notes, the history and the tabs are in the provider's prefix
+ * examples, the notes, the history and the tabs are in the provider's prefix
  * cache before the user's page has finished rendering.
  */
 export function buildWarmupMessages(req: NextActionRequest): ChatMessage[] {

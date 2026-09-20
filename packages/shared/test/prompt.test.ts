@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatMessage } from '../src/prompt';
-import { FEW_SHOTS, WARMUP_OUTLINE, actionInstructions, buildNextActionMessages, buildWarmupMessages, renderPrefix, renderRequest } from '../src/prompt';
+import { EXAMPLES, EXAMPLE_VALUES, WARMUP_OUTLINE, actionInstructions, buildNextActionMessages, buildWarmupMessages, renderPrefix, renderRequest } from '../src/prompt';
 import { EAGERNESS_LEVELS } from '../src/eagerness';
 import type { NextActionRequest } from '../src/next-action';
 
@@ -23,11 +23,15 @@ describe('buildNextActionMessages', () => {
     expect(JSON.stringify(buildNextActionMessages(req))).toBe(JSON.stringify(buildNextActionMessages(req)));
   });
 
-  it('puts the static instructions and the few-shots before anything from the page', () => {
+  it('puts the static instructions and the examples before anything from the page', () => {
     const msgs = buildNextActionMessages(req);
+    expect(msgs).toHaveLength(2);
     expect(msgs[0]).toEqual({ role: 'system', content: actionInstructions('eager') });
-    expect(msgs.slice(1, -1)).toEqual(FEW_SHOTS);
-    expect(msgs[msgs.length - 1]!.role).toBe('user');
+    expect(msgs[0]!.content).toContain(EXAMPLES);
+    expect(msgs[1]!.role).toBe('user');
+    // Nothing invented is in a user or assistant turn, where the model reads
+    // its own history and takes what it finds for something this user did.
+    expect(msgs[1]!.content).not.toContain('<examples>');
   });
 
   it('keeps the instructions identical across requests at the same level', () => {
@@ -79,9 +83,9 @@ describe('buildNextActionMessages', () => {
     const turn = renderRequest({ ...req, page: { ...req.page, scroll: { y: 1.4, pages: 3.2, more: true } } });
     expect(turn).not.toContain('scroll=');
     expect(turn).toContain('<page host="www.google.com" path="/maps">');
-    // The few-shot the model learns the shape from carries the outline's own lines instead.
-    expect(FEW_SHOTS[0]!.content).toContain('(0.8 screens above)');
-    expect(FEW_SHOTS[0]!.content).toContain('more screens below;');
+    // The example the model learns the shape from carries the outline's own lines instead.
+    expect(EXAMPLES).toContain('(0.8 screens above)');
+    expect(EXAMPLES).toContain('more screens below;');
   });
 
   it('carries the open tabs the model may switch to', () => {
@@ -135,5 +139,29 @@ describe('the warm-up request', () => {
   it('moves with the notes, the history and the tabs, because the real request will too', () => {
     const other = buildWarmupMessages({ ...req, notes: ['Something else was read.'] });
     expect(other.at(-1)!.content).not.toBe(buildWarmupMessages(req).at(-1)!.content);
+  });
+});
+
+describe('the examples', () => {
+  it('open with the line that says they are examples and nothing else', () => {
+    const [open, first] = EXAMPLES.split('\n');
+    expect(open).toBe('<examples>');
+    expect(first).toContain('illustrations of the format and the reasoning only');
+    expect(first).toContain('Nothing in them is about the current user');
+    expect(first).toContain('Never reuse a value from an example');
+    expect(EXAMPLES.endsWith('</examples>')).toBe(true);
+  });
+
+  it('is made of values nobody would ever type', () => {
+    // The cafe the owner kept finding in their search boxes, and the rest of
+    // the real-looking cast it arrived with.
+    const REAL_LOOKING = /seven shores|sevenshores|reddit\.com|discord\.com|google\.com|acme\.com|waterloo|mcmaster|regina st/i;
+    for (const level of EAGERNESS_LEVELS) expect(actionInstructions(level)).not.toMatch(REAL_LOOKING);
+    // Every host in an example is under a reserved TLD, so none of them resolves.
+    for (const host of EXAMPLES.match(/host="([^"]+)"/g) ?? []) expect(host).toMatch(/\.test"$/);
+  });
+
+  it('lists every value it uses, so the fill check cannot drift from the text', () => {
+    for (const value of EXAMPLE_VALUES) expect(EXAMPLES + actionInstructions('eager')).toContain(value);
   });
 });
