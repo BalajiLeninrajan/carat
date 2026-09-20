@@ -510,7 +510,8 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
     const s = session;
     if (!s) return;
     label.textContent = armed ? `Press again to ${lower(s.label)}` : s.label;
-    // Armed is a colour, not a motion: the pill goes amber and stays there.
+    // Armed is what the words say, not a colour the pill takes on: the ring
+    // round the control turns red and the pill stays the pill.
     pill.classList.toggle('is-armed', armed);
   }
 
@@ -658,7 +659,6 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
    */
   function hide(fade = false): void {
     const seen = session !== null && host.style.display !== 'none';
-    const wasArmed = armed;
     endExit();
     clearRing();
     cancelEnter();
@@ -697,8 +697,6 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
     setPending(false);
     pill.classList.remove('is-still');
     if (fade && seen && !reducedMotion()) {
-      // An armed chip acts in amber, so the warning's colour stays on for the exit.
-      if (wasArmed) pill.classList.add('is-armed');
       leave();
       return;
     }
@@ -740,8 +738,8 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
       arm();
       return;
     }
-    // An armed chip acts in amber: the same fade, the warning's colour.
-    const amber = armed;
+    // An irreversible action leaves its receipt in the ring's red.
+    const alarm = armed;
     const control = s.target;
     hide(true);
     // The keycap and the sound belong to the press, so they come after the
@@ -749,7 +747,7 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
     press();
     sounds.accept();
     // And the control keeps the receipt for a moment after the chip has gone.
-    if (control?.isConnected) fx.flash(control, { amber });
+    if (control?.isConnected) fx.flash(control, { alarm });
     s.onAccept();
   }
 

@@ -50,8 +50,8 @@ describe('the ring reads the page behind its target', () => {
     expect(toneBehind(input)).toBe('dark');
   });
 
-  it('has a red for an armed control that is not the amber the pill wears', () => {
-    // Red is the ring's alone: the pill and the ring's own hint stay amber.
+  it('has a red for an armed control, and it is the only colour armed changes', () => {
+    // The pill does not change at all; the ring alone turns red.
     expect(RING.alarm).toBe('#f38ba8');
     expect(RING.onLight.alarm).toBe('#d20f39');
     expect(RING.alarm).not.toBe(RING.armed);

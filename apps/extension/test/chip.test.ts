@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vite
 import { ARM_MS, AUTO_DISMISS_MS, CHIP_SETTLE_MS, CORNER_INSET_PX, PENDING_HINT, createChip, type Chip, type DismissReason } from '../src/chip';
 import { placeAt } from '../src/chip/position';
 import { ACCEPT_CODE, ACCEPT_GLYPH, ACCEPT_KEY_NAME } from '../src/chip/accept-key';
-import { CHIP_CSS, FX_CSS, KEYCAP, KEYFRAME_CLASSES, LINE_PX, PILL, TIMING, TYPE } from '../src/chip/styles';
+import { CHIP_CSS, FX_CSS, KEYCAP, KEYCAP_CSS, KEYFRAME_CLASSES, LINE_PX, PILL, TIMING, TYPE } from '../src/chip/styles';
 import { RING, Ring } from '../src/engine/content/ring';
 
 /** jsdom has no Web Audio; this is enough of a context to count how many were built. */
@@ -357,6 +357,14 @@ describe('chip', () => {
       expect(CHIP_CSS).toContain(`font: 600 ${KEYCAP.fontPx}px/1`);
     });
 
+    it('centres the ink rather than the em box, so the cap sits on the line', () => {
+      // A cap and an arrow have nothing below the baseline; the descender
+      // space the font reserves under them would otherwise ride them high.
+      expect(CHIP_CSS).toContain('text-box-trim: trim-both');
+      expect(CHIP_CSS).toContain('text-box-edge: cap alphabetic');
+      expect(KEYCAP_CSS).toContain('text-box-trim: trim-both');
+    });
+
     it("is a fixed box exactly one text line tall, with the glyph centred in it", () => {
       expect(KEYCAP.heightPx).toBe(LINE_PX);
       expect(LINE_PX).toBe(TYPE.fontPx * TYPE.lineHeight);
@@ -528,24 +536,27 @@ describe('chip', () => {
       expect(chip.classes).not.toContain('is-leaving');
     });
 
-    it('turns a static amber while armed and drops it when it stands down', () => {
+    it('marks itself armed without taking on a colour, and drops the mark when it stands down', () => {
       chip.show({ target, label: 'Click "Send reply"', irreversible: true, kind: 'click', onAccept, onDismiss });
       tap(target);
       expect(chip.classes).toContain('is-armed');
       expect(chip.classes).not.toContain('is-breathing');
+      // The pill keeps its own colour: the red ring on the control is the warning.
+      expect(CHIP_CSS).not.toContain('.chip.is-armed {');
+      expect(CHIP_CSS).not.toContain('--carat-amber');
       vi.advanceTimersByTime(ARM_MS);
       expect(chip.classes).not.toContain('is-armed');
     });
 
-    it('plays the accept in amber on the second Tab', () => {
+    it('leaves the same way on the second Tab, with no colour to carry out', () => {
       chip.show({ target, label: 'Click "Send reply"', irreversible: true, kind: 'click', onAccept, onDismiss });
       tap(target);
       tap(target);
       expect(onAccept).toHaveBeenCalledTimes(1);
-      // The colour stays for the exit.
-      expect(chip.classes).toEqual(expect.arrayContaining(['is-armed', 'is-leaving']));
-      vi.advanceTimersByTime(TIMING.exitMs);
+      expect(chip.classes).toContain('is-leaving');
       expect(chip.classes).not.toContain('is-armed');
+      vi.advanceTimersByTime(TIMING.exitMs);
+      expect(chip.classes).not.toContain('is-leaving');
     });
 
     it('does nothing at all while it waits to be answered', () => {
@@ -576,7 +587,7 @@ describe('chip', () => {
       for (const cls of KEYFRAME_CLASSES) expect(chip.classes).not.toContain(cls);
     });
 
-    it('arms in amber and goes without an exit', () => {
+    it('arms and goes without an exit', () => {
       chip.show({ target, label: 'Click "Send reply"', irreversible: true, kind: 'click', onAccept, onDismiss });
       tap(target);
       expect(chip.classes).toContain('is-armed');

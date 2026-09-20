@@ -12,7 +12,7 @@ const FX_ATTR = 'data-carat-fx';
 
 export interface Effects {
   /** The control carat just acted on, outlined for a moment as a receipt. */
-  flash(el: Element, opts?: { amber?: boolean }): void;
+  flash(el: Element, opts?: { alarm?: boolean }): void;
   /** Take every mark off now — the user acted, and carat is out of the way. */
   clear(): void;
   destroy(): void;
@@ -36,12 +36,12 @@ export function createEffects(doc: Document = document, still: () => boolean = (
     host.setAttribute(FX_ATTR, [...new Set(kinds)].sort().join(' '));
   }
 
-  function mark(kind: FxKind, ms: number, amber: boolean): HTMLElement {
+  function mark(kind: FxKind, ms: number, alarm: boolean): HTMLElement {
     if (!host.isConnected) doc.documentElement.appendChild(host);
     const el = doc.createElement('div');
     el.className = `fx ${kind}`;
     el.dataset.kind = kind;
-    if (amber) el.classList.add('is-amber');
+    if (alarm) el.classList.add('is-alarm');
     // No motion allowed: the mark is simply there and then gone, for the same span.
     if (still()) el.classList.add('is-static');
     root.appendChild(el);
@@ -71,7 +71,7 @@ export function createEffects(doc: Document = document, still: () => boolean = (
 
   return {
     flash(target, opts = {}) {
-      over(mark('flash', TIMING.flashMs, opts.amber === true), target, 2);
+      over(mark('flash', TIMING.flashMs, opts.alarm === true), target, 2);
       announce();
     },
     clear() {
