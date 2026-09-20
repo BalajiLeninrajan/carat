@@ -89,8 +89,39 @@ export interface ElasticMemory {
   indexFacts(item: Observation, notes: Note[]): Promise<void>;
   /** The task line and the context behind it, for the prompt. */
   retrieve(page: PageContext, tabId?: number): Promise<string[]>;
-  recordAction(action: { tabId?: number; host: string; kind: ActionKind; label: string; value?: string; accepted: boolean }): Promise<void>;
+  recordAction(action: {
+    tabId?: number;
+    host: string;
+    kind: ActionKind;
+    label: string;
+    value?: string;
+    accepted: boolean;
+    outcome?: ActionOutcome;
+    actual?: string;
+  }): Promise<void>;
+  analytics(): Promise<ActionAnalytics>;
   sweepExpiredTasks(): Promise<void>;
+}
+
+export type ActionOutcome = 'accepted' | 'dismissed' | 'alternative';
+
+export interface ActionAnalyticsBucket {
+  key: string;
+  suggested: number;
+  accepted: number;
+  dismissed: number;
+  alternative: number;
+  acceptanceRate: number;
+}
+
+export interface ActionAnalytics {
+  enabled: boolean;
+  window: string;
+  totals: ActionAnalyticsBucket;
+  byKind: ActionAnalyticsBucket[];
+  byHost: ActionAnalyticsBucket[];
+  recent: Array<{ at: string; host: string; kind: ActionKind | string; label: string; value?: string; outcome: ActionOutcome; actual?: string }>;
+  facts: string[];
 }
 
 export type ElasticDebugKind = 'pipeline' | 'mapping' | 'index' | 'search' | 'esql' | 'cleanup';
@@ -142,12 +173,17 @@ interface SearchHit {
     subjectKey?: string;
     detailField?: string;
     detailValue?: string;
+    label?: string;
+    value?: string;
     values?: string[];
     firstSeenAt?: string;
     capturedAt?: string;
     at?: string;
     lastSeenAt?: string;
     confidence?: number;
+    accepted?: boolean;
+    outcome?: ActionOutcome;
+    actual?: string;
   };
 }
 
@@ -439,14 +475,15 @@ export function createElasticMemory(deps: ElasticDeps): ElasticMemory {
       // Details only when the page has somewhere to put them; a page with no
       // name field should never be handed somebody's name.
       const wanted = detailFieldsWanted(page);
-      const [task, details, evidence, summary] = await Promise.all([
+      const [task, details, behavior, evidence, summary] = await Promise.all([
         plan.actionCapabilities.length ? topTask(s, plan, query, tabId, controller.signal) : Promise.resolve([]),
         wanted.length ? topDetails(s, wanted, tabId, controller.signal) : Promise.resolve([]),
+        actionPatterns(s, page, tabId, controller.signal),
         evidenceHits(s, query, tabId, controller.signal),
         plan.actionCapabilities.length ? taskSummary(s, plan, tabId, controller.signal) : Promise.resolve([]),
       ]);
       const taskText = new Set([...task, ...details].map((line) => keyText(line)));
-      return [...task, ...details, ...summary, ...evidence.filter((line) => !taskText.has(keyText(line)))];
+      return [...task, ...details, ...behavior, ...summary, ...evidence.filter((line) => !taskText.has(keyText(line)))];
     } finally {
       clearTimeout(timer);
     }
@@ -555,6 +592,59 @@ export function createElasticMemory(deps: ElasticDeps): ElasticMemory {
       return lines;
     } catch (err) {
       debug({ kind: 'search', tabId, path, ok: false, summary: 'detail search failed', request, response: errorMessage(err) });
+      return [];
+    }
+  }
+
+  /**
+   * The actions index is the feedback loop: every suggested chip becomes
+   * behavioral context. It is not model training by itself, but it gives the
+   * predictor a compact memory of what the user tends to accept, skip or do
+   * instead on surfaces like the current one.
+   */
+  async function actionPatterns(s: ElasticSettings, page: PageContext, tabId: number | undefined, signal: AbortSignal): Promise<string[]> {
+    const index = await ensure(s, 'actions');
+    const host = hostOf(page.url);
+    const request = {
+      size: 40,
+      _source: ['at', 'host', 'kind', 'label', 'value', 'accepted', 'outcome', 'actual'],
+      query: {
+        bool: {
+          filter: [
+            { range: { at: { gte: EVIDENCE_WINDOW } } },
+            {
+              bool: {
+                should: [
+                  { term: { host } },
+                  { multi_match: { query: searchText(page, retrievalPlan(page)), fields: ['label^2', 'value', 'actual', 'text'] } },
+                ],
+                minimum_should_match: 1,
+              },
+            },
+          ],
+        },
+      },
+      sort: [{ at: { order: 'desc', unmapped_type: 'date' } }],
+    };
+    const path = `/${encodeURIComponent(index)}/_search?ignore_unavailable=true`;
+    try {
+      const res = await send(s, path, { method: 'POST', body: JSON.stringify(request), signal });
+      const json = (await responsePreview(res)) as { hits?: { hits?: SearchHit[] } };
+      const rows = (json.hits?.hits ?? []).map(actionRow).filter((row): row is NonNullable<ReturnType<typeof actionRow>> => row !== null);
+      const lines = behaviorLines(rows).slice(0, 2);
+      debug({
+        kind: 'search',
+        tabId,
+        path,
+        ok: res.ok,
+        status: res.status,
+        summary: `${lines.length} behavior pattern(s) from recent actions`,
+        request,
+        response: json,
+      });
+      return res.ok ? lines : [];
+    } catch (err) {
+      debug({ kind: 'search', tabId, path, ok: false, summary: 'action behavior search failed', request, response: errorMessage(err) });
       return [];
     }
   }
@@ -1071,7 +1161,8 @@ export function createElasticMemory(deps: ElasticDeps): ElasticMemory {
       const s = await cfg();
       if (!s) return;
       const at = now();
-      const text = `${action.accepted ? 'accepted' : 'dismissed'} ${action.kind}: ${action.label}`;
+      const outcome = action.outcome ?? (action.accepted ? 'accepted' : 'dismissed');
+      const text = `${outcome} ${action.kind}: ${action.label}${action.actual ? `; user did ${action.actual}` : ''}`;
       const doc = {
         tabId: action.tabId,
         host: action.host,
@@ -1079,11 +1170,18 @@ export function createElasticMemory(deps: ElasticDeps): ElasticMemory {
         label: action.label,
         value: action.value ?? '',
         accepted: action.accepted,
+        outcome,
+        actual: action.actual ?? '',
         text,
         at: new Date(at).toISOString(),
       };
       await indexDoc(s, 'actions', `${at}:${Math.random().toString(36).slice(2)}`, doc, action.tabId).catch(() => undefined);
       await advanceMatchedTasks(s, action).catch(() => undefined);
+    },
+    async analytics() {
+      const s = await cfg();
+      if (!s) return emptyAnalytics(false);
+      return actionAnalytics(s, fetchImpl).catch(() => emptyAnalytics(true));
     },
     async sweepExpiredTasks() {
       const s = await cfg();
@@ -1091,6 +1189,171 @@ export function createElasticMemory(deps: ElasticDeps): ElasticMemory {
       await deleteExpiredTasks(s).catch(() => undefined);
     },
   };
+}
+
+const ANALYTICS_WINDOW = 'now-24h';
+const ANALYTICS_SIZE = 200;
+
+async function actionAnalytics(s: ElasticSettings, fetchImpl: typeof fetch): Promise<ActionAnalytics> {
+  const index = await ensureForAnalytics(s, 'actions', fetchImpl);
+  const request = {
+    size: ANALYTICS_SIZE,
+    _source: ['at', 'host', 'kind', 'label', 'value', 'accepted', 'outcome', 'actual'],
+    query: { range: { at: { gte: ANALYTICS_WINDOW } } },
+    sort: [{ at: { order: 'desc', unmapped_type: 'date' } }],
+  };
+  const res = await fetchImpl(`${s.elasticUrl}/${encodeURIComponent(index)}/_search?ignore_unavailable=true`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: `ApiKey ${s.elasticApiKey}`,
+    },
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) return emptyAnalytics(true);
+  const json = (await responsePreview(res)) as { hits?: { hits?: SearchHit[] } };
+  const rows = (json.hits?.hits ?? []).map(actionRow).filter((row): row is NonNullable<ReturnType<typeof actionRow>> => row !== null);
+  return summarizeActions(rows);
+}
+
+async function ensureForAnalytics(s: ElasticSettings, kind: IndexKind, fetchImpl: typeof fetch): Promise<string> {
+  const index = indexName(s, kind);
+  const exists = await fetchImpl(`${s.elasticUrl}/${encodeURIComponent(index)}`, {
+    method: 'HEAD',
+    headers: { authorization: `ApiKey ${s.elasticApiKey}` },
+  });
+  return exists.ok || exists.status === 404 ? index : index;
+}
+
+function emptyAnalytics(enabled: boolean): ActionAnalytics {
+  const totals = bucket('all', []);
+  return { enabled, window: '24h', totals, byKind: [], byHost: [], recent: [], facts: [] };
+}
+
+function actionRow(hit: SearchHit): ActionAnalytics['recent'][number] | null {
+  const source = hit._source;
+  if (!source?.at || !source.kind || !source.label) return null;
+  const outcome = source.outcome ?? (source.accepted ? 'accepted' : 'dismissed');
+  if (!isActionOutcome(outcome)) return null;
+  return {
+    at: source.at,
+    host: source.host ?? '',
+    kind: source.kind,
+    label: source.label,
+    ...(source.value ? { value: source.value } : {}),
+    outcome,
+    ...(source.actual ? { actual: source.actual } : {}),
+  };
+}
+
+function summarizeActions(rows: ActionAnalytics['recent']): ActionAnalytics {
+  const byKind = grouped(rows, (row) => row.kind);
+  const byHost = grouped(rows, (row) => row.host || 'unknown').slice(0, 5);
+  const totals = bucket('all', rows);
+  return {
+    enabled: true,
+    window: '24h',
+    totals,
+    byKind,
+    byHost,
+    recent: rows.slice(0, 8),
+    facts: trendFacts(rows, totals, byKind, byHost),
+  };
+}
+
+function grouped(rows: ActionAnalytics['recent'], keyFor: (row: ActionAnalytics['recent'][number]) => string): ActionAnalyticsBucket[] {
+  const groups = new Map<string, ActionAnalytics['recent']>();
+  for (const row of rows) {
+    const key = keyFor(row);
+    groups.set(key, [...(groups.get(key) ?? []), row]);
+  }
+  return [...groups.entries()]
+    .map(([key, items]) => bucket(key, items))
+    .sort((a, b) => b.suggested - a.suggested || b.acceptanceRate - a.acceptanceRate);
+}
+
+function bucket(key: string, rows: ActionAnalytics['recent']): ActionAnalyticsBucket {
+  const accepted = rows.filter((row) => row.outcome === 'accepted').length;
+  const dismissed = rows.filter((row) => row.outcome === 'dismissed').length;
+  const alternative = rows.filter((row) => row.outcome === 'alternative').length;
+  const suggested = rows.length;
+  return {
+    key,
+    suggested,
+    accepted,
+    dismissed,
+    alternative,
+    acceptanceRate: suggested === 0 ? 0 : Math.round((accepted / suggested) * 100),
+  };
+}
+
+function trendFacts(
+  rows: ActionAnalytics['recent'],
+  totals: ActionAnalyticsBucket,
+  byKind: ActionAnalyticsBucket[],
+  byHost: ActionAnalyticsBucket[],
+): string[] {
+  if (rows.length === 0) return ['No action data yet. Use Carat for a bit and this tab will start telling stories.'];
+  const facts: string[] = [];
+  const shopping = shoppingProfile(rows);
+  if (shopping) facts.push(shopping);
+  const hesitant = byHost.find((host) => host.suggested >= 3 && host.acceptanceRate <= 34 && host.alternative + host.dismissed >= 2);
+  if (hesitant) facts.push(`${hostLabel(hesitant.key)} looks indecisive: ${hesitant.alternative + hesitant.dismissed} of ${hesitant.suggested} suggestions were skipped or replaced.`);
+  const best = byKind.find((kind) => kind.suggested >= 2 && kind.acceptanceRate >= 70);
+  if (best) facts.push(`${best.key} suggestions are landing well: ${best.acceptanceRate}% accepted.`);
+  const alternative = byKind.find((kind) => kind.alternative >= 2);
+  if (alternative) facts.push(`When Carat suggests ${alternative.key}, the user often has their own move ready (${alternative.alternative} alternatives).`);
+  const recentBackouts = rows.filter((row) => /back|previous|return/i.test(row.actual ?? '')).length;
+  if (recentBackouts >= 2) facts.push(`Backtracking showed up ${recentBackouts} times after suggestions, a classic comparison-shopping signal.`);
+  const trains = rows.length >= 5 ? `The actions index now has ${rows.length} fresh preference examples Carat can use as context today, and later as training/eval data.` : '';
+  if (trains) facts.push(trains);
+  if (facts.length === 0) {
+    facts.push(`Carat suggested ${totals.suggested} actions in the last day and ${totals.accepted} were accepted.`);
+  }
+  return unique(facts).slice(0, 4);
+}
+
+function hostLabel(host: string): string {
+  return host === 'unknown' ? 'This site' : host.replace(/^www\./, '');
+}
+
+function shoppingProfile(rows: ActionAnalytics['recent']): string {
+  const shoppingRows = rows.filter((row) => /\b(airpods?|cart|checkout|buy|purchase|order|deal|price|review|shipping|store|shop)\b/i.test(actionText(row)));
+  if (shoppingRows.length < 3) return '';
+  const acceptedCart = shoppingRows.filter((row) => row.outcome === 'accepted' && /\b(add(ed)? to cart|cart)\b/i.test(actionText(row))).length;
+  const checkoutSkips = shoppingRows.filter((row) => row.outcome !== 'accepted' && /\b(checkout|buy|purchase|place order|pay)\b/i.test(actionText(row))).length;
+  const comparisons = shoppingRows.filter((row) => /\b(back|reviews?|compare|price|shipping|details?|different|another)\b/i.test(row.actual ?? '')).length;
+  if (acceptedCart > 0 && checkoutSkips > 0) {
+    return `Cart commitment issue: the user accepts cart-ish steps, then dodges checkout. Carat should slow down before pushing purchase actions.`;
+  }
+  if (comparisons >= 2) {
+    return `Indecisive shopper energy: ${comparisons} suggestions turned into comparison or backtracking moves.`;
+  }
+  const skipped = shoppingRows.filter((row) => row.outcome !== 'accepted').length;
+  if (skipped >= 3) return `Window shopper mode: ${skipped} shopping suggestions were skipped or replaced before checkout.`;
+  return '';
+}
+
+function behaviorLines(rows: ActionAnalytics['recent']): string[] {
+  if (rows.length < 3) return [];
+  const totals = bucket('recent', rows);
+  const lines: string[] = [];
+  const shopping = shoppingProfile(rows);
+  if (shopping) lines.push(`[elasticsearch] behavior: ${shopping}`);
+  if (totals.alternative >= 2 && totals.acceptanceRate <= 40) {
+    lines.push(`[elasticsearch] behavior: user often does something else after similar suggestions (${totals.alternative} alternatives, ${totals.acceptanceRate}% accepted). Prefer lower-commitment next steps.`);
+  }
+  const bestKind = grouped(rows, (row) => row.kind).find((kind) => kind.suggested >= 2 && kind.acceptanceRate >= 70);
+  if (bestKind) lines.push(`[elasticsearch] behavior: user usually accepts ${bestKind.key} suggestions (${bestKind.acceptanceRate}% accepted recently).`);
+  return lines;
+}
+
+function actionText(row: ActionAnalytics['recent'][number]): string {
+  return [row.kind, row.label, row.value ?? '', row.actual ?? '', row.host].join(' ');
+}
+
+function isActionOutcome(value: unknown): value is ActionOutcome {
+  return value === 'accepted' || value === 'dismissed' || value === 'alternative';
 }
 
 async function responsePreview(res: Response): Promise<unknown> {
@@ -1192,6 +1455,8 @@ function indexDefinition(_kind: IndexKind, inferenceId: string): Record<string, 
         label: { type: 'text' },
         value: { type: 'text' },
         accepted: { type: 'boolean' },
+        outcome: { type: 'keyword' },
+        actual: { type: 'text' },
         hash: { type: 'long' },
         confidence: { type: 'float' },
         capturedAt: { type: 'date' },

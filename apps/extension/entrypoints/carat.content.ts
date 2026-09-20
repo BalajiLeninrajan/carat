@@ -176,6 +176,7 @@ export default defineContentScript({
     }
 
     function log(entry: string): void {
+      markAlternative(entry);
       post({ type: 'log', entry, url: location.href });
     }
 
@@ -263,6 +264,15 @@ export default defineContentScript({
       suggestion = null;
       ring.hide();
       chip.hide();
+    }
+
+    function markAlternative(actual: string): void {
+      const s = suggestion;
+      if (!s) return;
+      suggestion = null;
+      ring.hide();
+      chip.hide();
+      post({ type: 'alternative', reqId: s.reqId, actual });
     }
 
     /** Their kinds, as the chip's own smaller vocabulary of exits and marks. */
@@ -623,7 +633,7 @@ export default defineContentScript({
       if (advanceGhost()) return;
       clearGhost();
       activity++;
-      if (suggestion) clearSuggestion();
+      if (suggestion) markAlternative(`typed into ${describe(deepActive() ?? document.body)}`);
       schedule('input');
     }
 
@@ -649,7 +659,7 @@ export default defineContentScript({
       if (e.type === 'input' && asTextField(e.target as Element)) return onFieldInput();
       clearGhost();
       activity++;
-      if (suggestion) clearSuggestion();
+      if (suggestion) markAlternative(`${e.type} on page`);
       // Typing in the focused field is not a page change: its value is sent with
       // the idle message. Anything else that changes values is.
       if (e.type === 'change') pageChanged = true;

@@ -60,6 +60,13 @@ export interface DismissMessage {
   reqId: number;
 }
 
+/** The user took a different trusted action while a suggestion was visible. */
+export interface AlternativeMessage {
+  type: "alternative";
+  reqId: number;
+  actual: string;
+}
+
 /** What was on screen when the user left a page (tab switch or navigation), for reading memory. */
 export interface SeenMessage {
   type: "seen";
@@ -69,7 +76,7 @@ export interface SeenMessage {
   text: string;
 }
 
-export type ContentToWorker = IdleMessage | LogMessage | AcceptMessage | DismissMessage | SeenMessage;
+export type ContentToWorker = IdleMessage | LogMessage | AcceptMessage | DismissMessage | AlternativeMessage | SeenMessage;
 
 // ---------------------------------------------------------------------------
 // Worker → content

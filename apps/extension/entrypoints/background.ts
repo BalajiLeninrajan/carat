@@ -8,6 +8,7 @@ import { clearNotes, notesFor, recordSeen } from '../src/engine/background/notes
 import { buildOutline } from '../src/engine/background/outline';
 import {
   acceptAction,
+  alternativeAction,
   cancelPrediction,
   dismissAction,
   peekAction,
@@ -81,11 +82,21 @@ export default defineBackground(() => {
   const recordChip = (
     tabId: number,
     chip: { kind: ActionKind; label: string; value: string; url: string },
-    accepted: boolean,
+    outcome: 'accepted' | 'dismissed' | 'alternative',
+    actual?: string,
   ): Promise<void> => {
-    console.log(`[carat] elastic → ${accepted ? 'accepted' : 'dismissed'} ${chip.kind}: ${chip.label}`);
+    console.log(`[carat] elastic → ${outcome} ${chip.kind}: ${chip.label}`);
     return elastic
-      .recordAction({ tabId, host: hostOf(chip.url), kind: chip.kind, label: chip.label, value: chip.value, accepted })
+      .recordAction({
+        tabId,
+        host: hostOf(chip.url),
+        kind: chip.kind,
+        label: chip.label,
+        value: chip.value,
+        accepted: outcome === 'accepted',
+        outcome,
+        actual,
+      })
       .catch((e) => console.warn('[carat] elastic recordAction failed:', e));
   };
 
@@ -151,14 +162,21 @@ export default defineBackground(() => {
           post({ type: 'result', reqId: msg.reqId, ...result });
           void event(tabId, 'accepted', result.ok ? undefined : result.reason);
           if (!result.ok) console.warn(`[carat] accept refused: ${result.reason}`);
-          if (chip && result.ok) void recordChip(tabId, chip, true);
+          if (chip && result.ok) void recordChip(tabId, chip, 'accepted');
           break;
         }
         case 'dismiss': {
           const chip = peekAction(tabId, msg.reqId);
           dismissAction(tabId, msg.reqId);
           void event(tabId, 'dismissed');
-          if (chip) void recordChip(tabId, chip, false);
+          if (chip) void recordChip(tabId, chip, 'dismissed');
+          break;
+        }
+        case 'alternative': {
+          const chip = peekAction(tabId, msg.reqId);
+          alternativeAction(tabId, msg.reqId, msg.actual);
+          void event(tabId, 'did something else', msg.actual);
+          if (chip) void recordChip(tabId, chip, 'alternative', msg.actual);
           break;
         }
         case 'seen': {
@@ -413,6 +431,7 @@ export default defineBackground(() => {
     const paused = tabId === undefined ? false : await isPaused(tabId);
     return describeStatus(await loadSettings(), sender.tab?.url, paused);
   });
+  onMessage('getAnalytics', () => elastic.analytics());
   onMessage('clearKnown', () => clearAll());
   onMessage('getDebug', ({ data, sender }) => snapshotFor(data.tabId ?? sender.tab?.id));
   onMessage('setDebug', async ({ data, sender }) => {

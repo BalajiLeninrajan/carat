@@ -102,6 +102,33 @@ describe('popup', () => {
     expect(clear.dataset.state).toBe('idle');
   });
 
+  it('loads suggestion analytics on the analytics tab', async () => {
+    sendMessage.mockImplementation(async (type) => {
+      if (type === 'getAnalytics') {
+        return {
+          enabled: true,
+          window: '24h',
+          totals: { key: 'all', suggested: 4, accepted: 1, dismissed: 1, alternative: 2, acceptanceRate: 25 },
+          byKind: [{ key: 'open', suggested: 3, accepted: 0, dismissed: 1, alternative: 2, acceptanceRate: 0 }],
+          byHost: [{ key: 'shop.example', suggested: 3, accepted: 0, dismissed: 1, alternative: 2, acceptanceRate: 0 }],
+          recent: [{ at: '2026-09-20T01:00:00Z', host: 'shop.example', kind: 'open', label: 'Open AirPods', outcome: 'alternative', actual: 'clicked Back' }],
+          facts: ['shop.example looks indecisive: 3 suggestions were skipped.'],
+        };
+      }
+      return settings;
+    });
+    await import('./main');
+    await flush();
+
+    (document.getElementById('tab-analytics') as HTMLButtonElement).click();
+    await flush();
+
+    expect(sendMessage).toHaveBeenCalledWith('getAnalytics', undefined);
+    expect(document.getElementById('analytics')?.textContent).toContain('25%');
+    expect(document.getElementById('analytics')?.textContent).toContain('Open AirPods');
+    expect(document.getElementById('analytics')?.textContent).toContain('indecisive');
+  });
+
   it('goes offline when the worker never answers, and retries on demand', async () => {
     vi.useFakeTimers();
     sendMessage.mockImplementation(() => new Promise(() => undefined));
