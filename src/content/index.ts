@@ -1,6 +1,7 @@
-import { PORT_NAME, TARGET_EVENT, type ActionKind, type ContentToWorker, type FieldInfo, type WorkerToContent } from "../shared/protocol.js";
+import { PORT_NAME, TARGET_EVENT, TASK_REQ, type ActionKind, type ContentToWorker, type FieldInfo, type WorkerToContent } from "../shared/protocol.js";
 import { isSensitiveField, maskSensitive } from "../shared/redact.js";
 import { Ghost } from "./ghost.js";
+import { Palette } from "./palette.js";
 import { Ring } from "./ring.js";
 
 /** How long the user must be still, after interacting, before Carat looks at the page. */
@@ -9,27 +10,47 @@ const IDLE_MS = 500;
 const TYPING_IDLE_MS = 250;
 
 // ---------------------------------------------------------------------------
-// Port to the worker. It drops whenever the service worker is recycled, so
-// reconnect lazily on the next send.
+// Port to the worker. It drops whenever the service worker is recycled, so it
+// is re-opened on a timer as well as on demand.
 
 let port: chrome.runtime.Port | null = null;
+let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+
+/**
+ * The worker can only reach this tab while a port is open, and the toolbar
+ * shortcut needs that even on a page the user has not touched, so the port is
+ * opened on load and re-opened whenever it drops (the service worker is
+ * recycled roughly every 30s of quiet).
+ */
+function connect(): chrome.runtime.Port | null {
+  if (port) return port;
+  // After the extension is reloaded this context is orphaned: chrome.runtime.id is gone.
+  if (!chrome.runtime?.id) return null;
+  try {
+    port = chrome.runtime.connect({ name: PORT_NAME });
+  } catch {
+    return null;
+  }
+  port.onMessage.addListener(onWorkerMessage);
+  port.onDisconnect.addListener(() => {
+    // Reading lastError marks it handled (e.g. "moved into back/forward cache").
+    void chrome.runtime.lastError;
+    port = null;
+    clearTimeout(reconnectTimer);
+    if (document.visibilityState === "visible") reconnectTimer = setTimeout(connect, 1000);
+  });
+  return port;
+}
 
 function post(msg: ContentToWorker): void {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      if (!port) {
-        port = chrome.runtime.connect({ name: PORT_NAME });
-        port.onMessage.addListener(onWorkerMessage);
-        port.onDisconnect.addListener(() => {
-          // Reading lastError marks it handled (e.g. "moved into back/forward cache").
-          void chrome.runtime.lastError;
-          port = null;
-        });
-      }
-      port.postMessage(msg);
+      const p = connect();
+      if (!p) return;
+      p.postMessage(msg);
       return;
     } catch {
-      // Disconnected, or the extension was reloaded and this context is orphaned.
+      // Disconnected between connect() and the send: drop it and retry once.
       port = null;
     }
   }
@@ -40,8 +61,15 @@ function post(msg: ContentToWorker): void {
 // the page is restored.
 addEventListener("pagehide", () => {
   sendSeen();
+  clearTimeout(reconnectTimer);
   port?.disconnect();
   port = null;
+});
+
+// Coming back from the back/forward cache, or becoming visible again, restores
+// the connection the worker needs to reach this tab.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") connect();
 });
 
 // ---------------------------------------------------------------------------
@@ -313,7 +341,51 @@ function acceptGhost(g: GhostState, wordOnly: boolean): void {
   insertText(g.el, chunk);
 }
 
+// ---------------------------------------------------------------------------
+// Tasks: Ctrl+Shift+K, an instruction, then steps carried out for you
+
+const palette = new Palette();
+let taskRunning = false;
+
+palette.onSubmit = (goal) => {
+  taskRunning = true;
+  palette.startTask(goal);
+  post({ type: "task", goal, url: location.href });
+};
+palette.onAnswer = (answer) => post({ type: "task-answer", answer });
+// Esc in the question box means "no" to the step it is asking about.
+palette.onQuestionEscape = () => {
+  if (taskRunning) post({ type: "dismiss", reqId: TASK_REQ });
+};
+palette.onStop = () => {
+  if (taskRunning) post({ type: "task-stop" });
+  taskRunning = false;
+  palette.hideTask();
+};
+
 function onWorkerMessage(msg: WorkerToContent): void {
+  switch (msg.type) {
+    case "palette":
+      palette.open();
+      return;
+    case "task-start":
+      taskRunning = true;
+      palette.startTask(msg.goal);
+      return;
+    case "task-step":
+      // A step that is no longer waiting has been answered one way or another.
+      if (msg.state !== "waiting") palette.hideQuestion();
+      palette.step(msg.index, msg.text, msg.state, msg.why);
+      return;
+    case "task-ask":
+      palette.question(msg.question);
+      return;
+    case "task-done":
+      taskRunning = false;
+      palette.finish(msg.summary);
+      return;
+  }
+
   if (msg.type === "result") {
     if (!suggestion || suggestion.reqId !== msg.reqId) return;
     if (msg.ok) {
@@ -328,8 +400,9 @@ function onWorkerMessage(msg: WorkerToContent): void {
     }
     return;
   }
-  // Replies to an older idle: the user has moved on since.
-  if (msg.reqId !== activity) return;
+  // Replies to an older idle: the user has moved on since. Task steps are
+  // always current: the task, not the user, is driving.
+  if (msg.reqId !== activity && msg.reqId !== TASK_REQ) return;
   switch (msg.type) {
     case "target":
       if (!lastTarget?.isConnected) return;
@@ -337,6 +410,21 @@ function onWorkerMessage(msg: WorkerToContent): void {
       ring.show(lastTarget);
       break;
     case "action":
+      // Browser actions (tab switch, address bar) ring nothing: no target message came.
+      if (msg.browser) {
+        suggestion = {
+          reqId: msg.reqId,
+          el: document.documentElement,
+          ready: true,
+          kind: msg.kind,
+          value: msg.value,
+          irreversible: msg.irreversible,
+          armed: false,
+          scrolled: true,
+        };
+        ring.showFloating({ kind: msg.kind, label: msg.label, value: msg.value, irreversible: msg.irreversible });
+        return;
+      }
       if (!suggestion || suggestion.reqId !== msg.reqId) return;
       suggestion.ready = true;
       suggestion.kind = msg.kind;
@@ -407,7 +495,7 @@ function acceptCurrent(): boolean {
     return true;
   }
   clearTimeout(disarmTimer);
-  if (s.kind === "fill" && fillLocally(s)) return true;
+  if (s.kind === "fill" && s.reqId !== TASK_REQ && fillLocally(s)) return true;
   post({ type: "accept", reqId: s.reqId });
   return true;
 }
@@ -516,6 +604,19 @@ document.addEventListener(
   "keydown",
   (e) => {
     if (!e.isTrusted) return;
+    if (e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey && e.code === "KeyK") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      palette.open();
+      return;
+    }
+    if (e.key === "Escape" && (palette.isOpen || taskRunning)) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (palette.isOpen) palette.close();
+      else palette.onStop();
+      return;
+    }
     if (e.code === "ShiftRight") {
       if (!e.repeat) rightShiftTap = !e.ctrlKey && !e.altKey && !e.metaKey;
       return;
@@ -645,7 +746,7 @@ for (const type of ["keydown", "input", "pointerdown", "click", "change", "focus
 new MutationObserver((records) => {
   if (pageChanged) return;
   const focused = deepActiveElement();
-  const ours = [ring.element, ghost.element].filter((el): el is HTMLElement => !!el);
+  const ours = [ring.element, ghost.element, palette.element].filter((el): el is HTMLElement => !!el);
   const isOurs = (r: MutationRecord) => ours.some((el) => r.target === el || [...r.addedNodes].includes(el));
   if (records.some((r) => r.target !== focused && !isOurs(r))) {
     pageChanged = true;
@@ -660,6 +761,7 @@ new MutationObserver((records) => {
 // A fresh page in the middle of a flow (you just clicked "Checkout") gets a
 // prediction without waiting for you to touch it. The worker ignores this
 // unless you interacted in this tab (or its opener) within the last minute.
+connect();
 schedule("load");
 
 // ---------------------------------------------------------------------------

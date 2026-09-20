@@ -134,8 +134,14 @@ export async function streamResponse(
   return { text, ttftMs, totalMs: Math.round(performance.now() - started), usage };
 }
 
-/** Pull `"target": <int>` out of partial JSON as soon as the number is complete. */
-export function partialTarget(json: string): number | null {
-  const m = /"target"\s*:\s*(-?\d+)\s*[,}]/.exec(json);
-  return m ? Number(m[1]) : null;
+/**
+ * Pull kind and target out of partial JSON as soon as each is complete. They
+ * are the first two fields, so a target can be ringed long before the rest of
+ * the answer arrives — and kind says whether that number is a page control or
+ * one of the browser targets.
+ */
+export function partialAction(json: string): { kind: string | null; target: number | null } {
+  const kind = /"kind"\s*:\s*"(\w+)"/.exec(json);
+  const target = /"target"\s*:\s*(-?\d+)\s*[,}]/.exec(json);
+  return { kind: kind ? kind[1] : null, target: target ? Number(target[1]) : null };
 }

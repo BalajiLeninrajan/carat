@@ -47,6 +47,8 @@ export class Ring {
   private ring!: HTMLDivElement;
   private chip!: HTMLDivElement;
   private target: Element | null = null;
+  /** Browser actions (tab switch, address bar) have no element: the chip floats. */
+  private floating = false;
   private frame = 0;
   private action: RingAction | null = null;
   private armed = false;
@@ -70,8 +72,22 @@ export class Ring {
   }
 
   /** Ring the element while the rest of the prediction streams in. */
+  /** Show only a chip, for an action that is about the browser, not the page. */
+  showFloating(action: RingAction): void {
+    this.mount();
+    this.target = null;
+    this.floating = true;
+    this.armed = false;
+    this.message = null;
+    this.action = action;
+    this.ring.hidden = true;
+    this.render();
+    this.position();
+  }
+
   show(target: Element): void {
     this.mount();
+    this.floating = false;
     this.target = target;
     this.action = null;
     this.armed = false;
@@ -105,6 +121,7 @@ export class Ring {
   hide(): void {
     cancelAnimationFrame(this.frame);
     this.target = null;
+    this.floating = false;
     this.action = null;
     if (!this.host) return;
     this.ring.hidden = true;
@@ -112,12 +129,12 @@ export class Ring {
   }
 
   get visible(): boolean {
-    return this.target != null;
+    return this.target != null || this.floating;
   }
 
   /** Is the target outside the viewport? */
   offscreen(): boolean {
-    if (!this.target) return false;
+    if (!this.target) return false; // floating chips are always in view
     const r = this.target.getBoundingClientRect();
     return r.bottom < 0 || r.top > innerHeight || r.right < 0 || r.left > innerWidth;
   }
@@ -146,11 +163,19 @@ export class Ring {
     add("kbd", "R⇧");
     if (a!.irreversible && !this.armed) add("kbd", "R⇧");
     const value = a!.value && !a!.label.includes(a!.value) ? `: ${a!.value}` : "";
-    const text = (a!.kind === "fill" || a!.kind === "select") ? a!.label + value : a!.label;
+    const verb = a!.kind === "switch" ? "Switch to " : a!.kind === "open" ? "Open " : "";
+    const text = a!.kind === "fill" || a!.kind === "select" ? a!.label + value : verb + a!.label;
     add("span", this.armed ? `again to ${a!.label}` : text, "label");
   }
 
   private position(): void {
+    if (this.floating && this.host) {
+      // Bottom centre: it is about the browser, not a spot on the page.
+      const chipW = this.chip.offsetWidth || 160;
+      this.chip.style.left = `${Math.max(4, (innerWidth - chipW) / 2)}px`;
+      this.chip.style.top = `${innerHeight - (this.chip.offsetHeight || 24) - 24}px`;
+      return;
+    }
     const t = this.target;
     if (!t || !this.host) return;
     if (!t.isConnected) {

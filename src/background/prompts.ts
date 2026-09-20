@@ -185,11 +185,16 @@ Kinds:
 - "click": press button / link / checkbox / radio / tab / menu item [n].
 - "fill": move to text field [n] and type "value". Only when the value is clearly implied by the page, the notes or the history (e.g. a quantity, a search term, a reference number the user just read). Never invent personal data such as names, addresses, emails, phone numbers, passwords or card numbers.
 - "select": choose the option whose exact text is "value" in combobox [n].
+- "submit": press Enter in text field [n]. Search boxes and many forms submit this way, and a search button often does nothing.
+- "switch": go to another open tab, given as its [Tn].
+- "open": put "value" in the address bar of this tab: a URL goes there, anything else is searched with the user's default search engine.
 
 You must always suggest an action. There is no "nothing" answer: even when the next step is uncertain, pick the single most likely one.
 
 How to decide:
 - Follow the flow the user is in. Read the history as a sequence: what were they trying to get done, and what step comes next? A filled-in form wants its submit button; an opened dialog wants its primary action; a just-added cart item wants checkout.
+- The page usually holds the next step. Only reach for a tab, a search or going back when the page plainly cannot do what comes next: the answer is in another tab, the user is done here, or they need something the site does not have.
+- For "switch", target is the tab's [Tn] number and value is "". For "open", target is 0 and value is what goes in the address bar.
 - <notes> often explain why the user came to this page: if the page is where they would act on a note, the next step is usually to put the note's details into the page (fill the matching field, select the matching option) or to press the control that acts on it.
 - The focused control and the controls near it are the strongest signal. "(required)" fields that are still empty come before submitting.
 - Only use numbers that appear in the outline. Never target a disabled control.
@@ -198,7 +203,7 @@ How to decide:
 - When unsure, choose the control the user is most likely to want next on this page (usually the primary action near the focus, or the first item of the main content).
 
 Output fields:
-- target: the [n] of the control. Always a number from the outline.
+- target: the [n] of the control, or the [Tn] number for "switch". 0 for "open".
 - kind: one of the kinds above.
 - value: the text to type or the option to select; "" for click. Keep it short, at most about 300 characters: for long free-text fields (descriptions, messages, essays) give only the opening sentence or two, and the user continues from there with autocomplete.
 - label: 1 to 4 words for the Tab hint, e.g. "Send reply", "Checkout", "Status: Resolved", "Quantity 2".
@@ -206,19 +211,48 @@ Output fields:
 
 export const ACTION_SCHEMA = {
   type: "object",
-  // `target` first: the ring can move before the rest of the JSON has streamed.
+  // kind and target first: the ring can move before the rest has streamed, and
+  // kind says whether that number is a page control or a tab.
   properties: {
+    kind: { type: "string", enum: ["click", "fill", "select", "submit", "switch", "open"] },
     target: { type: "integer" },
-    kind: { type: "string", enum: ["click", "fill", "select"] },
     value: { type: "string" },
     label: { type: "string" },
     irreversible: { type: "boolean" },
   },
-  required: ["target", "kind", "value", "label", "irreversible"],
+  required: ["kind", "target", "value", "label", "irreversible"],
   additionalProperties: false,
 };
 
 const ACTION_SHOTS: InputMessage[] = [
+  {
+    role: "user",
+    content: `<page>
+PAGE: Expense report — Ledger (https://ledger.example/expenses/new)
+main:
+  heading(1) "New expense"
+  form:
+    [1] textbox "Merchant" = "Northwind Outfitters"
+    [2] textbox "Amount"
+    [3] button "Save"
+</page>
+<browser>
+other open tabs:
+  [T1] tab "Re: Your order NW-55821 — Mail" (mail.example.com/u/0)
+  [T2] tab "Team calendar" (calendar.example.com)
+you can also: open a URL or run a search in this tab
+</browser>
+<notes>
+(none)
+</notes>
+<history>
+- 20s ago: typed into textbox "Merchant": "Northwind Outfitters" [on ledger.example/expenses/new]
+</history>`,
+  },
+  {
+    role: "assistant",
+    content: `{"kind":"switch","target":1,"value":"","label":"Order email","irreversible":false}`,
+  },
   {
     role: "user",
     content: `<page>
@@ -243,7 +277,7 @@ main:
   },
   {
     role: "assistant",
-    content: `{"target":1,"kind":"fill","value":"NW-55821","label":"Order number","irreversible":false}`,
+    content: `{"kind":"fill","target":1,"value":"NW-55821","label":"Order number","irreversible":false}`,
   },
   {
     role: "user",
@@ -272,7 +306,7 @@ contentinfo:
   },
   {
     role: "assistant",
-    content: `{"target":5,"kind":"click","value":"","label":"Checkout","irreversible":false}`,
+    content: `{"kind":"click","target":5,"value":"","label":"Checkout","irreversible":false}`,
   },
   {
     role: "user",
@@ -297,7 +331,7 @@ main:
   },
   {
     role: "assistant",
-    content: `{"target":1,"kind":"select","value":"Resolved","label":"Status: Resolved","irreversible":false}`,
+    content: `{"kind":"select","target":1,"value":"Resolved","label":"Status: Resolved","irreversible":false}`,
   },
   {
     role: "user",
@@ -322,7 +356,7 @@ main:
   },
   {
     role: "assistant",
-    content: `{"target":4,"kind":"click","value":"","label":"Read top story","irreversible":false}`,
+    content: `{"kind":"click","target":4,"value":"","label":"Read top story","irreversible":false}`,
   },
 ];
 
@@ -332,11 +366,15 @@ export function buildActionRequest(opts: {
   outline: string;
   notes: string;
   history: string;
+  browser: string;
 }): ResponsesRequest {
-  const { settings, url, outline, notes, history } = opts;
+  const { settings, url, outline, notes, history, browser } = opts;
   const content = `<page>
 ${outline}
 </page>
+<browser>
+${browser}
+</browser>
 <notes>
 ${notes}
 </notes>
@@ -350,5 +388,95 @@ ${history}
     // Clicks need ~30 tokens; a fill value can need more. Only generated tokens cost anything.
     max_output_tokens: 400,
     text: { format: { type: "json_schema", name: "next_action", strict: true, schema: ACTION_SCHEMA } },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Tasks: an instruction the user typed, carried out step by step
+
+export const TASK_INSTRUCTIONS = `You are Carat, carrying out one instruction for the user inside their browser. You see the current page as an accessibility outline where every control is numbered [n], notes about what the user recently read or heard, a log of what they did, and the steps you have already taken for this instruction.
+
+Decide the SINGLE next step. You will see the page again after it happens, so never plan ahead in one answer: do one thing, then look.
+
+Kinds:
+- "click": press button / link / checkbox / radio / tab / menu item [n].
+- "fill": type "value" into text field [n].
+- "select": choose the option whose exact text is "value" in combobox [n].
+- "submit": press Enter in text field [n]. Search boxes and many forms submit this way, and a search button often does nothing.
+- "switch": go to another open tab, given as its [Tn].
+- "open": put "value" in the address bar of this tab: a URL goes there, anything else is searched with the user's default search engine.
+- "wait": do nothing and look at the page again, when it is still loading or updating and there is nothing to act on yet. Working out the next step already takes a moment, so this is just another look.
+- "ask": you cannot continue without something only the user knows (a value that is not on the page or in the notes, or a choice between options that are genuinely equivalent). Put the question in "message".
+- "done": the instruction has been carried out, or nothing more can be done. Put a one-sentence summary in "message".
+
+How to decide:
+- Work from the page as it is now. If your last step did not do what you expected (a menu did not open, a validation error appeared), react to that instead of repeating it.
+- A step marked "nothing changed" did not work: never repeat it. Try another way — press Enter in the field with "submit" instead of clicking a search button, or pick a different control.
+- Prefer the shortest route to what the user asked for. Do not tidy up, explore, or do anything they did not ask for.
+- Only use numbers that appear in the outline, and never a disabled control. Tab numbers come from <browser>.
+- Use the page first. "open" and "switch" are for when the instruction needs something this page does not have: a search, a different site, or a tab already holding the answer. The user confirms leaving the current site.
+- Fill values must come from the instruction, the page, the notes or the history. Never invent personal data (names, addresses, emails, phone numbers, card numbers).
+- Answer "done" only when the whole instruction has been carried out. A flow with more of itself left (a return leg to choose, passenger details, a review page, a final confirmation only the user can give) is not finished: carry on to the next part. If all that remains is something the user must do themselves, say so in the "done" message.
+- Stay on the task the user gave you. Never log out, delete anything they did not mention, or navigate away from the site.
+
+Output fields:
+- why: a short phrase (under 10 words) saying why this step, shown to the user.
+- kind, target, value: as above. target is the [n] of a control, the [Tn] number for "switch", or 0 for "open", "wait", "ask" and "done".
+- label: 1 to 4 words naming the control, e.g. "Send reply", "Priority".
+- irreversible: true if this step sends, submits, posts, publishes, pays, buys, deletes or otherwise cannot be undone. The user confirms those by hand.
+- message: the question for "ask", the summary for "done", otherwise "".`;
+
+export const TASK_SCHEMA = {
+  type: "object",
+  properties: {
+    why: { type: "string" },
+    kind: { type: "string", enum: ["click", "fill", "select", "submit", "switch", "open", "wait", "ask", "done"] },
+    target: { type: "integer" },
+    value: { type: "string" },
+    label: { type: "string" },
+    irreversible: { type: "boolean" },
+    message: { type: "string" },
+  },
+  required: ["why", "kind", "target", "value", "label", "irreversible", "message"],
+  additionalProperties: false,
+};
+
+export function buildTaskRequest(opts: {
+  settings: Settings;
+  url: string;
+  goal: string;
+  outline: string;
+  notes: string;
+  history: string;
+  /** What has been done so far in this task, oldest first. */
+  steps: string[];
+  browser: string;
+}): ResponsesRequest {
+  const { settings, url, goal, outline, notes, history, steps, browser } = opts;
+  const content = `<instruction>
+${goal}
+</instruction>
+<page>
+${outline}
+</page>
+<browser>
+${browser}
+</browser>
+<notes>
+${notes}
+</notes>
+<history>
+${history}
+</history>
+<steps_taken>
+${steps.length ? steps.map((s, i) => `${i + 1}. ${s}`).join("\n") : "(none yet)"}
+</steps_taken>
+What is the next step?`;
+  return {
+    ...common(settings, settings.actionModel, url, "task"),
+    instructions: TASK_INSTRUCTIONS,
+    input: [{ role: "user", content }],
+    max_output_tokens: 400,
+    text: { format: { type: "json_schema", name: "next_step", strict: true, schema: TASK_SCHEMA } },
   };
 }

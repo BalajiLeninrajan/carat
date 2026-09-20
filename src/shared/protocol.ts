@@ -65,7 +65,33 @@ export interface SeenMessage {
   text: string;
 }
 
-export type ContentToWorker = IdleMessage | LogMessage | AcceptMessage | DismissMessage | SeenMessage;
+/** The user typed an instruction in the palette. */
+export interface TaskMessage {
+  type: "task";
+  goal: string;
+  url: string;
+}
+
+/** The user answered a question the task asked. */
+export interface TaskAnswerMessage {
+  type: "task-answer";
+  answer: string;
+}
+
+/** Stop the running task (Stop button, Esc, or the user acting themselves). */
+export interface TaskStopMessage {
+  type: "task-stop";
+}
+
+export type ContentToWorker =
+  | IdleMessage
+  | LogMessage
+  | AcceptMessage
+  | DismissMessage
+  | SeenMessage
+  | TaskMessage
+  | TaskAnswerMessage
+  | TaskStopMessage;
 
 // ---------------------------------------------------------------------------
 // Worker → content
@@ -77,7 +103,16 @@ export type ContentToWorker = IdleMessage | LogMessage | AcceptMessage | Dismiss
  */
 export const TARGET_EVENT = "carat-target";
 
-export type ActionKind = "click" | "fill" | "select";
+/**
+ * reqId used by task steps. Suggestions are normally ignored once the user has
+ * done anything since the request; a task's own steps are always current.
+ */
+export const TASK_REQ = -1;
+
+export type ActionKind = "click" | "fill" | "select" | "submit" | "switch" | "open";
+
+/** Kinds that act on the browser (tab strip, address bar) rather than the page. */
+export const BROWSER_KINDS: ActionKind[] = ["switch", "open"];
 
 /** The target is known (streamed early); the rest of the prediction is still coming. */
 export interface TargetMessage {
@@ -93,6 +128,8 @@ export interface ActionMessage {
   label: string;
   value: string;
   irreversible: boolean;
+  /** Acts on the browser, so there is nothing on the page to ring. */
+  browser?: boolean;
 }
 
 /** No suggestion after all (model said none, or the target was invalid). */
@@ -119,4 +156,52 @@ export interface GhostMessage {
   done: boolean;
 }
 
-export type WorkerToContent = TargetMessage | ActionMessage | ClearMessage | ResultMessage | GhostMessage;
+/** Open the instruction box (the toolbar shortcut fires in the worker). */
+export interface OpenPaletteMessage {
+  type: "palette";
+}
+
+/**
+ * Open the task panel for a task already running in this tab. Sent when a page
+ * loads into a tab that has one: the old page's panel went with it.
+ */
+export interface TaskStartMessage {
+  type: "task-start";
+  goal: string;
+}
+
+export type TaskStepState = "running" | "done" | "failed" | "skipped" | "waiting";
+
+/** One step of a running task, created or updated. */
+export interface TaskStepMessage {
+  type: "task-step";
+  index: number;
+  text: string;
+  state: TaskStepState;
+  /** The model's one-line reason for this step. */
+  why?: string;
+}
+
+/** The task needs something from the user before it can go on. */
+export interface TaskAskMessage {
+  type: "task-ask";
+  question: string;
+}
+
+/** The task is over: finished, stopped, or gave up. */
+export interface TaskDoneMessage {
+  type: "task-done";
+  summary: string;
+}
+
+export type WorkerToContent =
+  | TargetMessage
+  | ActionMessage
+  | ClearMessage
+  | ResultMessage
+  | GhostMessage
+  | OpenPaletteMessage
+  | TaskStartMessage
+  | TaskStepMessage
+  | TaskAskMessage
+  | TaskDoneMessage;

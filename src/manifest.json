@@ -8,7 +8,8 @@
     "storage",
     "tabs",
     "webNavigation",
-    "offscreen"
+    "offscreen",
+    "search"
   ],
   "host_permissions": [
     "<all_urls>"
@@ -32,5 +33,14 @@
   "options_page": "options/options.html",
   "action": {
     "default_title": "Carat"
+  },
+  "commands": {
+    "open-palette": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+K",
+        "mac": "Command+Shift+K"
+      },
+      "description": "Ask Carat to do something on this page"
+    }
   }
 }

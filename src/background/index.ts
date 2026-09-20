@@ -1,12 +1,14 @@
-import { PORT_NAME, type ContentToWorker, type IdleMessage, type WorkerToContent } from "../shared/protocol.js";
+import { PORT_NAME, TASK_REQ, type ContentToWorker, type IdleMessage, type WorkerToContent } from "../shared/protocol.js";
 import { isBlocked, loadSettings } from "../shared/settings.js";
 import { getTree } from "./axmirror.js";
+import { browserContext } from "./browser.js";
 import { CdpPausedError, isPaused, resume } from "./cdp.js";
 import { appendHistory, historyFor, sinceLastInteraction } from "./history.js";
 import { notesFor, recordSeen } from "./notes.js";
 import { buildOutline } from "./outline.js";
 import { cancelCompletion, complete } from "./complete.js";
 import { acceptAction, cancelPrediction, dismissAction, predictAction } from "./predict.js";
+import { answerTask, confirmTask, hasTask, resumeTask, startTask, stopTask } from "./task.js";
 import { buildActionRequest, buildTextRequest } from "./prompts.js";
 import "./listen.js";
 import "./visits.js";
@@ -30,6 +32,25 @@ chrome.action.onClicked.addListener(async (tab) => {
   }
 });
 
+/** Live content-script connections, so worker-side events can reach a tab. */
+const ports = new Map<number, (msg: WorkerToContent) => void>();
+
+/** The tab the user is looking at, so a task's panel can follow them to it. */
+let activeTabId: number | undefined;
+chrome.tabs.query({ active: true, lastFocusedWindow: true }).then(([t]) => (activeTabId = t?.id));
+chrome.tabs.onActivated.addListener(({ tabId }) => {
+  activeTabId = tabId;
+  const post = ports.get(tabId);
+  if (post) resumeTask(tabId, post); // show a running task here too
+});
+
+/** Send a task message to the task's own tab and to the tab in front of the user. */
+function toTaskViews(taskTabId: number, msg: WorkerToContent): void {
+  for (const id of new Set([taskTabId, activeTabId])) {
+    if (id != null) ports.get(id)?.(msg);
+  }
+}
+
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== PORT_NAME) return;
   const tabId = port.sender?.tab?.id;
@@ -41,7 +62,13 @@ chrome.runtime.onConnect.addListener((port) => {
       // The page went away; nothing to show it on.
     }
   };
-  port.onDisconnect.addListener(() => void chrome.runtime.lastError);
+  ports.set(tabId, post);
+  // A page load in a tab with a running task lost the panel with the old page.
+  resumeTask(tabId, post);
+  port.onDisconnect.addListener(() => {
+    void chrome.runtime.lastError;
+    if (ports.get(tabId) === post) ports.delete(tabId);
+  });
   port.onMessage.addListener(async (msg: ContentToWorker) => {
     switch (msg.type) {
       case "idle":
@@ -51,13 +78,27 @@ chrome.runtime.onConnect.addListener((port) => {
         appendHistory(tabId, msg.entry, msg.url);
         break;
       case "accept": {
+        if (msg.reqId === TASK_REQ) {
+          confirmTask(tabId, true);
+          break;
+        }
         const result = await acceptAction(tabId, msg.reqId);
         post({ type: "result", reqId: msg.reqId, ...result });
         if (!result.ok) console.warn(`[carat] accept refused: ${result.reason}`);
         break;
       }
       case "dismiss":
-        dismissAction(tabId, msg.reqId);
+        if (msg.reqId === TASK_REQ) confirmTask(tabId, false);
+        else dismissAction(tabId, msg.reqId);
+        break;
+      case "task":
+        startTask(tabId, msg.goal, msg.url, toTaskViews);
+        break;
+      case "task-answer":
+        answerTask(tabId, msg.answer);
+        break;
+      case "task-stop":
+        stopTask(tabId);
         break;
       case "seen": {
         const settings = await loadSettings();
@@ -80,6 +121,7 @@ async function onIdle(tabId: number, msg: IdleMessage, post: (msg: WorkerToConte
 
   const settings = await loadSettings();
   if (!settings.enabled || isBlocked(settings, msg.url)) return;
+  if (hasTask(tabId)) return; // the task is driving; its own steps are the suggestions
 
   const field = msg.field;
   const typing = !!field && !!field.typed.trim() && (msg.reason === "input" || msg.reason === "keydown");
@@ -130,7 +172,14 @@ ${notes}`);
     });
     console.log(`Text prompt (user turn):\n${textRequest.input[textRequest.input.length - 1].content}`);
   } else {
-    const actionRequest = buildActionRequest({ settings, url: msg.url, outline: actionOutline.text, notes, history });
+    const actionRequest = buildActionRequest({
+      settings,
+      url: msg.url,
+      outline: actionOutline.text,
+      notes,
+      history,
+      browser: (await browserContext(tabId)).text,
+    });
     console.log(`Action prompt (user turn):\n${actionRequest.input[actionRequest.input.length - 1].content}`);
     console.log("Action request body:", actionRequest);
   }
@@ -153,5 +202,14 @@ ${notes}`);
   }
   if (!typing) predict();
 }
+
+// Ctrl+Shift+K anywhere in Chrome opens the instruction box on the active tab.
+chrome.commands.onCommand.addListener(async (command) => {
+  if (command !== "open-palette") return;
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const post = tab?.id != null ? ports.get(tab.id) : undefined;
+  if (post) post({ type: "palette" });
+  else console.warn("[carat] no content script on this tab (reload the page, or it is a chrome:// page)");
+});
 
 console.log("[carat] service worker started");

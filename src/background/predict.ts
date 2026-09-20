@@ -5,11 +5,12 @@
  * accepted actions and remembers dismissals.
  */
 
-import type { ActionKind, WorkerToContent } from "../shared/protocol.js";
+import { BROWSER_KINDS, type ActionKind, type WorkerToContent } from "../shared/protocol.js";
 import type { Settings } from "../shared/settings.js";
-import { announceTarget, click, focus, select, type ActuateResult } from "./actuate.js";
+import { announceTarget, click, focus, pressEnter, select, type ActuateResult } from "./actuate.js";
+import { browserContext, openOrSearch, switchToTab, type BrowserContext, type TabTarget } from "./browser.js";
 import { appendHistory } from "./history.js";
-import { partialTarget, streamResponse } from "./llm.js";
+import { partialAction, streamResponse } from "./llm.js";
 import type { Candidate, Outline } from "./outline.js";
 import { buildActionRequest } from "./prompts.js";
 
@@ -19,7 +20,10 @@ const IRREVERSIBLE = /\b(send|submit|pay|purchase|buy|order|place|checkout|delet
 interface Pending {
   reqId: number;
   url: string;
-  candidate: Candidate;
+  /** The page control to act on; absent for browser actions. */
+  candidate?: Candidate;
+  /** The tab to switch to, for kind "switch". */
+  tab?: TabTarget;
   kind: ActionKind;
   value: string;
   label: string;
@@ -85,12 +89,13 @@ export async function predictAction(opts: {
   post: (msg: WorkerToContent) => void;
 }): Promise<void> {
   const { tabId, reqId, url, settings, outline, notes, history, post } = opts;
+  const browser: BrowserContext = await browserContext(tabId);
   cancelPrediction(tabId);
   pending.delete(tabId);
   const controller = new AbortController();
   inflight.set(tabId, controller);
 
-  const request = buildActionRequest({ settings, url, outline: outline.text, notes, history });
+  const request = buildActionRequest({ settings, url, outline: outline.text, notes, history, browser: browser.text });
   let shown: Candidate | null = null;
   /** The early target's announce + "target" message, which must land before "action". */
   let announced: Promise<void> = Promise.resolve();
@@ -109,7 +114,10 @@ export async function predictAction(opts: {
       request,
       (json) => {
         if (shown) return;
-        const n = partialTarget(json);
+        const { kind, target: n } = partialAction(json);
+        // Browser actions have nothing on the page to ring, and their number
+        // means a tab, not a control.
+        if (!kind || BROWSER_KINDS.includes(kind as ActionKind)) return;
         if (n == null || n <= 0) return;
         const c = candidateFor(n);
         if (!c) return;
@@ -136,10 +144,28 @@ export async function predictAction(opts: {
       console.warn(`[carat] action: output was cut off; salvaged ${parsed.kind} [${parsed.target}] with a ${parsed.value.length}-char value`);
     }
 
-    const c = candidateFor(parsed.target);
     const summary =
       `ttft ${result.ttftMs}ms · target ${targetMs ?? "-"}ms · total ${result.totalMs}ms · ` +
       `${result.usage?.input ?? "?"} in (${result.usage?.cached ?? 0} cached) / ${result.usage?.output ?? "?"} out`;
+
+    // Tab strip / address bar: nothing on the page to ring, so the chip floats.
+    if (BROWSER_KINDS.includes(parsed.kind as ActionKind)) {
+      const tab = parsed.kind === "switch" ? browser.tabs[parsed.target - 1] : undefined;
+      if (parsed.kind === "switch" && !tab) {
+        console.log(`[carat] action → no tab [T${parsed.target}] · ${summary}`);
+        post({ type: "clear", reqId });
+        return;
+      }
+      const kind = parsed.kind as ActionKind;
+      const label =
+        parsed.label.trim() || (tab ? tab.title.slice(0, 40) : parsed.value);
+      pending.set(tabId, { reqId, url, tab, kind, value: parsed.value, label });
+      post({ type: "action", reqId, kind, label, value: parsed.value, irreversible: false, browser: true });
+      console.log(`[carat] action → ${kind} ${tab ? `tab "${tab.title}"` : `"${parsed.value}"`} · ${summary}`);
+      return;
+    }
+
+    const c = candidateFor(parsed.target);
     if (!c) {
       console.log(`[carat] action → unusable target [${parsed.target}] (not on the page, or dismissed) · ${summary}`);
       post({ type: "clear", reqId });
@@ -174,8 +200,11 @@ export async function acceptAction(tabId: number, reqId: number): Promise<Actuat
   const p = pending.get(tabId);
   if (!p || p.reqId !== reqId) return { ok: false, reason: "That suggestion has expired." };
   pending.delete(tabId);
-  const id = p.candidate.backendNodeId;
   try {
+    if (p.kind === "switch") return p.tab ? await switchToTab(p.tab) : { ok: false, reason: "That tab is gone." };
+    if (p.kind === "open") return await openOrSearch(tabId, p.value);
+    if (!p.candidate) return { ok: false, reason: "That suggestion has expired." };
+    const id = p.candidate.backendNodeId;
     switch (p.kind) {
       case "click": {
         const result = await click(tabId, id);
@@ -189,6 +218,10 @@ export async function acceptAction(tabId: number, reqId: number): Promise<Actuat
         return await focus(tabId, id);
       case "select":
         return (await select(tabId, id, p.value)) ?? (await click(tabId, id));
+      case "submit":
+        return await pressEnter(tabId, id);
+      default:
+        return { ok: false, reason: "That suggestion is no longer valid." };
     }
   } catch (e) {
     console.error("[carat] accept failed:", e);
@@ -200,6 +233,10 @@ export function dismissAction(tabId: number, reqId: number): void {
   const p = pending.get(tabId);
   if (!p || p.reqId !== reqId) return;
   pending.delete(tabId);
-  dismissed.add(`${p.url}|${p.candidate.backendNodeId}`);
-  appendHistory(tabId, `dismissed suggestion: ${p.kind} ${p.candidate.role} "${p.candidate.name}"`, p.url);
+  if (p.candidate) dismissed.add(`${p.url}|${p.candidate.backendNodeId}`);
+  appendHistory(
+    tabId,
+    `dismissed suggestion: ${p.kind} ${p.candidate ? `${p.candidate.role} "${p.candidate.name}"` : p.label}`,
+    p.url,
+  );
 }

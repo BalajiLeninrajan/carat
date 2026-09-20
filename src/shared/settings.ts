@@ -30,7 +30,7 @@ export interface Settings {
 
 // Picked by the model × reasoning ablation (npm run eval): as accurate as the
 // alternatives with no reasoning, and the tightest latency tail for ghost text.
-export const DEFAULT_MODEL = "gpt-5.6-terra";
+export const DEFAULT_MODEL = "gpt-5.6-luna";
 /** Earlier defaults: stored settings still on one of these follow the new default. */
 export const PREVIOUS_DEFAULT_MODELS = ["gpt-5.6-luna"];
 

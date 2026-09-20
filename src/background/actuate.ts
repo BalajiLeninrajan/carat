@@ -84,6 +84,60 @@ export async function click(tabId: number, backendNodeId: number): Promise<Actua
   }
 }
 
+/**
+ * Put a value into a field the way typing would: through the native setter, so
+ * frameworks that track .value (React) see it, then input and change events.
+ * Handles text inputs, textareas, date/time inputs and contenteditable.
+ */
+export async function setValue(tabId: number, backendNodeId: number, value: string): Promise<ActuateResult> {
+  const objectId = await objectFor(tabId, backendNodeId);
+  try {
+    const outcome = await callOn<string>(
+      tabId,
+      objectId,
+      `function (value) {
+        const el = this;
+        if (!el.isConnected) return "gone";
+        el.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "instant" });
+        if (typeof el.focus === "function") el.focus({ preventScroll: true });
+        if (el.isContentEditable) {
+          el.textContent = value;
+          el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }));
+          return "ok";
+        }
+        const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+        const desc = Object.getOwnPropertyDescriptor(proto, "value");
+        if (!desc || !desc.set) return "not-a-field";
+        desc.set.call(el, value);
+        el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        return "ok";
+      }`,
+      [value],
+      true,
+    );
+    if (outcome === "ok") return { ok: true };
+    return { ok: false, reason: outcome === "gone" ? "The field is no longer on the page." : "That target is not a field." };
+  } finally {
+    release(tabId, objectId);
+  }
+}
+
+/**
+ * Press Enter in a field. Search boxes and many forms submit this way, and
+ * their "Search" button often does nothing when clicked. The key events go
+ * through CDP, so they are trusted.
+ */
+export async function pressEnter(tabId: number, backendNodeId: number): Promise<ActuateResult> {
+  const focused = await focus(tabId, backendNodeId);
+  if (!focused.ok) return focused;
+  const key = { key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 };
+  await send(tabId, "Input.dispatchKeyEvent", { type: "rawKeyDown", ...key });
+  await send(tabId, "Input.dispatchKeyEvent", { type: "char", ...key, text: "\r" });
+  await send(tabId, "Input.dispatchKeyEvent", { type: "keyUp", ...key });
+  return { ok: true };
+}
+
 export async function focus(tabId: number, backendNodeId: number): Promise<ActuateResult> {
   await send(tabId, "DOM.getDocument", { depth: 0 });
   await send(tabId, "DOM.scrollIntoViewIfNeeded", { backendNodeId }).catch(() => {});
