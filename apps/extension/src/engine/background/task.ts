@@ -23,7 +23,11 @@ import { buildTaskRequest } from "./prompts";
 
 /** How long the page is given to react before it is read again. */
 const SETTLE_MS = 450;
-/** How long a confirmation waits for the user before moving on without it. */
+/**
+ * How long a confirmation waits before it counts as declined. The step is
+ * never taken without an answer: silence skips it, the task carries on with
+ * something else, and the model is told nobody answered.
+ */
 const CONFIRM_TIMEOUT_MS = 5 * 60_000;
 
 /** Labels that mean "this cannot be undone": confirmed by hand, whatever the model says. */
