@@ -6,6 +6,6 @@ export { send } from './send';
 export { pageMeta } from './page-meta';
 export type { ScriptContext } from './context';
 export { startStatus, STATUS_TIMING } from './status-poller';
-export type { StatusHandle } from './status-poller';
+export type { StatusHandle, StatusOptions } from './status-poller';
 export { createPageState } from './page-state';
 export type { PageState } from './page-state';

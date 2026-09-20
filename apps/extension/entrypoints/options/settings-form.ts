@@ -14,6 +14,7 @@ export interface SettingsFormValues {
   apiKey: string;
   model: string;
   statusLine: boolean;
+  sound: boolean;
   cfAccountId: string;
   cfApiToken: string;
   smartModel: string;
@@ -39,6 +40,7 @@ export function normalizeSettings(v: SettingsFormValues): Partial<Settings> {
     apiKey: v.apiKey.trim(),
     model: model === '' ? DEFAULT_SETTINGS.model : model,
     statusLine: v.statusLine,
+    sound: v.sound,
     cfAccountId: v.cfAccountId.trim(),
     cfApiToken: v.cfApiToken.trim(),
     smartModel, // blank is a setting of its own: the fast model with low reasoning

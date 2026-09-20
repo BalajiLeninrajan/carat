@@ -14,6 +14,12 @@ export interface StatusInfo {
   provider: Settings['provider'];
   /** The model name shown to the user; "local" when the regex fallback is what will answer. */
   model: string;
+  /**
+   * Whether the chip may make a sound on Tab. The status line itself never
+   * does; this rides along because the status poll is the one channel a page
+   * has for a setting, and the chip should follow a change without a reload.
+   */
+  sound: boolean;
 }
 
 export function describeStatus(settings: Settings, url: string | undefined): StatusInfo {
@@ -31,6 +37,7 @@ export function describeStatus(settings: Settings, url: string | undefined): Sta
   const base: Omit<StatusInfo, 'provider' | 'model'> = {
     show: settings.statusLine,
     running: reason === undefined,
+    sound: settings.sound,
     ...(reason ? { reason } : {}),
   };
   // The same rules createProvider applies. Cloudflare with an account id and token asks Jev first,

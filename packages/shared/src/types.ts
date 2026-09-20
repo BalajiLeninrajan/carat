@@ -34,6 +34,11 @@ export interface Settings {
   cfApiToken: string; // Workers AI token; stays in chrome.storage.local like apiKey
   disabledHosts: string[]; // exact hosts (with port) where carat neither reads nor suggests
   statusLine: boolean; // small bottom-right line on every page: running or not, and which model
+  /**
+   * The short note the chip plays on Tab, and the softer one on Esc.
+   * Synthesized in the page on the keypress itself; no file, no autoplay.
+   */
+  sound: boolean;
   /** Opt-in: screenshot thin source tabs and read them into notes. Default off. */
   screenshots: boolean;
   /**
@@ -77,6 +82,7 @@ export const DEFAULT_SETTINGS: Settings = {
   cfApiToken: '',
   disabledHosts: [],
   statusLine: false,
+  sound: true,
   screenshots: false,
   smartModel: '',
   eagerness: DEFAULT_EAGERNESS,

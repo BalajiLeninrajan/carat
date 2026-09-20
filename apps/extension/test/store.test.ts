@@ -256,6 +256,7 @@ describe('settings store', () => {
       cfApiToken: '',
       disabledHosts: [],
       statusLine: false,
+      sound: true,
       screenshots: false,
       smartModel: '',
       eagerness: 'eager',

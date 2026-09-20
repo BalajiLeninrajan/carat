@@ -13,7 +13,7 @@ const settings = { ...DEFAULT_SETTINGS, apiKey: 'sk-x', statusLine: true };
 describe('describeStatus', () => {
   it('reports the configured model when a key is set and the page is allowed', () => {
     const s = describeStatus(settings, 'https://maps.google.com/');
-    expect(s).toEqual({ show: true, running: true, provider: 'openai', model: 'gpt-5.6-luna' });
+    expect(s).toEqual({ show: true, running: true, sound: true, provider: 'openai', model: 'gpt-5.6-luna' });
   });
 
   it('reports local when there is no key or the provider is local, whatever the model field says', () => {
@@ -54,20 +54,20 @@ describe('describeStatus', () => {
 
 describe('statusText', () => {
   it('names the model while running and the reason while not', () => {
-    expect(statusText({ show: true, running: true, provider: 'openai', model: 'gpt-5.6-luna' })).toBe(
+    expect(statusText({ show: true, running: true, sound: true, provider: 'openai', model: 'gpt-5.6-luna' })).toBe(
       'carat · gpt-5.6-luna',
     );
-    expect(statusText({ show: true, running: true, provider: 'openai', model: 'gpt-5.6-luna' }, true)).toBe(
+    expect(statusText({ show: true, running: true, sound: true, provider: 'openai', model: 'gpt-5.6-luna' }, true)).toBe(
       'carat · gpt-5.6-luna · thinking',
     );
-    expect(statusText({ show: true, running: true, provider: 'local', model: 'local' })).toBe('carat · local');
-    expect(statusText({ show: true, running: false, reason: 'site-off', provider: 'openai', model: 'x' })).toBe(
+    expect(statusText({ show: true, running: true, sound: true, provider: 'local', model: 'local' })).toBe('carat · local');
+    expect(statusText({ show: true, running: false, sound: true, reason: 'site-off', provider: 'openai', model: 'x' })).toBe(
       'carat · off for this site',
     );
   });
 
   it('counts a snooze down instead of naming the model', () => {
-    const running = { show: true, running: true, provider: 'openai' as const, model: 'gpt-5.6-luna' };
+    const running = { show: true, running: true, sound: true, provider: 'openai' as const, model: 'gpt-5.6-luna' };
     expect(statusText(running, false, 42_000)).toBe('carat · quiet 0:42');
     expect(statusText(running, false, 60_000)).toBe('carat · quiet 1:00');
     // A request cannot be in flight during a snooze, and the countdown says so first anyway.
@@ -85,7 +85,7 @@ describe('status line element', () => {
   it('stays out of the document until shown, and hides again when the setting is off', () => {
     const line = createStatusLine(document);
     expect(document.querySelector('[data-carat-status]')).toBeNull();
-    line.update({ show: true, running: true, provider: 'openai', model: 'm' });
+    line.update({ show: true, running: true, sound: true, provider: 'openai', model: 'm' });
     const host = document.querySelector<HTMLElement>('[data-carat-status]');
     expect(host).not.toBeNull();
     expect(host!.style.display).toBe('block');
@@ -95,14 +95,14 @@ describe('status line element', () => {
     expect(host!.style.right).toBe('');
     expect(host!.style.bottom).toBe('12px');
     expect(line.visible).toBe(true);
-    line.update({ show: false, running: true, provider: 'openai', model: 'm' });
+    line.update({ show: false, running: true, sound: true, provider: 'openai', model: 'm' });
     expect(host!.style.display).toBe('none');
     expect(line.visible).toBe(false);
   });
 
   it('removes itself on destroy', () => {
     const line = createStatusLine(document);
-    line.update({ show: true, running: true, provider: 'openai', model: 'm' });
+    line.update({ show: true, running: true, sound: true, provider: 'openai', model: 'm' });
     line.destroy();
     expect(document.querySelector('[data-carat-status]')).toBeNull();
   });
@@ -138,7 +138,7 @@ describe('status poller', () => {
   }
 
   it('asks the background on start, on the poll interval, and after an answer, and only ever asks getStatus', async () => {
-    const info = { show: true, running: true, provider: 'openai', model: 'm' };
+    const info = { show: true, running: true, sound: true, provider: 'openai', model: 'm' };
     sent.mockResolvedValue(info);
     const updates: unknown[] = [];
     const line = {
@@ -172,7 +172,7 @@ describe('status poller', () => {
   });
 
   it('ticks the snooze down every second and stops when the minute is up', async () => {
-    sent.mockResolvedValue({ show: true, running: true, provider: 'openai', model: 'm' });
+    sent.mockResolvedValue({ show: true, running: true, sound: true, provider: 'openai', model: 'm' });
     const setQuiet = vi.fn();
     const line = { update: vi.fn(), setBusy: vi.fn(), setQuiet, destroy: vi.fn(), visible: false };
     const handle = startStatus(fakeCtx(), line, document);
@@ -202,7 +202,7 @@ describe('status poller', () => {
     const ctx = fakeCtx();
     startStatus(ctx, line, document);
     ctx.invalidate();
-    resolve({ show: true, running: true, provider: 'openai', model: 'm' });
+    resolve({ show: true, running: true, sound: true, provider: 'openai', model: 'm' });
     await vi.advanceTimersByTimeAsync(0);
     expect(line.update).not.toHaveBeenCalled();
   });
