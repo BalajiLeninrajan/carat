@@ -24,37 +24,27 @@ A friend messages you on Discord: "dinner at Seven Shores Cafe, Friday at 6?" A 
 
 ## How it decides
 
-Every request asks one question — what will the user do next on this page? — and gets back one answer. The model must answer: at the default eagerness there is no "nothing" reply, because a wrong chip costs one Esc and a missing chip costs the whole retype.
+The engine is the `listening` prototype, ported file for file (see Provenance below). Carat reads the page through Chrome's accessibility tree over `chrome.debugger`, waits until you have been idle for a moment, asks the model one question, what will the user do next on this page, and shows the answer. There is no placeholder answer, no second-guessing of the model, and no fallback when the debugger cannot attach: on a page where it cannot read (Chrome's own pages, the Web Store, a blocked host, or a tab where you pressed Cancel on the debugging bar) it does nothing and the debug panel says so.
 
-What the model is given, in this order, so that everything but the last part is the same on every page and the provider's prompt cache hits:
+What the model is given, in an order that keeps everything but the page stable so the provider's prompt cache hits: the instructions and a few illustrative examples; `<browser>`, the other open tabs and the fact that it may open a URL or run a search; `<notes>`, facts kept from pages you left; `<history>`, what happened in this tab; then the page as a numbered outline from the accessibility tree, the focused control marked, with `<selection>` carrying any text you have highlighted. A highlight is itself a trigger: change it and Carat asks again.
 
-1. **Static instructions.** What each kind of action means, and how to choose between them: follow the flow the history shows, the focused control and its neighbours are the strongest signal, empty required fields come before submitting, do not lead away from the task (logout, footer links, ads), and when unsure take the primary action near the focus or the first item of the main content. Only the last paragraph moves, and only with the eagerness setting.
-2. **Three few-shots.** A link in the body of a Reddit post, the first matching card on a Maps results page, and a note from Discord dropped into the Maps search box.
-3. **`<goal>`** — one line for what the user is trying to get done across every tab, in their own terms: `book a flight ZRH to LON on Friday, cheapest`. Left out entirely when Carat has not worked one out, which is most pages.
-4. **`<notes>`** — at most eight facts distilled from pages read recently in other tabs, newest first.
-5. **`<history>`** — at most twelve lines of what happened in this tab, oldest first: `40s ago: clicked button "Add to cart"`.
-6. **`<tabs>`** — the open tabs, so `switch` has something to name.
-7. **The page**, last: an accessibility-style outline read from the DOM, landmarks indented, text inline, every control the user could operate numbered `[n]` with its role, name, value and state, the focused one marked. At most 9000 characters, or 4000 when the caller wants a first fast ask, trimmed by distance from the focus.
-
-Only what is on screen goes into that outline. A block or a control whose box sits entirely above the fold, or more than a quarter of a viewport below it, is left out whole, and the controls inside it are neither numbered nor sent, so the model cannot offer a link the user would have to scroll twice to find. The focused control's own region is an exception: it is described to the end even where it runs past the fold, because the button that submits the field you are typing in is part of the same step. What is missing is said rather than hidden. The outline opens with `(1.5 screens above)` when the page is scrolled and closes with `(3.2 more screens below; 14 controls not shown)`, which is how the model knows that `scroll` is an answer. Scrolling changes the visible set, so it changes the outline's hash, and the page is asked about again.
-
-A page built from web components reads the same way. Carat walks open shadow roots instead of stopping at the host, and takes each `<slot>` where the root puts it, so slotted text lands in composed order and a button inside a component is numbered and can be pressed like any other. Names resolve inside the root, where the `aria-labelledby` ids live. A closed root stays opaque: Chrome hands back nothing and carat does not go around that. Roots nested more than eight deep are left out, as is everything past the twenty-thousandth element of one walk.
-
-The answer is one JSON object with `target` as its first property, streamed. The number arrives long before the label does, so the highlight ring lands on the control while the model is still writing the rest. A body the output limit cut off is salvaged rather than thrown away: `target` and `kind` come first, and a half-written value is trimmed back to its last whole sentence.
+The answer is one streamed JSON object, `kind` and `target` first so the ring lands on the control before the label arrives.
 
 | Kind | What it does |
 | --- | --- |
-| `fill` | type a value into text control `[n]` |
 | `click` | press button, link, checkbox, radio, tab or menu item `[n]` |
-| `select` | choose an option in combobox or select `[n]` |
-| `scroll` | one viewport down, when reading on is the step |
-| `open` | a destination that is not on the page, named as `maps:Seven Shores Cafe` |
-| `switch` | bring one of the open tabs forward |
-| `none` | nothing worth offering; refused at `eager` |
+| `fill` | type a value into text field `[n]`, only when the page, notes or history clearly imply it |
+| `select` | choose the option whose text is the value in combobox `[n]` |
+| `submit` | press Enter in text field `[n]`; search boxes and many forms submit this way |
+| `switch` | bring open tab `[Tn]` forward |
+| `open` | put the value in this tab's address bar: a URL goes there, anything else is searched |
+| `scroll` | one screen down, only when nothing in view is worth acting on |
 
-At `eager` a refusal is not the end of it. An answer of `none`, one the service worker refuses, one under the floor and a provider that failed or timed out all mean the same thing — no chip — so the question goes back out once with the reason written into `<history>` as a line the model reads: `carat: the last answer was none; something on this page is still the next step`. If the second answer is nothing too, the plainest step the page itself offers stands in: read on when there is more page below, else put what the user read into the field in front of them, else press the control nearest the focus, never a risky one. The page that truly has nothing — no controls, no text, nothing below — is still allowed to say so, and the popup's check line says which of those it was.
+`irreversible: true` (sending, paying, deleting, submitting an order) arms the chip: the first Tab shows what it would do, the second does it. Ghost text is the prototype's completion path: pause while typing and the continuation appears inline; Tab accepts it.
 
-There are no hand-written priors any more. The page kind, the results-page rule, the checkout rule and the article-scroll rule are gone: the model decides, and the regex pass is only a placeholder while it thinks.
+### Provenance
+
+`apps/extension/src/engine/` is `origin/listening`'s `src/` with bodies intact: `background/{actuate,ax,axmirror,browser,cdp,complete,history,llm,notes,outline,predict,prompts,visits}.ts`, `content/{ghost,ring}.ts`, `shared/{protocol,redact,settings}.ts`. Adapted, not copied: imports, WXT entrypoints, and two additions to `prompts.ts`: the `scroll` kind and the `<selection>` block. Ours on top: the chip and its sound, the popup with Clear, the status pill, the debug panel, the three shortcuts. Removed with the old engine: the DOM outline and its frame protocol, the regex and race providers, eagerness, the goal, the notes distiller, the grounding validator and every stand-in.
 
 ## What Carat refuses
 

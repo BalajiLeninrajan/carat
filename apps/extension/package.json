@@ -12,10 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@carat/providers": "workspace:*",
-    "@carat/shared": "workspace:*",
-    "@webext-core/messaging": "4.0.0",
-    "zod": "4.6.5"
+    "@webext-core/messaging": "4.0.0"
   },
   "devDependencies": {
     "@types/chrome": "0.3.0",

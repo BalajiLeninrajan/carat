@@ -1,4 +1,4 @@
-import type { DebugEvent, DebugSnapshot } from '../background/debug';
+import type { DebugEvent, DebugSnapshot } from './log';
 import type { ScriptContext } from '../content/context';
 import { send } from '../content/send';
 import { onMessage } from '../messaging';
@@ -17,8 +17,6 @@ export interface DebugHandle {
   toggle(): void;
   /** The scheduler's own events. Dropped on the floor until the panel has been opened on this tab. */
   event(event: { name: string; detail?: string }): void;
-  /** Shift+Tab's minute, for the gate's `snoozed until` row. */
-  setQuiet(until: number | null): void;
   readonly panel: DebugPanel;
 }
 
@@ -42,14 +40,13 @@ export function startDebug(ctx: ScriptContext, doc: Document = document, opts: D
   /** The scheduler's events, newest last, and only while the panel is open. */
   let events: DebugEvent[] = [];
   let snapshot: DebugSnapshot | null = null;
-  let quietUntil: number | null = null;
   let repaint: number | null = null;
 
   const copy = opts.copy ?? ((text: string) => void navigator.clipboard?.writeText(text).catch(() => undefined));
 
   function paint(): void {
     if (!panel.visible || !snapshot) return;
-    panel.render(debugView(snapshot, { events, hidden: doc.visibilityState === 'hidden', snoozedUntil: quietUntil, now: now() }));
+    panel.render(debugView(snapshot, { events, hidden: doc.visibilityState === 'hidden', now: now() }));
   }
 
   /** Several pushes in a row are one repaint; the log would otherwise jump under the reader. */
@@ -108,10 +105,6 @@ export function startDebug(ctx: ScriptContext, doc: Document = document, opts: D
       if (!panel.visible) return;
       const next: DebugEvent = { at: now(), source: 'page', name: event.name, ...(event.detail ? { detail: event.detail } : {}) };
       events = [...events, next].slice(-PAGE_EVENTS);
-      soon();
-    },
-    setQuiet(until) {
-      quietUntil = until;
       soon();
     },
     panel,
