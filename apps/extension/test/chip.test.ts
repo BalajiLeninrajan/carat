@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { ARM_MS, AUTO_DISMISS_MS, CHIP_SETTLE_MS, CORNER_INSET_PX, PENDING_HINT, createChip, type Chip, type DismissReason } from '../src/chip';
 import { placeAt } from '../src/chip/position';
-import { CHIP_CSS, FX_CSS, KEYCAP, KEYFRAME_CLASSES, LINE_PX, PILL, TAB_GLYPH, TIMING, TYPE } from '../src/chip/styles';
+import { ACCEPT_CODE, ACCEPT_GLYPH, ACCEPT_KEY_NAME } from '../src/chip/accept-key';
+import { CHIP_CSS, FX_CSS, KEYCAP, KEYFRAME_CLASSES, LINE_PX, PILL, TIMING, TYPE } from '../src/chip/styles';
 import { RING, Ring } from '../src/engine/content/ring';
 
 /** jsdom has no Web Audio; this is enough of a context to count how many were built. */
@@ -41,6 +42,24 @@ function key(target: EventTarget, k: string, init: KeyboardEventInit = {}): Keyb
   const e = new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, ...init });
   target.dispatchEvent(e);
   return e;
+}
+
+/** Carat's key: the right Shift pressed and let go with nothing in between. */
+function tap(target: EventTarget, init: KeyboardEventInit = {}): KeyboardEvent {
+  const shape = { key: 'Shift', code: ACCEPT_CODE, location: 2, shiftKey: true, bubbles: true, cancelable: true, ...init };
+  target.dispatchEvent(new KeyboardEvent('keydown', shape));
+  const up = new KeyboardEvent('keyup', { ...shape, shiftKey: false });
+  target.dispatchEvent(up);
+  return up;
+}
+
+/** The right Shift held down while another key is pressed: a chord, not a tap. */
+function chord(target: EventTarget, k: string): KeyboardEvent {
+  target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', code: ACCEPT_CODE, location: 2, shiftKey: true, bubbles: true, cancelable: true }));
+  const inner = new KeyboardEvent('keydown', { key: k, shiftKey: true, bubbles: true, cancelable: true });
+  target.dispatchEvent(inner);
+  target.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', code: ACCEPT_CODE, location: 2, bubbles: true, cancelable: true }));
+  return inner;
 }
 
 function hosts(): NodeListOf<Element> {
@@ -98,22 +117,58 @@ describe('chip', () => {
     expect(hosts()).toHaveLength(1);
   });
 
-  it('takes Tab from the target and acts once', () => {
+  it('takes a right Shift tap from the target and acts once', () => {
     show();
-    const e = key(target, 'Tab');
+    const e = tap(target);
     expect(e.defaultPrevented).toBe(true);
     expect(onAccept).toHaveBeenCalledTimes(1);
     expect(chip.visible).toBe(false);
-    key(target, 'Tab');
+    tap(target);
     expect(onAccept).toHaveBeenCalledTimes(1);
   });
 
-  it('takes Tab even when the user is in another text field', () => {
+  it('takes the tap even when the user is in another text field', () => {
     other.focus();
     show();
-    const e = key(other, 'Tab');
+    const e = tap(other);
     expect(e.defaultPrevented).toBe(true);
     expect(onAccept).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves Tab to the page, and takes the chip down with the focus it moves', () => {
+    show();
+    const e = key(target, 'Tab');
+    expect(e.defaultPrevented).toBe(false);
+    expect(onAccept).not.toHaveBeenCalled();
+    other.focus();
+    expect(chip.visible).toBe(false);
+  });
+
+  it('does not accept a right Shift held down as part of a chord', () => {
+    show();
+    // Shift+Tab is carat's too, so a chord the page owns makes the point better.
+    const e = chord(target, 'a');
+    expect(e.defaultPrevented).toBe(false);
+    expect(onAccept).not.toHaveBeenCalled();
+  });
+
+  it('acts once on a held key, not once per repeat', () => {
+    show();
+    const down = { key: 'Shift', code: ACCEPT_CODE, location: 2, shiftKey: true, bubbles: true, cancelable: true };
+    target.dispatchEvent(new KeyboardEvent('keydown', down));
+    target.dispatchEvent(new KeyboardEvent('keydown', { ...down, repeat: true }));
+    target.dispatchEvent(new KeyboardEvent('keydown', { ...down, repeat: true }));
+    expect(onAccept).not.toHaveBeenCalled();
+    target.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', code: ACCEPT_CODE, location: 2, bubbles: true, cancelable: true }));
+    expect(onAccept).toHaveBeenCalledTimes(1);
+  });
+
+  it('is not tapped by the left Shift', () => {
+    show();
+    target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', code: 'ShiftLeft', location: 1, shiftKey: true, bubbles: true }));
+    target.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', code: 'ShiftLeft', location: 1, bubbles: true }));
+    expect(onAccept).not.toHaveBeenCalled();
+    expect(chip.visible).toBe(true);
   });
 
   it('dismisses on Escape, on typing in the target, and on its own after the timeout', () => {
@@ -132,7 +187,7 @@ describe('chip', () => {
 
   it('asks for a quiet minute on Shift+Tab, and stands an armed chip down first', () => {
     chip.show({ target, label: 'Click "Send reply"', irreversible: true, onAccept, onDismiss });
-    key(target, 'Tab');
+    tap(target);
     expect(chip.armed).toBe(true);
     const e = key(target, 'Tab', { shiftKey: true });
     expect(e.defaultPrevented).toBe(true);
@@ -147,29 +202,29 @@ describe('chip', () => {
 
     it('arms on the first Tab, says so, and acts on the second', () => {
       showRisky();
-      key(target, 'Tab');
+      tap(target);
       expect(onAccept).not.toHaveBeenCalled();
       expect(chip.armed).toBe(true);
-      expect(chip.text).toBe('Press Tab again to click "Send reply"');
-      key(target, 'Tab');
+      expect(chip.text).toBe('Press again to click "Send reply"');
+      tap(target);
       expect(onAccept).toHaveBeenCalledTimes(1);
       expect(chip.visible).toBe(false);
     });
 
     it('stands down after four seconds, so a later Tab only arms it again', () => {
       showRisky();
-      key(target, 'Tab');
+      tap(target);
       vi.advanceTimersByTime(ARM_MS);
       expect(chip.armed).toBe(false);
       expect(chip.text).toBe('Click "Send reply"');
-      key(target, 'Tab');
+      tap(target);
       expect(onAccept).not.toHaveBeenCalled();
       expect(chip.armed).toBe(true);
     });
 
     it('stands down on any other key', () => {
       showRisky();
-      key(target, 'Tab');
+      tap(target);
       expect(chip.armed).toBe(true);
       key(target, 'a');
       expect(chip.armed).toBe(false);
@@ -178,7 +233,7 @@ describe('chip', () => {
 
     it('still dismisses on Escape while armed', () => {
       showRisky();
-      key(target, 'Tab');
+      tap(target);
       key(target, 'Escape');
       expect(onDismiss).toHaveBeenCalledWith('escape');
       expect(onAccept).not.toHaveBeenCalled();
@@ -203,7 +258,7 @@ describe('chip', () => {
   it('rings the target of every action that has one', () => {
     chip.show({ target, label: 'Click "Pay"', kind: 'click', onAccept, onDismiss });
     expect(ring.visible).toBe(true);
-    key(target, 'Tab');
+    tap(target);
     expect(ring.visible).toBe(false);
   });
 
@@ -277,7 +332,7 @@ describe('chip', () => {
     expect(host.style.bottom).toBe(`${CORNER_INSET_PX}px`);
     expect(host.style.left).toBe('50%');
     expect(chip.text).toBe('Scroll down');
-    const e = key(document.body, 'Tab');
+    const e = tap(document.body);
     expect(e.defaultPrevented).toBe(true);
     expect(onAccept).toHaveBeenCalledTimes(1);
   });
@@ -291,7 +346,7 @@ describe('chip', () => {
     expect(chip.visible).toBe(true);
     expect(host.style.display).toBe('block');
     expect(host.style.bottom).toBe(`${CORNER_INSET_PX}px`);
-    const e = key(document.body, 'Tab');
+    const e = tap(document.body);
     expect(e.defaultPrevented).toBe(true);
     expect(onAccept).toHaveBeenCalledTimes(1);
   });
@@ -310,11 +365,11 @@ describe('chip', () => {
       expect(CHIP_CSS).toContain(`.label { line-height: ${LINE_PX}px;`);
     });
 
-    it('shows the tab glyph and names the key for a reader', () => {
+    it('shows the right Shift glyph and names the key for a reader', () => {
       show();
-      expect(chip.keycap.glyph).toBe(TAB_GLYPH);
-      expect(TAB_GLYPH).toBe('\u21E5');
-      expect(chip.keycap.name).toBe('Tab');
+      expect(chip.keycap.glyph).toBe(ACCEPT_GLYPH);
+      expect(ACCEPT_GLYPH).toBe('R\u21E7');
+      expect(chip.keycap.name).toBe(ACCEPT_KEY_NAME);
     });
 
     it("has a radius that fits its box and sits inside the pill's own", () => {
@@ -406,9 +461,9 @@ describe('chip', () => {
 
   it('relays a key heard inside a child frame', () => {
     chip.showBanner({ label: 'Click "Pay now"', irreversible: true, onAccept, onDismiss });
-    chip.relay('Tab');
+    chip.relay('RightShift');
     expect(chip.armed).toBe(true);
-    chip.relay('Tab');
+    chip.relay('RightShift');
     expect(onAccept).toHaveBeenCalledTimes(1);
 
     chip.showBanner({ label: 'Scroll down', onAccept, onDismiss });
@@ -448,7 +503,7 @@ describe('chip', () => {
     it('leaves the same way whatever the action was', () => {
       for (const kind of ['click', 'scroll', 'open'] as const) {
         chip.showBanner({ label: 'Do the thing', kind, onAccept, onDismiss });
-        key(document.body, 'Tab');
+        tap(document.body);
         expect([kind, chip.classes.includes('is-leaving')]).toEqual([kind, true]);
         expect(chip.classes.filter((c) => c.startsWith('exit-'))).toEqual([]);
         vi.advanceTimersByTime(TIMING.exitMs);
@@ -475,7 +530,7 @@ describe('chip', () => {
 
     it('turns a static amber while armed and drops it when it stands down', () => {
       chip.show({ target, label: 'Click "Send reply"', irreversible: true, kind: 'click', onAccept, onDismiss });
-      key(target, 'Tab');
+      tap(target);
       expect(chip.classes).toContain('is-armed');
       expect(chip.classes).not.toContain('is-breathing');
       vi.advanceTimersByTime(ARM_MS);
@@ -484,8 +539,8 @@ describe('chip', () => {
 
     it('plays the accept in amber on the second Tab', () => {
       chip.show({ target, label: 'Click "Send reply"', irreversible: true, kind: 'click', onAccept, onDismiss });
-      key(target, 'Tab');
-      key(target, 'Tab');
+      tap(target);
+      tap(target);
       expect(onAccept).toHaveBeenCalledTimes(1);
       // The colour stays for the exit.
       expect(chip.classes).toEqual(expect.arrayContaining(['is-armed', 'is-leaving']));
@@ -504,7 +559,7 @@ describe('chip', () => {
       const fx = (): string => document.querySelector('[data-carat-fx]')?.getAttribute('data-carat-fx') ?? '';
       chip.show({ target, label: 'Fill Search with "x"', kind: 'fill', onAccept, onDismiss });
       expect(fx()).toBe('');
-      key(target, 'Tab');
+      tap(target);
       // One outline, no tint and no ripple, and it is gone inside 200ms.
       expect(fx()).toBe('flash');
       vi.advanceTimersByTime(TIMING.flashMs);
@@ -523,17 +578,17 @@ describe('chip', () => {
 
     it('arms in amber and goes without an exit', () => {
       chip.show({ target, label: 'Click "Send reply"', irreversible: true, kind: 'click', onAccept, onDismiss });
-      key(target, 'Tab');
+      tap(target);
       expect(chip.classes).toContain('is-armed');
       expect(chip.classes).not.toContain('is-breathing');
-      key(target, 'Tab');
+      tap(target);
       expect(onAccept).toHaveBeenCalledTimes(1);
       expect(chip.classes).not.toContain('is-leaving');
     });
 
     it('still marks the control it acted on, standing still', () => {
       chip.show({ target, label: 'Click "Pay"', kind: 'click', onAccept, onDismiss });
-      key(target, 'Tab');
+      tap(target);
       expect(document.querySelector('[data-carat-fx]')?.getAttribute('data-carat-fx')).toBe('flash');
     });
   });
@@ -548,14 +603,14 @@ describe('chip', () => {
       show();
       vi.advanceTimersByTime(AUTO_DISMISS_MS - 1);
       expect(FakeAudioContext.built).toBe(0);
-      key(target, 'Tab');
+      tap(target);
       expect(FakeAudioContext.built).toBe(1);
     });
 
     it('builds none at all with the sound turned off', () => {
       chip.setSound(false);
       show();
-      key(target, 'Tab');
+      tap(target);
       show();
       key(target, 'Escape');
       expect(FakeAudioContext.built).toBe(0);
@@ -563,9 +618,9 @@ describe('chip', () => {
 
     it('reuses the one context across arming and accepting', () => {
       chip.show({ target, label: 'Click "Send reply"', irreversible: true, onAccept, onDismiss });
-      key(target, 'Tab');
+      tap(target);
       expect(FakeAudioContext.built).toBe(1);
-      key(target, 'Tab');
+      tap(target);
       expect(FakeAudioContext.built).toBe(1);
     });
   });

@@ -1,5 +1,6 @@
 import { defineContentScript } from 'wxt/utils/define-content-script';
 import { createChip, type ChipKind } from '../src/chip';
+import { watchTap } from '../src/chip/accept-key';
 import { startDebug } from '../src/debug';
 import { Ghost } from '../src/engine/content/ghost';
 import { Ring } from '../src/engine/content/ring';
@@ -248,7 +249,8 @@ export default defineContentScript({
     const chip = createChip(document, ring);
     const status = createStatusLine(document);
     const debug = startDebug(ctx, document);
-    // Shift+Tab on any chip: a minute with nothing asked and nothing offered.
+    // Shift+Tab on any chip: a chord, never carat's own tap, and a minute
+    // with nothing asked and nothing offered.
     const quiet = createQuiet((left) => status.setQuiet(left));
 
     interface Suggestion {
@@ -418,23 +420,23 @@ export default defineContentScript({
     }
 
     /**
-     * Ghost text has first claim on Tab. This listener is bound before any chip
-     * exists, and window capture runs before the chip's own, so a field with
-     * grey text in it answers Tab itself and the chip never sees the key.
+     * Ghost text has first claim on carat's key. These listeners are bound
+     * before any chip exists, and window capture runs in the order listeners
+     * were added, so a field with grey text in it answers the tap itself and
+     * the chip never sees it.
      */
+    const ghostTap = watchTap();
     window.addEventListener(
       'keydown',
       (e) => {
-        if (!e.isTrusted || e.isComposing) return;
+        if (!e.isTrusted) return;
+        // The latch is kept whether or not there is grey text to take: what
+        // matters on the way down is only that nothing else was pressed.
+        if (ghostTap.keydown(e)) return;
+        if (e.isComposing) return;
         const g = ghostVisible();
         if (!g) return;
         const bare = !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey;
-        if (e.key === 'Tab' && bare) {
-          e.preventDefault();
-          e.stopImmediatePropagation();
-          acceptGhost(g, false);
-          return;
-        }
         if (e.key === 'ArrowRight' && e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) {
           e.preventDefault();
           e.stopImmediatePropagation();
@@ -449,6 +451,19 @@ export default defineContentScript({
       },
       true,
     );
+    window.addEventListener(
+      'keyup',
+      (e) => {
+        if (!e.isTrusted || !ghostTap.keyup(e)) return;
+        const g = ghostVisible();
+        if (!g) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        acceptGhost(g, false);
+      },
+      true,
+    );
+    window.addEventListener('pointerdown', () => ghostTap.cancel(), true);
 
     // -----------------------------------------------------------------------
     // Filling in the page
@@ -530,7 +545,7 @@ export default defineContentScript({
 
     /**
      * "fill": jump to the field and offer the value as ghost text, so accepting
-     * it is one more Tab (and the user sees it before it goes in). Returns false
+     * it is one more tap (and the user sees it before it goes in). Returns false
      * for targets that are not plain text fields; the worker focuses those.
      */
     function fillLocally(s: Suggestion): boolean {

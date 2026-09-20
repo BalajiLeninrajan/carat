@@ -13,7 +13,7 @@ import { RING } from '../engine/content/ring';
 export const TIMING = {
   /** The fade a new chip arrives on. */
   enterMs: 120,
-  /** The keycap darkening under an accepted Tab. */
+  /** The keycap darkening under an accepted tap. */
   pressMs: 60,
   /** A replaced value cross-fading in place. */
   freshMs: 120,
@@ -52,9 +52,6 @@ export const TYPE = {
 
 /** One line of pill text, in pixels. Everything on the pill is this tall. */
 export const LINE_PX = TYPE.fontPx * TYPE.lineHeight;
-
-/** What the keycap shows. It means Tab; the name is on the aria-label. */
-export const TAB_GLYPH = '\u21E5';
 
 export const KEYCAP = {
   fontPx: TYPE.fontPx,
@@ -152,7 +149,7 @@ export const CHIP_CSS = `
 }
 
 /* --- the press --- */
-/* The keycap darkens under an accepted Tab and comes back. It does not move. */
+/* The keycap darkens under an accepted tap and comes back. It does not move. */
 kbd.is-press { background: #232334; color: #9399b2; }
 .chip.is-armed kbd.is-press { background: #11111b; color: #d8c48d; }
 
@@ -168,7 +165,7 @@ kbd.is-press { background: #232334; color: #9399b2; }
   .value.is-fresh, .label.is-fresh { animation: none; }
   .chip.is-entering, .chip.is-banner.is-entering, .chip.is-leaving { animation: none; }
 }
-/* Armed: the first Tab landed on something that cannot be undone, so the chip turns amber until the second. */
+/* Armed: the first tap landed on something that cannot be undone, so the chip turns amber until the second. */
 .chip.is-armed { background: var(--carat-amber); color: #1e1e2e; box-shadow: 0 6px 18px rgba(${RING.armedRgb}, 0.35), 0 0 0 1px rgba(30, 30, 46, 0.2); }
 .chip.is-armed:hover { background: #f5d88a; }
 .chip.is-armed .value { color: #1e1e2e; }

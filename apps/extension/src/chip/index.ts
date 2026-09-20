@@ -5,12 +5,14 @@ import { createEffects } from './effects';
 import { placeChip } from './position';
 import { PREVIEW_CSS, PREVIEW_DELAY_MS } from './preview';
 import { createSounds } from './sound';
-import { CHIP_CSS, TAB_GLYPH, TIMING } from './styles';
+import { ACCEPT_GLYPH, ACCEPT_KEY_NAME, watchTap } from './accept-key';
+import { CHIP_CSS, TIMING } from './styles';
 
 /**
  * Why the chip went away. `escape` and `typed` are the user saying no to the
  * offer and are reported as such; `acted` and `scrolled` are the user getting
- * on with the page, which says nothing about it. `snoozed` is Shift+Tab: it
+ * on with the page, which says nothing about it. `snoozed` is Shift+Tab, a
+ * chord and so never a tap: it
  * says nothing about this offer either, it asks for a minute without any.
  */
 export type DismissReason = 'escape' | 'timeout' | 'typed' | 'detached' | 'acted' | 'scrolled' | 'snoozed';
@@ -22,8 +24,8 @@ export type DismissReason = 'escape' | 'timeout' | 'typed' | 'detached' | 'acted
  */
 export type ChipKind = 'fill' | 'click' | 'select' | 'scroll' | 'open' | 'switch' | 'none';
 
-/** Tab accepts everything now; an irreversible action simply wants it twice. */
-export type AcceptKey = 'Tab';
+/** One key accepts everything; an irreversible action simply wants it twice. */
+export type AcceptKey = 'RightShift';
 
 /** A key, or a keystroke, heard in a frame the chip cannot listen to itself, relayed by that frame's agent. */
 export type RelayedKey = AcceptKey | 'Escape' | 'typed';
@@ -96,7 +98,7 @@ export interface Chip {
   settle(): void;
   hide(): void;
   destroy(): void;
-  /** A key pressed inside a frame this chip cannot hear: Tab accepts (or arms), Escape and typing dismiss. */
+  /** A key pressed inside a frame this chip cannot hear: the tap accepts (or arms), Escape and typing dismiss. */
   relay(key: RelayedKey): void;
   readonly visible: boolean;
   /** The words on the chip; the shadow root is closed, so tests read it here. */
@@ -107,11 +109,11 @@ export interface Chip {
   readonly preview: string;
   /** Whether the indicator is up; the shadow root is closed, so tests read it here. */
   readonly pending: boolean;
-  /** Whether the first Tab of an irreversible action has landed. */
+  /** Whether the first tap of an irreversible action has landed. */
   readonly armed: boolean;
   /** The keycap's glyph and the key it names; the shadow root is closed, so tests read it here. */
   readonly keycap: { readonly glyph: string; readonly name: string | null };
-  /** The options page's "Sound on Tab". Off means no AudioContext is ever built. */
+  /** The options page's "Sound on accept". Off means no AudioContext is ever built. */
   setSound(on: boolean): void;
   /** What the pill is wearing; the shadow root is closed, so tests read it here. */
   readonly classes: readonly string[];
@@ -119,7 +121,7 @@ export interface Chip {
 
 export const AUTO_DISMISS_MS = 20_000;
 export const CORNER_INSET_PX = 24;
-/** How long an armed chip waits for the second Tab before it stands down. */
+/** How long an armed chip waits for the second tap before it stands down. */
 export const ARM_MS = 4000;
 /** Appended to the chip's reason while a better answer may still land. */
 export const PENDING_HINT = 'checking with the model…';
@@ -187,8 +189,8 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
   peek.hidden = true;
   text.append(label, sub, peek);
   const key = doc.createElement('kbd');
-  key.textContent = TAB_GLYPH;
-  key.setAttribute('aria-label', 'Tab');
+  key.textContent = ACCEPT_GLYPH;
+  key.setAttribute('aria-label', ACCEPT_KEY_NAME);
   pill.append(text, key);
   const previewStyle = doc.createElement('style');
   previewStyle.textContent = PREVIEW_CSS;
@@ -216,15 +218,27 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
   const fx = createEffects(doc, reducedMotion);
   const sounds = createSounds(win);
 
+  /** The latch behind carat's key: a right Shift pressed and let go on its own. */
+  const tap = watchTap();
+
   const onKeydown = (e: KeyboardEvent): void => {
     if (!session) return;
     // A key pressed inside one of carat's own surfaces — the debug panel — is
     // the user working carat, not answering the chip. Esc closes the panel,
     // Tab moves inside it, and neither reaches this.
-    if (fromSurface(e)) return;
+    if (fromSurface(e)) {
+      tap.cancel();
+      return;
+    }
     // A chip the user cannot see must not eat their keys; neither should one
     // they can see while an IME is still composing.
-    if (!session.onScreen || e.isComposing) return;
+    if (!session.onScreen || e.isComposing) {
+      tap.cancel();
+      return;
+    }
+    // Carat's key is decided on the way up, and every other key says this
+    // hold is a chord rather than a tap.
+    if (tap.keydown(e)) return;
     if (e.key === 'Escape') {
       e.preventDefault();
       e.stopImmediatePropagation();
@@ -241,28 +255,34 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
       dismiss('snoozed');
       return;
     }
-    const bare = !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey;
-    // While a chip is up, Tab is carat's wherever focus is. The page never
-    // sees it: tabbing between fields comes back the moment the chip is gone.
-    if (e.key === 'Tab' && bare) {
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      accept();
-      return;
-    }
-    // Any other key means the user moved on: an armed chip stands down rather than acting on the next Tab.
+    // Any other key means the user moved on: an armed chip stands down rather
+    // than acting on the next tap.
     if (armed) disarm();
     if (actedOn(e)) dismiss('acted');
   };
 
   /**
-   * Whether a key press means the user has moved on. Tab never does: it is
-   * carat's key whenever a chip is up. Nor does a
-   * modifier held on its own, nor typing into the field the chip is about,
-   * which the `input` listener reports as `typed` instead.
+   * The tap lands here. The page never sees the keyup, so a page that watches
+   * Shift for itself does not act on carat's key; it did see the keydown,
+   * which on its own does nothing anywhere.
+   */
+  const onKeyup = (e: KeyboardEvent): void => {
+    if (!session) return;
+    if (!tap.keyup(e)) return;
+    if (!session.onScreen || fromSurface(e)) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    accept();
+  };
+
+  /**
+   * Whether a key press means the user has moved on. A modifier held on its
+   * own does not, nor does typing into the field the chip is about, which the
+   * `input` listener reports as `typed` instead. Tab does: it is the page's
+   * key again, and the focus it moves is the user's own next step.
    */
   function actedOn(e: KeyboardEvent): boolean {
-    if (e.key === 'Tab' || MODIFIER_KEYS.has(e.key)) return false;
+    if (MODIFIER_KEYS.has(e.key)) return false;
     return !aboutTheChipsField(e.target);
   }
 
@@ -288,6 +308,8 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
 
   /** A press, a tap or a click anywhere but the chip itself. */
   const onPointerDown = (e: Event): void => {
+    // Shift-clicking is not a tap either.
+    tap.cancel();
     if (!session || onTheChip(e)) return;
     dismiss('acted');
   };
@@ -441,7 +463,7 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
     pill.classList.remove('is-entering');
   }
 
-  /** The keycap goes down under an accepted Tab, and back up on its own. */
+  /** The keycap goes down under an accepted tap, and back up on its own. */
   function press(): void {
     cancelKey();
     key.classList.add('is-press');
@@ -487,7 +509,7 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
   function render(): void {
     const s = session;
     if (!s) return;
-    label.textContent = armed ? `Press Tab again to ${lower(s.label)}` : s.label;
+    label.textContent = armed ? `Press again to ${lower(s.label)}` : s.label;
     // Armed is a colour, not a motion: the pill goes amber and stays there.
     pill.classList.toggle('is-armed', armed);
   }
@@ -499,11 +521,12 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
     previewText = opts.preview ?? '';
     reason = opts.reason ?? '';
     setPending(opts.pending === true);
-    key.textContent = TAB_GLYPH;
+    key.textContent = ACCEPT_GLYPH;
     label.classList.remove('is-fresh');
     if (!host.isConnected) doc.documentElement.appendChild(host);
-    // Capture phase so the page's own Tab handlers never see an accepted Tab.
+    // Capture phase so the page's own handlers never see an accepted tap.
     win.addEventListener('keydown', onKeydown, true);
+    win.addEventListener('keyup', onKeyup, true);
     // The user acting on the page for themselves takes the chip with them, whatever shape it is.
     win.addEventListener('pointerdown', onPointerDown, true);
     win.addEventListener('wheel', onUserScroll, { capture: true, passive: true });
@@ -559,6 +582,7 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
     startTracking();
     // A target in a same-origin child frame: its keys and scrolls stay in that window.
     session.targetWin?.addEventListener('keydown', onKeydown, true);
+    session.targetWin?.addEventListener('keyup', onKeyup, true);
     session.targetWin?.addEventListener('scroll', reposition, { capture: true, passive: true });
     opts.target.addEventListener('input', onTyped);
     // Typing on in the field carat just filled means the user is busy there, not ready for the next chip.
@@ -649,6 +673,7 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
     clearTimeout(armTimer);
     armed = false;
     win.removeEventListener('keydown', onKeydown, true);
+    win.removeEventListener('keyup', onKeyup, true);
     win.removeEventListener('pointerdown', onPointerDown, true);
     win.removeEventListener('wheel', onUserScroll, true);
     win.removeEventListener('touchmove', onUserScroll, true);
@@ -662,6 +687,7 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
       win.removeEventListener('scroll', reposition, true);
       win.removeEventListener('resize', reposition);
       s.targetWin?.removeEventListener('keydown', onKeydown, true);
+      s.targetWin?.removeEventListener('keyup', onKeyup, true);
       s.targetWin?.removeEventListener('scroll', reposition, true);
       s.target.removeEventListener('input', onTyped);
       s.interceptFrom?.removeEventListener('input', onTyped);
@@ -709,7 +735,7 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
   function accept(): void {
     const s = session;
     if (!s) return;
-    // Anything that cannot be undone takes a second Tab, and says so in between.
+    // Anything that cannot be undone takes a second tap, and says so in between.
     if (s.irreversible && !armed) {
       arm();
       return;
@@ -803,7 +829,7 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
   };
 }
 
-/** `Click "Save"` reads as `Press Tab again to click "Save"`. */
+/** `Click "Save"` reads as `Press again to click "Save"`. */
 function lower(label: string): string {
   return label.charAt(0).toLowerCase() + label.slice(1);
 }
