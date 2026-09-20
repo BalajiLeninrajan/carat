@@ -15,6 +15,13 @@ export interface OutlineControl {
   state?: string;
   /** Registrable domain a link goes to. */
   host?: string;
+  /**
+   * What pressing this opens, from `aria-haspopup`: `dialog`, `listbox`,
+   * `menu`, `tree`, `grid` or `dialog` for a plain `true`. A date field
+   * rendered as a button reads as `button "Departure date" (opens dialog)`,
+   * so the model knows the click is a step towards a value, not a submit.
+   */
+  popup?: string;
   /** Frame id when the control lives in a child frame; the top frame performs through the hub. */
   fr?: number;
   /** A label that names payment, sending, deleting or the like; a backstop for the model's irreversible flag. */
@@ -93,4 +100,17 @@ export interface NextAction {
   source?: string;
   /** Where an `open` or a `switch` leads, for the same preview. */
   destination?: { host: string; title?: string };
+  /**
+   * Not an offer: the model answered, carat could not carry the answer out,
+   * and this is the model's own label shown as a greyed line the user can
+   * only dismiss. It exists so a refusal is visible as a refusal instead of
+   * being dressed up as some plainer step the user never asked for. `kind`
+   * is always `none`, `target` always null, and nothing ever performs it.
+   */
+  hint?: boolean;
+}
+
+/** What the chip says over a refused answer: `Carat wanted: Fill From with "Toronto"`. */
+export function hintLabel(label: string): string {
+  return `Carat wanted: ${label}`;
 }

@@ -15,6 +15,19 @@ export function isRiskyName(name: string): boolean {
 }
 
 const TEXT_INPUT_TYPES = new Set(['', 'text', 'email', 'tel', 'url', 'number', 'date', 'datetime-local', 'month', 'week', 'time']);
+
+/**
+ * `role="presentation"` and `role="none"` take an element out of the
+ * accessibility tree: it is furniture the author has marked as furniture, and
+ * carat must not number it. The one exception is the one ARIA itself makes —
+ * a focusable element keeps its implicit role, because a control the user can
+ * still Tab to cannot honestly be called decorative.
+ */
+const PRESENTATIONAL = new Set(['presentation', 'none']);
+
+/** What `aria-haspopup` says pressing the control opens. `true` is a menu by the spec; `dialog` is what date fields use. */
+const POPUP_KINDS = new Set(['menu', 'listbox', 'tree', 'grid', 'dialog']);
+
 const ARIA_CONTROL_ROLE: Record<string, ControlRole> = {
   button: 'button',
   link: 'link',
@@ -37,13 +50,20 @@ const ARIA_CONTROL_ROLE: Record<string, ControlRole> = {
 
 /**
  * Which of the outline's roles a control plays, or null when the element is
- * not operable. Text fields, which `roleOf` does not describe, are read here;
- * everything else defers to the interact enumerator's own mapping so the
- * outline and the perform path agree on what a thing is.
+ * not operable. It follows the accessibility tree's own order: an explicit
+ * `role` wins, `presentation` erases the implicit one unless the element is
+ * focusable, and only then does the tag decide. Text fields, which `roleOf`
+ * does not describe, are read here; everything else defers to the interact
+ * enumerator's own mapping so the outline and the perform path agree on what
+ * a thing is.
  */
 export function controlRoleOf(el: Element): ControlRole | null {
   const aria = el.getAttribute('role')?.toLowerCase();
   if (aria && aria in ARIA_CONTROL_ROLE) return ARIA_CONTROL_ROLE[aria]!;
+  if (aria && PRESENTATIONAL.has(aria) && !isFocusable(el)) return null;
+  // An anchor with nothing to go to is a generic span in the accessibility
+  // tree, not a link; numbering it offers the user a click that does nothing.
+  if (el.tagName.toLowerCase() === 'a' && !el.hasAttribute('href') && !isFocusable(el) && !el.hasAttribute('onclick')) return null;
   if (isInput(el)) {
     const type = el.type.toLowerCase();
     if (type === 'search') return 'searchbox';
@@ -70,6 +90,47 @@ export function controlRoleOf(el: Element): ControlRole | null {
 export function isEditable(el: Element): boolean {
   const attr = el.getAttribute('contenteditable');
   return attr === '' || attr?.toLowerCase() === 'true' || attr?.toLowerCase() === 'plaintext-only';
+}
+
+/** Whether the user can put the focus on it themselves: a tab stop, or a native control. */
+export function isFocusable(el: Element): boolean {
+  const tabindex = el.getAttribute('tabindex');
+  if (tabindex !== null && Number(tabindex) >= 0) return true;
+  const tag = el.tagName.toLowerCase();
+  if (tag === 'a' || tag === 'area') return el.hasAttribute('href');
+  return tag === 'button' || tag === 'input' || tag === 'select' || tag === 'textarea' || tag === 'summary' || isEditable(el);
+}
+
+/**
+ * What pressing this opens, when the page says so. A date field rendered as a
+ * button is the case that matters: without `(opens dialog)` the model reads
+ * `button "Departure date"` as something that might submit the form, and a
+ * model that will not press it has nothing left to answer but `scroll`.
+ */
+export function popupOf(el: Element): string | undefined {
+  const raw = el.getAttribute('aria-haspopup')?.toLowerCase().trim();
+  if (!raw || raw === 'false') return undefined;
+  // `aria-haspopup="true"` means a menu, per ARIA. Anything else is taken at its word.
+  if (raw === 'true') return 'menu';
+  return POPUP_KINDS.has(raw) ? raw : undefined;
+}
+
+/**
+ * The listbox a combobox owns, when the page names one. The combobox pattern
+ * puts the options in a separate element and points at it with
+ * `aria-controls` or `aria-owns`; without following that, an expanded picker
+ * is described as expanded onto nothing.
+ */
+export function popupListOf(el: Element, scope: { getElementById(id: string): Element | null }): Element | null {
+  for (const attr of ['aria-controls', 'aria-owns']) {
+    const ids = el.getAttribute(attr);
+    if (!ids) continue;
+    for (const id of ids.split(/\s+/)) {
+      const found = id ? scope.getElementById(id) : null;
+      if (found) return found;
+    }
+  }
+  return null;
 }
 
 /**

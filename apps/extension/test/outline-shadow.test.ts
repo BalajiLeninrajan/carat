@@ -64,11 +64,14 @@ describe('open shadow roots', () => {
     expect(registry.get(add.n)).toEqual({ el: root.getElementById('add') });
   });
 
-  it('describes the root\'s own structure and text, not just the host', () => {
+  it('describes the root\'s own structure, not just the host', () => {
     card();
     const { outline } = buildOutline(document);
     expect(lines(outline)).toContain('  form "Order":');
-    expect(outline).toContain('text: Name for the order');
+    // The div inside the root is the field's label: it names the control
+    // rather than standing beside it as a line of prose saying the same words.
+    expect(outline).toContain('textbox "Name for the order"');
+    expect(outline).not.toContain('text: Name for the order');
   });
 
   it('resolves aria-labelledby inside the root, where the id lives', () => {

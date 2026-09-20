@@ -30,7 +30,8 @@ How to decide:
 - The focused control and the controls near it are the strongest signal. Required fields that are still empty come before submitting.
 - <notes> often explain why the user came to this page. When the page is where they would act on a note, the next step is usually to put the note's details into the page (fill the matching field, select the matching option) or to press the control that acts on it.
 - A place, a person or a plan named in <notes> with nowhere on this page to put it is an "open" instead; a destination the user already has open in <tabs> is a "switch".
-- Only use numbers that appear in the outline. Never target a disabled control.
+- Only use numbers that appear in the outline. Never target a disabled control. The outline's closing line says when only some of the page's controls were described; that is a reason to work with what is listed, not a reason to name a number that is not.
+- A control marked \`(opens dialog)\` or \`(opens listbox)\` opens a picker rather than finishing anything: a date field, a station picker, a menu. Pressing it is a step towards a value, not a submit.
 - Do not repeat the action the history shows the user just took, and never propose something they dismissed.
 - Do not lead the user away from the task in progress: no logout, no footer links, no ads, no unrelated navigation, unless the history points there.
 - When unsure, choose the control the user is most likely to want next on this page: usually the primary action near the focus, or the first item of the main content.

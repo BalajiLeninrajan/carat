@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Book a trip</title>
+  </head>
+  <body>
+    <header>
+      <a href="/">Rail</a>
+    </header>
+
+    <main>
+      <h1>Book a trip</h1>
+
+      <form aria-label="Trip search">
+        <!--
+          VIA Rail's station pickers: a div carrying the combobox role, with
+          the real input inside it. The accessibility tree exposes both; an
+          outline that stops at the wrapper leaves nothing that can be filled.
+        -->
+        <div class="field">
+          <span id="from-label">From</span>
+          <div role="combobox" aria-expanded="false" aria-haspopup="listbox" aria-labelledby="from-label" aria-controls="from-list">
+            <input id="from-input" type="text" autocomplete="off" placeholder="Departure station" />
+          </div>
+          <ul id="from-list" role="listbox" hidden>
+            <li role="option">Toronto - Union Station</li>
+            <li role="option">Ottawa</li>
+          </ul>
+        </div>
+
+        <div class="field">
+          <span id="to-label">To</span>
+          <div role="combobox" aria-expanded="true" aria-controls="to-list" aria-labelledby="to-label">
+            <input id="to-input" type="text" autocomplete="off" placeholder="Arrival station" value="Mon" />
+          </div>
+          <ul id="to-list" role="listbox">
+            <li role="option" aria-selected="false">Montreal</li>
+            <li role="option" aria-selected="true">Moncton</li>
+            <li role="option">Montmagny</li>
+          </ul>
+        </div>
+
+        <!--
+          Google Flights' date field: a button that opens a dialog. Nothing
+          says so unless the outline reads aria-haspopup.
+        -->
+        <div class="field">
+          <button type="button" aria-haspopup="dialog" aria-expanded="false">Departure date</button>
+          <button type="button" aria-haspopup="dialog" aria-label="Return date"><svg aria-hidden="true"></svg></button>
+        </div>
+
+        <!-- The name is in a sibling label with no for=, the way hand-rolled forms do it. -->
+        <div class="field">
+          <label>Discount code</label>
+          <input id="discount" type="text" />
+        </div>
+
+        <!-- Nothing but a placeholder names this one. -->
+        <div class="field">
+          <input id="promo" type="text" placeholder="Promotion code" />
+        </div>
+
+        <!-- Expedia's traveller box: a contenteditable used as a search field. -->
+        <div class="field">
+          <span id="who-label">Travellers</span>
+          <div id="who" contenteditable="true" role="searchbox" aria-labelledby="who-label"></div>
+        </div>
+
+        <!-- Decorative: a spacer that took a role it should not be numbered for. -->
+        <div role="presentation" tabindex="-1" class="spacer"></div>
+
+        <button type="submit">Find trains</button>
+      </form>
+
+      <!-- A custom element hosting the real input, labelled from the light DOM. -->
+      <span id="card-label">Loyalty card</span>
+      <station-picker></station-picker>
+    </main>
+
+    <footer>
+      <a href="/legal">Legal</a>
+    </footer>
+
+    <script>
+      class StationPicker extends HTMLElement {
+        connectedCallback() {
+          const root = this.attachShadow({ mode: 'open' });
+          root.innerHTML =
+            '<input id="card" type="text" aria-labelledby="card-label" />' +
+            '<button type="button" aria-haspopup="dialog">Pick a card</button>';
+        }
+      }
+      customElements.define('station-picker', StationPicker);
+    </script>
+  </body>
+</html>

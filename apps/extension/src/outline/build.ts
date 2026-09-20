@@ -5,10 +5,9 @@ import { isSecretField } from '../dom/secret';
 import { isIframe, isInput, isSelect, isTextArea } from '../dom/tags';
 import type { FrameLine, FrameRef } from '../frames/protocol';
 import { FRAME_MAX_INDENT, FRAME_MAX_LINES, frameNumber } from '../frames/protocol';
-import { accessibleName } from '../interact';
-import { labelOf } from '../snapshot/labels';
+import { textExcluding } from '../snapshot/labels';
 import { documentHeight, inViewport, viewportRect } from '../scroll';
-import { controlRoleOf, isEditable, isRiskyName, stateOf } from './roles';
+import { controlRoleOf, isEditable, isRiskyName, popupListOf, popupOf, stateOf } from './roles';
 
 export const OUTLINE_LIMITS = {
   /** Characters the outline may take in the request. */
@@ -82,6 +81,22 @@ const CONTAINER_ROLES = new Set(['region', 'group', 'radiogroup', 'article', 'ta
 const INLINE_TAGS = new Set(['span', 'strong', 'em', 'b', 'i', 'u', 's', 'small', 'code', 'mark', 'time', 'abbr', 'sub', 'sup', 'q', 'cite', 'var', 'kbd', 'samp', 'del', 'ins', 'bdi', 'bdo', 'wbr', 'br', 'font']);
 /** A control of one of these roles with no name says nothing; it is left out unless it has the focus. */
 const NEEDS_NAME = new Set<ControlRole>(['button', 'link', 'tab', 'menuitem', 'option']);
+/**
+ * Roles whose content is their value, not their name. A combobox is never
+ * called after whatever has been typed into it, and a listbox is never called
+ * after the options inside it — which is how `ul[role=listbox]` used to reach
+ * the model as `select "Montreal Moncton Montmagny"`.
+ */
+const TAKES_VALUE = new Set<ControlRole>(['textbox', 'searchbox', 'combobox', 'select', 'slider']);
+/**
+ * Roles that wrap the control the user actually types in: the ARIA 1.1
+ * combobox is a div with the role and a real `<input>` inside it. The
+ * accessibility tree exposes both, and only the inner one can be filled, so
+ * the walk carries on through these instead of stopping at the wrapper.
+ */
+const WRAPS_A_FIELD = new Set<ControlRole>(['combobox', 'select']);
+/** What `WRAPS_A_FIELD` goes looking for: a field a fill could actually land in. */
+const FIELD_INSIDE = 'input:not([type="hidden"]),textarea,[contenteditable=""],[contenteditable="true"],[contenteditable="plaintext-only"]';
 const HEADING_TAGS = new Set(['h1', 'h2', 'h3', 'h4', 'h5', 'h6']);
 
 type LineKind = 'struct' | 'heading' | 'text' | 'control' | 'option';
@@ -108,6 +123,8 @@ interface RawControl {
   value?: string;
   state?: string;
   host?: string;
+  /** What pressing it opens, from `aria-haspopup`. */
+  popup?: string;
   fr?: number;
   frame?: FrameRef;
   risky?: boolean;
@@ -148,6 +165,15 @@ export interface PageOutline {
   outline: string;
   controls: OutlineControl[];
   focused?: number;
+  /**
+   * How many controls the outline actually numbered, and how many operable
+   * controls the walk found on the page. When they differ the closing line
+   * says so, because a model shown eighteen of a booking form's forty-six
+   * controls and told nothing has every reason to believe the one it wants is
+   * further down, and to answer `scroll`.
+   */
+  describedControls: number;
+  pageControls: number;
   /** n -> what to act on. Not sent anywhere; the content script keeps it. */
   registry: Map<number, OutlineTarget>;
 }
@@ -210,7 +236,7 @@ interface ViewportNotes {
  */
 export function buildOutline(doc: Document, win: Window | null = doc.defaultView, opts: OutlineOptions = {}): PageOutline {
   const registry = new Map<number, OutlineTarget>();
-  if (!win || !doc.body) return { outline: '', controls: [], registry };
+  if (!win || !doc.body) return { outline: '', controls: [], registry, describedControls: 0, pageControls: 0 };
 
   const budget = opts.budget ?? OUTLINE_LIMITS.budget;
   const lines: OutlineLine[] = [];
@@ -223,6 +249,8 @@ export function buildOutline(doc: Document, win: Window | null = doc.defaultView
   let order = 0;
   /** Controls left out for being off screen, counted for the closing line. */
   let hidden = 0;
+  /** Lists already described under the combobox that owns them; the walk does not describe them twice. */
+  const listed = new Set<Element>();
   /** Elements looked at so far; a component tree that loops or fans out stops here. */
   let seenNodes = 0;
 
@@ -282,13 +310,14 @@ export function buildOutline(doc: Document, win: Window | null = doc.defaultView
     const role = controlRoleOf(el);
     if (!role) return;
     const focused = el === focusedEl;
-    const name = truncate(normalizeWhitespace(controlName(el, idScope(el, ctx.doc), role)), OUTLINE_LIMITS.nameChars);
+    const name = truncate(normalizeWhitespace(controlName(el, ctx.doc, role)), OUTLINE_LIMITS.nameChars);
     if (!name && NEEDS_NAME.has(role) && !focused) return;
     flush();
     noteAnchor(el);
     const value = controlValue(el, role, name);
     const state = stateOf(el, role);
     const host = role === 'link' ? linkHost(el, ctx.doc) : undefined;
+    const popup = popupOf(el);
     const entry: RawControl = {
       el,
       role,
@@ -296,22 +325,51 @@ export function buildOutline(doc: Document, win: Window | null = doc.defaultView
       ...(value ? { value } : {}),
       ...(state ? { state } : {}),
       ...(host ? { host } : {}),
+      ...(popup ? { popup } : {}),
       ...(ctx.fr !== undefined ? { fr: ctx.fr } : {}),
       ...(isRiskyName(name) ? { risky: true } : {}),
     };
     raw.push(entry);
     const index = push('control', renderControl(entry), ctx, { control: raw.length - 1, focused });
     if (focused) focusedLine = index;
-    if (isSelect(el)) listOptions(el, ctx);
+    // The ARIA 1.1 combobox: the role is on the wrapper and the field is
+    // inside it. Both are numbered, because only the inner one can be filled,
+    // and the field comes before the list the way the user meets them.
+    if (WRAPS_A_FIELD.has(role) && !isSelect(el) && el.querySelector(FIELD_INSIDE)) {
+      walkChildren(el, { ...ctx, indent: ctx.indent + 1, region: ctx.region, inNamed: true });
+      flush();
+    }
+    if (isSelect(el)) listOptions(Array.from(el.options).map((o) => ({ label: o.text, selected: o.selected })), ctx);
+    // A listbox the page built out of `<ul>` and `<li role=option>` reads the same way a `<select>` does.
+    else if (role === 'select') listOptions(optionsIn(el, ctx.win), ctx);
+    else listPopup(el, ctx);
   };
 
-  const listOptions = (el: HTMLSelectElement, ctx: WalkContext): void => {
+  const listOptions = (options: readonly { label: string; selected: boolean }[], ctx: Pick<WalkContext, 'indent' | 'region'>): void => {
     const inner = { indent: ctx.indent + 1, region: ctx.region };
-    for (const option of Array.from(el.options).slice(0, OUTLINE_LIMITS.maxOptions)) {
-      const label = truncate(normalizeWhitespace(option.text), OUTLINE_LIMITS.nameChars);
+    for (const option of options.slice(0, OUTLINE_LIMITS.maxOptions)) {
+      const label = truncate(normalizeWhitespace(option.label), OUTLINE_LIMITS.nameChars);
       if (!label) continue;
       push('option', `option ${quote(label)}${option.selected ? ' (selected)' : ''}`, inner);
     }
+  };
+
+  /**
+   * The list an open combobox is showing. The options live in a separate
+   * element the control points at with `aria-controls`, so without following
+   * that an expanded picker reads as expanded onto nothing and the model has
+   * no option text to answer `select` with. The list is only read where it is
+   * really on screen; a picker's markup is usually in the page whether it is
+   * open or not.
+   */
+  const listPopup = (el: Element, ctx: WalkContext): void => {
+    const list = popupListOf(el, idScope(el, ctx.doc));
+    if (!list || list === el || !isVisible(list, ctx.win) || offScreen(list)) return;
+    const options = optionsIn(list, ctx.win);
+    if (options.length === 0) return;
+    listOptions(options, ctx);
+    // Its options are described here, so the list itself is not described again.
+    listed.add(list);
   };
 
   /**
@@ -353,6 +411,7 @@ export function buildOutline(doc: Document, win: Window | null = doc.defaultView
         ...(c.value ? { value: clean(c.value, OUTLINE_LIMITS.valueChars) } : {}),
         ...(c.state ? { state: clean(c.state, OUTLINE_LIMITS.nameChars) } : {}),
         ...(c.host ? { host: clean(c.host, OUTLINE_LIMITS.nameChars) } : {}),
+        ...(c.popup ? { popup: clean(c.popup, OUTLINE_LIMITS.nameChars) } : {}),
         fr,
         frame: { token: report.token, remoteId: String(c.n) },
         ...(c.risky || isRiskyName(name) ? { risky: true } : {}),
@@ -400,6 +459,8 @@ export function buildOutline(doc: Document, win: Window | null = doc.defaultView
     }
 
     if (el.matches(JUNK)) return;
+    // The combobox that owns this list has already laid its options out.
+    if (listed.has(el)) return;
     // `display: contents` is how a component host gets out of the way; it has
     // no box, so the visibility check calls it invisible while its content is
     // on screen. Everything inside is checked on its own anyway.
@@ -530,12 +591,18 @@ export function buildOutline(doc: Document, win: Window | null = doc.defaultView
 
   const anchor = focusedLine >= 0 ? lines[focusedLine]!.order : Math.max(0, anchorOrder);
   capControls(lines, anchor, OUTLINE_LIMITS.maxControls);
-  const notes = viewportNotes(win, doc, hidden);
-  const room = Math.max(0, budget - noteSize(notes));
+  dropNameEchoes(lines, raw);
+  // Every operable control the walk found, described or not: the ones it put
+  // on a line, plus the ones an off-screen subtree took with it.
+  const pageControls = raw.length + hidden;
+  const makeNotes = (described: number): ViewportNotes => viewportNotes(win, doc, hidden, described, pageControls);
+  // The closing line's own length depends on a count the trim has not settled
+  // yet, so the trim reserves the longest that line could be.
+  const room = Math.max(0, budget - noteSize(makeNotes(Math.max(0, pageControls - 1))));
   const dropped = trim(lines, anchor, room, focusedLine);
   dropEmptyRegions(lines);
 
-  return render(lines, raw, registry, dropped, room, notes);
+  return render(lines, raw, registry, dropped, room, makeNotes, pageControls);
 }
 
 /**
@@ -544,7 +611,7 @@ export function buildOutline(doc: Document, win: Window | null = doc.defaultView
  * screen. Without these lines the model reads a page cut off at the fold as
  * the whole page, and never answers `scroll`.
  */
-function viewportNotes(win: Window, doc: Document, hidden: number): ViewportNotes {
+function viewportNotes(win: Window, doc: Document, hidden: number, described: number, pageControls: number): ViewportNotes {
   const vh = Math.max(1, win.innerHeight);
   const above = win.scrollY / vh;
   const below = (documentHeight(win, doc) - win.scrollY - win.innerHeight) / vh;
@@ -552,7 +619,12 @@ function viewportNotes(win: Window, doc: Document, hidden: number): ViewportNote
   if (above >= 0.05) notes.above = `(${above.toFixed(1)} screens above)`;
   const rest = below >= 0.05 ? `${below.toFixed(1)} more screens below` : '';
   const unseen = hidden > 0 ? `${hidden} control${hidden === 1 ? '' : 's'} not shown` : '';
-  if (rest || unseen) notes.below = `(${[rest, unseen].filter((part) => part).join('; ')})`;
+  // Said only when the budget really did cut the list short. The off-screen
+  // count above says what the fold took; this says what the budget took, and
+  // the two are different reasons for the model to distrust the list.
+  const trimmed = described < pageControls - hidden ? `only ${described} of ${pageControls} controls described` : '';
+  const parts = [rest, unseen, trimmed].filter((part) => part);
+  if (parts.length > 0) notes.below = `(${parts.join('; ')})`;
   return notes;
 }
 
@@ -680,7 +752,15 @@ export function snapshotHash(outline: string): string {
   return hashText(outline).toString(36);
 }
 
-function render(lines: OutlineLine[], raw: RawControl[], registry: Map<number, OutlineTarget>, dropped: number, budget: number, notes: ViewportNotes): PageOutline {
+function render(
+  lines: OutlineLine[],
+  raw: RawControl[],
+  registry: Map<number, OutlineTarget>,
+  dropped: number,
+  budget: number,
+  makeNotes: (described: number) => ViewportNotes,
+  pageControls: number,
+): PageOutline {
   const controls: OutlineControl[] = [];
   const out: string[] = [];
   let focused: number | undefined;
@@ -698,6 +778,7 @@ function render(lines: OutlineLine[], raw: RawControl[], registry: Map<number, O
         ...(entry.value ? { value: entry.value } : {}),
         ...(entry.state ? { state: entry.state } : {}),
         ...(entry.host ? { host: entry.host } : {}),
+        ...(entry.popup ? { popup: entry.popup } : {}),
         ...(entry.fr !== undefined ? { fr: entry.fr } : {}),
         ...(entry.risky ? { risky: true } : {}),
       });
@@ -720,8 +801,33 @@ function render(lines: OutlineLine[], raw: RawControl[], registry: Map<number, O
     kept = controls.filter((c) => live.has(c.n));
     if (focused !== undefined && !live.has(focused)) focused = undefined;
   }
+  const notes = makeNotes(kept.length);
   const outline = [notes.above, body, notes.below].filter((part): part is string => Boolean(part)).join('\n');
-  return { outline, controls: kept, registry, ...(focused !== undefined ? { focused } : {}) };
+  return {
+    outline,
+    controls: kept,
+    registry,
+    describedControls: kept.length,
+    pageControls,
+    ...(focused !== undefined ? { focused } : {}),
+  };
+}
+
+/**
+ * A label the outline has already used as a control's name is not also a line
+ * of page prose. Without this, a field named from the `<label>` beside it
+ * reads as `text: Discount code` followed by `[7] textbox "Discount code"`,
+ * which is the same words twice and a hint that the two are separate things.
+ */
+function dropNameEchoes(lines: OutlineLine[], raw: readonly RawControl[]): void {
+  for (let i = 0; i < lines.length - 1; i++) {
+    const line = lines[i]!;
+    if (line.kind !== 'text' || !line.keep) continue;
+    const next = lines[i + 1]!;
+    if (next.control === undefined || !next.keep) continue;
+    const name = raw[next.control]!.name;
+    if (name && line.text === `text: ${name}`) line.keep = false;
+  }
 }
 
 /** Drop the control lines farthest from the focus until at most `max` remain numbered. */
@@ -828,7 +934,10 @@ function renderControl(c: RawControl): string {
   const value = c.value ? ` = ${quote(c.value)}` : '';
   const host = c.host ? ` -> ${c.host}` : '';
   const state = c.state ? ` (${c.state})` : '';
-  return `${c.role}${name}${value}${host}${state}`;
+  // Its own clause rather than another word inside the state's: what a
+  // control opens is not a state it is in.
+  const popup = c.popup ? ` (opens ${c.popup})` : '';
+  return `${c.role}${name}${value}${host}${state}${popup}`;
 }
 
 function headingTag(el: Element, tag: string): string {
@@ -865,16 +974,151 @@ function regionName(el: Element, doc: Document): string {
 }
 
 /**
- * What the control is called. An editable one is never named by its own
- * content, which is its value, so only its labels and its placeholder count.
+ * What the control is called, in the order the accessible-name computation
+ * uses it: `aria-labelledby`, then `aria-label`, then the native label —
+ * `label[for]` or a wrapping one — then the value of a push button and the
+ * alt of an image button, then the element's own text for the roles whose
+ * text is their name, then the placeholder, the title, and the alt of an
+ * image inside.
+ *
+ * Two deliberate departures from the specification, both of them because a
+ * nameless control is worth nothing to the model and the page's author
+ * plainly meant to name it:
+ *
+ * - `aria-labelledby` inside a shadow root is looked up in the root first, as
+ *   the specification says, and then outward through each host's root to the
+ *   document. A component that labels its input from the page around it gets
+ *   no name at all in the real accessibility tree; carat takes the one that
+ *   was obviously intended.
+ * - A `<label>` with no `for=` sitting beside the control, which names
+ *   nothing in the accessibility tree, is used when nothing else named it.
+ *   Hand-rolled booking forms are full of them.
+ *
+ * A control whose content is its value — a text field, a combobox, a listbox
+ * — is never named by that content.
  */
 function controlName(el: Element, doc: Document, role: ControlRole): string {
-  const aria = el.getAttribute('aria-labelledby') || el.getAttribute('aria-label') ? accessibleName(el, doc) : '';
+  const labelled = labelledByText(el, doc);
+  if (labelled) return labelled;
+  const aria = normalizeWhitespace(el.getAttribute('aria-label') ?? '');
   if (aria) return aria;
-  if (role === 'textbox' || role === 'searchbox' || role === 'combobox' || isSelect(el)) {
-    return labelOf(el, doc) ?? el.getAttribute('placeholder') ?? el.getAttribute('name') ?? '';
+  const native = nativeLabelText(el);
+  if (native) return native;
+  if (isInput(el)) {
+    const type = el.type.toLowerCase();
+    if (type === 'button' || type === 'submit' || type === 'reset') {
+      const value = normalizeWhitespace(el.value);
+      if (value) return value;
+    }
+    if (type === 'image') {
+      const alt = normalizeWhitespace(el.alt);
+      if (alt) return alt;
+    }
   }
-  return accessibleName(el, doc) || el.getAttribute('name') || '';
+  if (!TAKES_VALUE.has(role) && !isEditable(el) && !isInput(el) && !isTextArea(el)) {
+    const own = normalizeWhitespace(el.textContent ?? '');
+    if (own) return own;
+  }
+  const placeholder = normalizeWhitespace(el.getAttribute('placeholder') ?? el.getAttribute('aria-placeholder') ?? '');
+  if (placeholder) return placeholder;
+  const title = normalizeWhitespace(el.getAttribute('title') ?? '');
+  if (title) return title;
+  // Only for a control named by what is in it: the alt inside a listbox would
+  // be an option's, which is its value.
+  const image = TAKES_VALUE.has(role) ? '' : imageText(el);
+  if (image) return image;
+  const near = siblingLabelText(el);
+  if (near) return near;
+  return normalizeWhitespace(el.getAttribute('name') ?? '');
+}
+
+/**
+ * The text of everything `aria-labelledby` points at. Each id is resolved in
+ * the element's own root first and then outward, so a control inside a
+ * component is named by its component's label where there is one and by the
+ * page's where there is not.
+ */
+function labelledByText(el: Element, doc: Document): string {
+  const attr = el.getAttribute('aria-labelledby');
+  if (!attr) return '';
+  const parts: string[] = [];
+  for (const id of attr.split(/\s+/)) {
+    if (!id) continue;
+    const source = elementById(el, id, doc);
+    if (!source) continue;
+    // A label that holds the control does not name it with the control's own value.
+    parts.push(source.contains(el) ? textExcluding(source, el) : normalizeWhitespace(source.textContent ?? ''));
+  }
+  return normalizeWhitespace(parts.filter(Boolean).join(' '));
+}
+
+/** An id looked up in the element's root, then in each root out to the document. */
+function elementById(el: Element, id: string, doc: Document): Element | null {
+  for (let root: Node = el.getRootNode(), hops = 0; hops < OUTLINE_LIMITS.shadowDepth; hops++) {
+    const scope = root as unknown as { getElementById?: (id: string) => Element | null };
+    const found = typeof scope.getElementById === 'function' ? scope.getElementById(id) : null;
+    if (found) return found;
+    if (!isShadowRoot(root)) break;
+    root = root.host.getRootNode();
+  }
+  return doc.getElementById(id);
+}
+
+/** `label[for]` in the control's own root, or the label the control sits inside. */
+function nativeLabelText(el: Element): string {
+  const root = el.getRootNode() as unknown as ParentNode;
+  if (el.id && typeof root.querySelectorAll === 'function') {
+    // `label[for=...]` would need CSS.escape, which jsdom lacks; htmlFor is exact anyway.
+    for (const label of Array.from(root.querySelectorAll('label[for]'))) {
+      if ((label as HTMLLabelElement).htmlFor !== el.id) continue;
+      const text = normalizeWhitespace(label.textContent ?? '');
+      if (text) return text;
+    }
+  }
+  const wrapping = el.closest('label');
+  return wrapping ? textExcluding(wrapping, el) : '';
+}
+
+/** How far out from a control a stray `<label>` may sit and still be taken for its name. */
+const LABEL_CLIMB = 3;
+const LABEL_SIBLINGS = 4;
+
+/**
+ * A `<label>` with no `for=` beside the control, or beside something holding
+ * it. The accessibility tree ignores these; a booking form that writes
+ * `<label>Discount code</label><input>` still means them, and without this
+ * the model is offered an anonymous box next to a line of loose prose.
+ */
+function siblingLabelText(el: Element): string {
+  for (let node: Element | null = el, hops = 0; node && hops < LABEL_CLIMB; node = node.parentElement, hops++) {
+    let seen = 0;
+    for (let sib = node.previousElementSibling; sib && seen < LABEL_SIBLINGS; sib = sib.previousElementSibling, seen++) {
+      const label = sib.tagName.toLowerCase() === 'label' ? sib : sib.querySelector(':scope > label:not([for])');
+      // A label with a `for` names some other control, and one wrapping a
+      // control of its own has already named that one.
+      if (!label || label.hasAttribute('for') || label.querySelector(FIELD_INSIDE)) continue;
+      const text = normalizeWhitespace(label.textContent ?? '');
+      if (text) return text;
+    }
+  }
+  return '';
+}
+
+/** The alt of an image inside a control that has no text of its own. */
+function imageText(el: Element): string {
+  const img = el.querySelector('img[alt],svg title,[aria-label]');
+  if (!img) return '';
+  return normalizeWhitespace(img.getAttribute('alt') ?? img.getAttribute('aria-label') ?? img.textContent ?? '');
+}
+
+/** The options of a listbox the page built itself, in the shape `listOptions` takes. */
+function optionsIn(list: Element, win: Window): { label: string; selected: boolean }[] {
+  const out: { label: string; selected: boolean }[] = [];
+  for (const option of Array.from(list.querySelectorAll('[role="option"]'))) {
+    if (!isVisible(option, win)) continue;
+    out.push({ label: normalizeWhitespace(option.textContent ?? ''), selected: option.getAttribute('aria-selected') === 'true' });
+  }
+  return out;
 }
 
 function controlValue(el: Element, role: ControlRole, name: string): string {
