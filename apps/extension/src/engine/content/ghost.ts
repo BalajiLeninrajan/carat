@@ -14,7 +14,7 @@
  * taken off them are the page's own and are never touched.
  */
 
-import { ACCEPT_GLYPH, ACCEPT_KEY_NAME } from "../../chip/accept-key";
+import { ACCEPT_KEYS, DEFAULT_ACCEPT_KEY, type AcceptKeyName } from "../../chip/accept-key";
 import { KEYCAP_CSS } from "../../chip/styles";
 
 type TextField = HTMLInputElement | HTMLTextAreaElement;
@@ -50,6 +50,12 @@ export class Ghost {
    * there is no other way to see it. `line` is every glyph in order, which is
    * what says the keycap comes after the last one of the suggestion.
    */
+  /** Follow the options page: the hint names whichever key takes the text. */
+  setAcceptKey(key: AcceptKeyName): void {
+    this.hint.textContent = ACCEPT_KEYS[key].glyph;
+    this.hint.setAttribute("aria-label", ACCEPT_KEYS[key].label);
+  }
+
   get drawn(): { ghost: string; hint: string | null; tail: string; line: string } | null {
     if (!this.host || this.host.style.display === "none") return null;
     return {
@@ -84,7 +90,7 @@ export class Ghost {
         vertical-align: middle;
       }
       kbd.hint[hidden] { display: none; }
-    </style><div class="box"><div class="inner"><span class="typed"></span><span class="ghost"></span><span class="tail"><span class="word"></span><kbd class="hint" aria-label="${ACCEPT_KEY_NAME}">${ACCEPT_GLYPH}</kbd></span></div></div>`;
+    </style><div class="box"><div class="inner"><span class="typed"></span><span class="ghost"></span><span class="tail"><span class="word"></span><kbd class="hint" aria-label="${ACCEPT_KEYS[DEFAULT_ACCEPT_KEY].label}">${ACCEPT_KEYS[DEFAULT_ACCEPT_KEY].glyph}</kbd></span></div></div>`;
     this.box = root.querySelector(".box")!;
     this.inner = root.querySelector(".inner")!;
     this.typedSpan = root.querySelector(".typed")!;

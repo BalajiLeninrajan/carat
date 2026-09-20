@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { ARM_MS, AUTO_DISMISS_MS, CORNER_INSET_PX, PENDING_HINT, createChip, type Chip, type DismissReason } from '../src/chip';
 import { placeAt } from '../src/chip/position';
-import { ACCEPT_CODE, ACCEPT_GLYPH, ACCEPT_KEY_NAME } from '../src/chip/accept-key';
+import { ACCEPT_KEYS } from '../src/chip/accept-key';
 import { CHIP_CSS, FX_CSS, KEYCAP, KEYCAP_CSS, KEYFRAME_CLASSES, LINE_PX, PILL, TIMING, TYPE } from '../src/chip/styles';
 import { RING, Ring } from '../src/engine/content/ring';
 
@@ -46,7 +46,7 @@ function key(target: EventTarget, k: string, init: KeyboardEventInit = {}): Keyb
 
 /** Carat's key: the right Shift pressed and let go with nothing in between. */
 function tap(target: EventTarget, init: KeyboardEventInit = {}): KeyboardEvent {
-  const shape = { key: 'Shift', code: ACCEPT_CODE, location: 2, shiftKey: true, bubbles: true, cancelable: true, ...init };
+  const shape = { key: 'Shift', code: ACCEPT_KEYS.rightShift.code, location: 2, shiftKey: true, bubbles: true, cancelable: true, ...init };
   target.dispatchEvent(new KeyboardEvent('keydown', shape));
   const up = new KeyboardEvent('keyup', { ...shape, shiftKey: false });
   target.dispatchEvent(up);
@@ -55,10 +55,10 @@ function tap(target: EventTarget, init: KeyboardEventInit = {}): KeyboardEvent {
 
 /** The right Shift held down while another key is pressed: a chord, not a tap. */
 function chord(target: EventTarget, k: string): KeyboardEvent {
-  target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', code: ACCEPT_CODE, location: 2, shiftKey: true, bubbles: true, cancelable: true }));
+  target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', code: ACCEPT_KEYS.rightShift.code, location: 2, shiftKey: true, bubbles: true, cancelable: true }));
   const inner = new KeyboardEvent('keydown', { key: k, shiftKey: true, bubbles: true, cancelable: true });
   target.dispatchEvent(inner);
-  target.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', code: ACCEPT_CODE, location: 2, bubbles: true, cancelable: true }));
+  target.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', code: ACCEPT_KEYS.rightShift.code, location: 2, bubbles: true, cancelable: true }));
   return inner;
 }
 
@@ -159,12 +159,12 @@ describe('chip', () => {
 
   it('acts once on a held key, not once per repeat', () => {
     show();
-    const down = { key: 'Shift', code: ACCEPT_CODE, location: 2, shiftKey: true, bubbles: true, cancelable: true };
+    const down = { key: 'Shift', code: ACCEPT_KEYS.rightShift.code, location: 2, shiftKey: true, bubbles: true, cancelable: true };
     target.dispatchEvent(new KeyboardEvent('keydown', down));
     target.dispatchEvent(new KeyboardEvent('keydown', { ...down, repeat: true }));
     target.dispatchEvent(new KeyboardEvent('keydown', { ...down, repeat: true }));
     expect(onAccept).not.toHaveBeenCalled();
-    target.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', code: ACCEPT_CODE, location: 2, bubbles: true, cancelable: true }));
+    target.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', code: ACCEPT_KEYS.rightShift.code, location: 2, bubbles: true, cancelable: true }));
     expect(onAccept).toHaveBeenCalledTimes(1);
   });
 
@@ -356,6 +356,59 @@ describe('chip', () => {
     expect(onAccept).toHaveBeenCalledTimes(1);
   });
 
+  describe('the accept key setting', () => {
+    it('takes Tab once the setting says so, and leaves the right Shift alone', () => {
+      chip.setAcceptKey('tab');
+      show();
+      const e = key(target, 'Tab');
+      expect(e.defaultPrevented).toBe(true);
+      expect(onAccept).toHaveBeenCalledTimes(1);
+
+      show();
+      tap(target);
+      expect(onAccept).toHaveBeenCalledTimes(1);
+      expect(chip.visible).toBe(true);
+    });
+
+    it('puts the key it now answers to on the cap', () => {
+      show();
+      expect(chip.keycap.glyph).toBe(ACCEPT_KEYS.rightShift.glyph);
+      chip.setAcceptKey('tab');
+      expect(chip.keycap.glyph).toBe(ACCEPT_KEYS.tab.glyph);
+      expect(chip.keycap.name).toBe(ACCEPT_KEYS.tab.label);
+      chip.setAcceptKey('rightShift');
+      expect(chip.keycap.glyph).toBe(ACCEPT_KEYS.rightShift.glyph);
+    });
+
+    it('still gives Shift+Tab the quiet minute rather than an accept', () => {
+      chip.setAcceptKey('tab');
+      show();
+      const e = key(target, 'Tab', { shiftKey: true });
+      expect(e.defaultPrevented).toBe(true);
+      expect(onAccept).not.toHaveBeenCalled();
+      expect(onDismiss).toHaveBeenCalledWith('snoozed');
+    });
+
+    it('arms an irreversible action on the first Tab and acts on the second', () => {
+      chip.setAcceptKey('tab');
+      chip.show({ target, label: 'Click "Send reply"', irreversible: true, onAccept, onDismiss });
+      key(target, 'Tab');
+      expect(chip.armed).toBe(true);
+      expect(onAccept).not.toHaveBeenCalled();
+      key(target, 'Tab');
+      expect(onAccept).toHaveBeenCalledTimes(1);
+    });
+
+    it('hands Tab back to the page when the setting goes back', () => {
+      chip.setAcceptKey('tab');
+      chip.setAcceptKey('rightShift');
+      show();
+      const e = key(target, 'Tab');
+      expect(e.defaultPrevented).toBe(false);
+      expect(onAccept).not.toHaveBeenCalled();
+    });
+  });
+
   describe('the Tab keycap', () => {
     it("is set in the label's size", () => {
       expect(KEYCAP.fontPx).toBe(TYPE.fontPx);
@@ -388,9 +441,9 @@ describe('chip', () => {
 
     it('shows the right Shift glyph and names the key for a reader', () => {
       show();
-      expect(chip.keycap.glyph).toBe(ACCEPT_GLYPH);
-      expect(ACCEPT_GLYPH).toBe('R\u21E7');
-      expect(chip.keycap.name).toBe(ACCEPT_KEY_NAME);
+      expect(chip.keycap.glyph).toBe(ACCEPT_KEYS.rightShift.glyph);
+      expect(ACCEPT_KEYS.rightShift.glyph).toBe('R\u21E7');
+      expect(chip.keycap.name).toBe(ACCEPT_KEYS.rightShift.label);
     });
 
     it("has a radius that fits its box and sits inside the pill's own", () => {

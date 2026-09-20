@@ -182,6 +182,14 @@ describe('popup', () => {
   });
 });
 
+describe('the footer keys line', () => {
+  it('names whichever key the setting says accepts', async () => {
+    const { keysText } = await import('./main');
+    expect(keysText({ ...settings, acceptKey: 'rightShift' })).toBe('Right Shift accepts · Esc dismisses');
+    expect(keysText({ ...settings, acceptKey: 'tab' })).toBe('Tab accepts · Esc dismisses');
+  });
+});
+
 describe('withSite', () => {
   it('drops the www prefix and never lists a host twice', async () => {
     const { withSite, isSiteOff, siteHost } = await import('./main');

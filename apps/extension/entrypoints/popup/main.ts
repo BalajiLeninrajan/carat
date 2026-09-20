@@ -1,5 +1,6 @@
 import { sendMessage } from '@/src/messaging';
 import type { ActionAnalytics, ActionAnalyticsBucket } from '@/src/background/elastic';
+import { ACCEPT_KEYS } from '@/src/chip/accept-key';
 import type { Settings } from '@/src/engine/shared/settings';
 
 const app = document.getElementById('app') as HTMLElement;
@@ -9,6 +10,7 @@ const siteRow = document.getElementById('site-row') as HTMLElement;
 const siteEnabled = document.getElementById('site-enabled') as HTMLInputElement;
 const siteHostLabel = document.getElementById('site-host') as HTMLElement;
 const modelLine = document.getElementById('model') as HTMLElement;
+const keysLine = document.getElementById('keys') as HTMLElement;
 const pausedRow = document.getElementById('paused-row') as HTMLElement;
 const resumeButton = document.getElementById('resume') as HTMLButtonElement;
 const retryButton = document.getElementById('retry') as HTMLButtonElement;
@@ -82,6 +84,11 @@ async function renderPaused(): Promise<void> {
   } catch {
     pausedRow.hidden = true;
   }
+}
+
+/** The footer names carat's key, so it has to follow the setting. */
+export function keysText(settings: Settings): string {
+  return `${ACCEPT_KEYS[settings.acceptKey].label} accepts · Esc dismisses`;
 }
 
 function renderModel(settings: Settings): void {
@@ -175,6 +182,7 @@ async function load(): Promise<void> {
     enabled.checked = settings.enabled;
     renderSite(settings);
     renderModel(settings);
+    keysLine.textContent = keysText(settings);
     app.dataset.state = 'ready';
     void renderPaused();
   } catch {
