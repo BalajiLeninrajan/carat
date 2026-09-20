@@ -30,6 +30,7 @@ import {
   redactSettings,
   requesterFromSender,
   setPinned,
+  undoNavigation,
   useAnswerStorage,
 } from '../src/background';
 import type { CaptureVerdict, ScreenApi } from '../src/background';
@@ -185,6 +186,15 @@ export default defineBackground(() => {
     if (from && isSiteOff(current, new URL(from.origin).host)) return { ok: false };
     try {
       return await performNavigation(data, sender, tabs);
+    } catch {
+      return { ok: false };
+    }
+  });
+
+  // Ctrl+Z on that same chip, within its window: the tab carat opened goes away again.
+  onMessage('undoNavigate', async ({ data, sender }) => {
+    try {
+      return await undoNavigation(data, sender, tabs);
     } catch {
       return { ok: false };
     }

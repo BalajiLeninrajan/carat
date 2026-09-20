@@ -4,6 +4,7 @@ import type { ContextItem, NextAction, NextActionRequest, Settings } from '@cara
 import type { DebugSnapshot } from './background/debug';
 import type { TabDiag } from './background/diag';
 import type { HistoryEntry } from './history';
+import type { NavigationResult } from './background/navigation';
 import type { FeedbackInput } from './background/feedback';
 import type { StatusInfo } from './background/status';
 import type { VisionCue } from './background/vision';
@@ -74,7 +75,13 @@ export interface Protocol {
   contextCleared(): void;
   feedback(data: FeedbackInput): void;
   /** Sent only from a Tab press on an `open` or `switch` chip; the background rebuilds the URL from the registry. */
-  navigate(data: { kind: 'open' | 'switch'; value: string }): { ok: boolean };
+  navigate(data: { kind: 'open' | 'switch'; value: string }): NavigationResult;
+  /**
+   * Ctrl+Z inside the undo window on a chip that opened or switched a tab.
+   * The tab carat opened is closed only while it is still on the URL carat
+   * opened it at; either way the tab the chip was on comes back to the front.
+   */
+  undoNavigate(data: { kind: 'open' | 'switch'; tabId?: number; url?: string }): { ok: boolean };
   getKnown(): { items: KnownItem[]; pinned: boolean };
   /** The popup's button. The keyboard shortcut runs the same routine in the background. */
   clearKnown(): void;
