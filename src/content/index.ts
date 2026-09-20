@@ -175,7 +175,7 @@ let focusValue: { el: TextField; value: string } | null = null;
 document.addEventListener(
   "click",
   (e) => {
-    if (!e.isTrusted) return;
+    if (!e.isTrusted || fromCaratUi(e)) return;
     const target = (e.composedPath()[0] as Element | undefined)?.closest?.(CLICKABLE);
     if (!target || asTextField(target) || target instanceof HTMLSelectElement) return;
     // Checkbox/radio clicks are logged by their change event.
@@ -695,8 +695,19 @@ function onFieldInput(): void {
   schedule("input");
 }
 
+/** Did this event come from one of Carat's own overlays rather than the page? */
+function fromCaratUi(e: Event): boolean {
+  const hosts = [palette.element, ring.element, ghost.element].filter((h): h is HTMLElement => !!h);
+  if (!hosts.length) return false;
+  const path = e.composedPath();
+  return hosts.some((h) => path.includes(h));
+}
+
 function onActivity(e: Event): void {
   if (!e.isTrusted) return;
+  // Typing in the palette, or its question box taking focus, is not the user
+  // getting on with the page: it must not cancel the suggestion being asked about.
+  if (fromCaratUi(e)) return;
   if (e.type === "keydown") {
     const k = e as KeyboardEvent;
     if (MODIFIER_KEYS.has(k.key)) return;

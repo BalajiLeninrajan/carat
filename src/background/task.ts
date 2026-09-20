@@ -16,7 +16,7 @@ import { announceTarget, click, pressEnter, select, setValue } from "./actuate.j
 import { browserContext, openOrSearch, switchToTab, waitForLoad } from "./browser.js";
 import { getTree } from "./axmirror.js";
 import { appendHistory, historyFor } from "./history.js";
-import { streamResponse } from "./llm.js";
+import { parseLoose, streamResponse } from "./llm.js";
 import { notesFor } from "./notes.js";
 import { buildOutline, type Candidate } from "./outline.js";
 import { buildTaskRequest } from "./prompts.js";
@@ -217,6 +217,9 @@ async function runTask(startTabId: number, task: Task): Promise<void> {
   }
 
   // Runs until it finishes, gets stuck, or the user stops it with Esc or Stop.
+  /** Consecutive answers that could not be read; two in a row ends the task. */
+  let unreadable = 0;
+
   for (let n = 0; ; n++) {
     if (task.stopped) return;
 
@@ -267,14 +270,30 @@ async function runTask(startTabId: number, task: Task): Promise<void> {
     const result = await streamResponse(settings, request, () => {}, new AbortController().signal);
     if (task.stopped) return;
 
-    let step: Step;
-    try {
-      step = JSON.parse(result.text);
-    } catch {
-      console.warn("[carat] task: unparseable step", result.text);
-      stopTask(tabId, "The model's answer could not be read.");
-      return;
+    // Answers arrive cut off often enough (a long value or summary running past
+    // the output limit) that one unreadable reply is worth retrying, not fatal.
+    const parsed = parseLoose<Partial<Step>>(result.text);
+    if (!parsed?.kind) {
+      console.warn("[carat] task: unreadable answer", JSON.stringify(result.text));
+      unreadable++;
+      if (unreadable >= 2) {
+        stopTask(tabId, "The model's answers could not be read twice in a row.");
+        return;
+      }
+      emit(task, { type: "task-step", index: n, text: "Could not read that answer; trying again", state: "failed" });
+      task.steps.push("the previous answer was unreadable — reply with one small JSON object");
+      continue;
     }
+    unreadable = 0;
+    const step: Step = {
+      why: parsed.why ?? "",
+      kind: parsed.kind,
+      target: parsed.target ?? 0,
+      value: parsed.value ?? "",
+      label: parsed.label ?? "",
+      irreversible: parsed.irreversible ?? false,
+      message: parsed.message ?? "",
+    };
     console.log(
       `[carat] task step ${n + 1}: ${step.kind} [${step.target}] "${step.label}"${step.value ? ` = "${step.value}"` : ""}` +
         ` · ${step.why} · ${Math.round(performance.now() - started)}ms`,
