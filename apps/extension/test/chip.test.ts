@@ -109,8 +109,8 @@ describe('chip', () => {
   });
 
   it('takes Tab even when the user is in another text field', () => {
-    show();
     other.focus();
+    show();
     const e = key(other, 'Tab');
     expect(e.defaultPrevented).toBe(true);
     expect(onAccept).toHaveBeenCalledTimes(1);
