@@ -93,6 +93,24 @@ export interface CopiedMessage {
   text: string;
 }
 
+/** The user typed an instruction in the palette. */
+export interface TaskMessage {
+  type: "task";
+  goal: string;
+  url: string;
+}
+
+/** The user answered a question the task asked. */
+export interface TaskAnswerMessage {
+  type: "task-answer";
+  answer: string;
+}
+
+/** Stop the running task: the Stop button, Esc, or the user taking over. */
+export interface TaskStopMessage {
+  type: "task-stop";
+}
+
 export type ContentToWorker =
   | IdleMessage
   | LogMessage
@@ -100,7 +118,17 @@ export type ContentToWorker =
   | DismissMessage
   | AlternativeMessage
   | SeenMessage
-  | CopiedMessage;
+  | CopiedMessage
+  | TaskMessage
+  | TaskAnswerMessage
+  | TaskStopMessage;
+
+/**
+ * The reqId a task's own steps carry. An ordinary suggestion is ignored once
+ * the user has done anything since it was asked for; a task's steps are always
+ * current, because the task is the one doing things.
+ */
+export const TASK_REQ = -1;
 
 // ---------------------------------------------------------------------------
 // Worker → content
@@ -166,4 +194,53 @@ export interface GhostMessage {
   done: boolean;
 }
 
-export type WorkerToContent = TargetMessage | ActionMessage | ClearMessage | ResultMessage | GhostMessage;
+/** Open the instruction box (Ctrl+Shift+K reaches the worker, not the page). */
+export interface OpenPaletteMessage {
+  type: "palette";
+}
+
+/**
+ * Show the task panel for a task already running in this tab: after a page
+ * load took the old panel with it, or when the user moves to a tab the task
+ * opened.
+ */
+export interface TaskStartMessage {
+  type: "task-start";
+  goal: string;
+}
+
+export type TaskStepState = "running" | "done" | "failed" | "skipped" | "waiting";
+
+/** One step of a running task, created or updated. */
+export interface TaskStepMessage {
+  type: "task-step";
+  index: number;
+  text: string;
+  state: TaskStepState;
+  /** The model's one-line reason for this step. */
+  why?: string;
+}
+
+/** The task needs something from the user before it can go on. */
+export interface TaskAskMessage {
+  type: "task-ask";
+  question: string;
+}
+
+/** The task is over: finished, stopped, or gave up. */
+export interface TaskDoneMessage {
+  type: "task-done";
+  summary: string;
+}
+
+export type WorkerToContent =
+  | TargetMessage
+  | ActionMessage
+  | ClearMessage
+  | ResultMessage
+  | GhostMessage
+  | OpenPaletteMessage
+  | TaskStartMessage
+  | TaskStepMessage
+  | TaskAskMessage
+  | TaskDoneMessage;

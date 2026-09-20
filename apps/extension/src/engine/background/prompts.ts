@@ -574,7 +574,8 @@ What is the next step?`;
     ...common(settings, settings.actionModel, url, "task"),
     instructions: TASK_INSTRUCTIONS,
     input: [{ role: "user", content }],
-    max_output_tokens: 400,
+    // A step with a long fill value or summary was running past 400.
+    max_output_tokens: 800,
     text: { format: { type: "json_schema", name: "next_step", strict: true, schema: TASK_SCHEMA } },
   };
 }

@@ -3,10 +3,12 @@ import { createChip, type ChipKind } from '../src/chip';
 import { watchAccept } from '../src/chip/accept-key';
 import { startDebug } from '../src/debug';
 import { Ghost } from '../src/engine/content/ghost';
+import { Palette } from '../src/engine/content/palette';
 import { Ring } from '../src/engine/content/ring';
 import {
   PORT_NAME,
   TARGET_EVENT,
+  TASK_REQ,
   type ActionKind,
   type ContentToWorker,
   type FieldInfo,
@@ -439,6 +441,55 @@ export default defineContentScript({
      * were added, so a field with grey text in it answers the tap itself and
      * the chip never sees it.
      */
+    // -----------------------------------------------------------------------
+    // Tasks: Ctrl+Shift+K, an instruction, then steps carried out for you
+
+    const palette = new Palette();
+    let taskRunning = false;
+
+    palette.onSubmit = (goal) => {
+      taskRunning = true;
+      palette.startTask(goal);
+      post({ type: 'task', goal, url: location.href });
+      debug.event({ name: 'task', detail: goal });
+    };
+    palette.onAnswer = (answer) => post({ type: 'task-answer', answer });
+    // Esc in the question box means "no" to the step it is asking about.
+    palette.onQuestionEscape = () => {
+      if (taskRunning) post({ type: 'dismiss', reqId: TASK_REQ });
+    };
+    palette.onStop = () => {
+      if (taskRunning) post({ type: 'task-stop' });
+      taskRunning = false;
+      palette.hideTask();
+    };
+
+    /**
+     * Bound before the ghost and the chip, so the instruction box opens
+     * wherever the user is, and Esc reaches the task before anything else
+     * claims it. Esc inside the question box never gets here: that input
+     * stops it, and answers it as a "no" to the step instead.
+     */
+    window.addEventListener(
+      'keydown',
+      (e) => {
+        if (!e.isTrusted) return;
+        if (e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey && e.code === 'KeyK') {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          palette.open();
+          return;
+        }
+        if (e.key === 'Escape' && (palette.isOpen || taskRunning)) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          if (palette.isOpen) palette.close();
+          else palette.onStop();
+        }
+      },
+      true,
+    );
+
     const ghostAccept = watchAccept();
     window.addEventListener(
       'keydown',
@@ -607,8 +658,30 @@ export default defineContentScript({
         }
         return;
       }
-      // Replies to an older idle: the user has moved on since.
-      if (msg.reqId !== activity) return;
+      switch (msg.type) {
+        case 'palette':
+          palette.open();
+          return;
+        case 'task-start':
+          taskRunning = true;
+          palette.startTask(msg.goal);
+          return;
+        case 'task-step':
+          // A step that is no longer waiting has been answered one way or another.
+          if (msg.state !== 'waiting') palette.hideQuestion();
+          palette.step(msg.index, msg.text, msg.state, msg.why);
+          return;
+        case 'task-ask':
+          palette.showQuestion(msg.question);
+          return;
+        case 'task-done':
+          taskRunning = false;
+          palette.finish(msg.summary);
+          return;
+      }
+      // Replies to an older idle: the user has moved on since. A task's own
+      // steps are always current: the task, not the user, is driving.
+      if (msg.reqId !== activity && msg.reqId !== TASK_REQ) return;
       switch (msg.type) {
         case 'target':
           if (!lastTarget?.isConnected) return;
@@ -795,7 +868,7 @@ export default defineContentScript({
     new MutationObserver((records) => {
       if (pageChanged) return;
       const focused = deepActive();
-      const ours = [ring.element, ghost.element].filter((el): el is HTMLElement => !!el);
+      const ours = [ring.element, ghost.element, palette.element].filter((el): el is HTMLElement => !!el);
       const isOurs = (r: MutationRecord): boolean =>
         ours.some((el) => r.target === el || [...r.addedNodes].includes(el)) ||
         (r.target instanceof Element && caratSurface(r.target)) ||
@@ -926,6 +999,7 @@ export default defineContentScript({
       // or listens for it follows the same poll.
       chip.setAcceptKey(info.acceptKey);
       ghostAccept.use(info.acceptKey);
+      palette.setAcceptKey(info.acceptKey);
       ghost.setAcceptKey(info.acceptKey);
       // With the pill off, a pause looks exactly like carat having nothing to
       // say. Break that silence once, then leave the page alone.
