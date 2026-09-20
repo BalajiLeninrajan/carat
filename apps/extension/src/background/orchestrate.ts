@@ -4,10 +4,12 @@ import {
   EXAMPLE_VALUES,
   INTENT_REGISTRY,
   LIMITS,
+  domainLabel,
   fnv1a,
   isIntentDestination,
   isIrreversibleLabel,
   normalizeWhitespace,
+  registrableDomain,
   resolveIntentValue,
   scrollLabel,
   truncate,
@@ -407,7 +409,9 @@ export function validate(action: NextAction | null, req: NextActionRequest, sett
       if (action.value === '') return refuse('a fill needs a value');
       if (echoes(action.value, control!)) return refuse("that is the field's own name");
       if (fromAnExample(action.value)) return refuse(FROM_AN_EXAMPLE);
+      if (namesSomewhere(action.value, req)) return refuse(A_LABEL);
       if (!grounded(action.value, req)) return refuse(UNGROUNDED);
+      if (isSearchBox(control!) && req.focused !== control!.n && !aimedAtSearch(action.value, req)) return refuse(NOT_A_QUERY);
       break;
     }
     case 'select':
@@ -479,6 +483,76 @@ function grounded(value: string, req: NextActionRequest): boolean {
   const typed = req.focused === undefined ? undefined : req.controls.find((c) => c.n === req.focused)?.value;
   const sources = [...req.notes, ...req.history, req.outline, ...(typed ? [typed] : [])];
   return sources.some((source) => norm(source).includes(needle));
+}
+
+/** Why a fill was refused when its value is the name of a page, a tab or a site. */
+export const A_LABEL = 'that is a page or site name, not something the user would type';
+
+/** Why a fill into a search box the user is not in was refused. */
+export const NOT_A_QUERY = 'nothing the user typed or read lately points that search box at this value';
+
+/** A note read on a site the user has since left counts for ten minutes. */
+export const FRESH_NOTE_MS = 10 * 60_000;
+
+/**
+ * Everything on this request that is a name for somewhere rather than
+ * something to type: the page's own title, the open tabs' titles, and every
+ * host involved, each also split at the separators a site puts in its title
+ * bar. "Redirecting… | Slack" is a tab name, "Slack" is a site, and neither
+ * is a search query, however plainly the outline offers them.
+ */
+function namesSomewhere(value: string, req: NextActionRequest): boolean {
+  const v = norm(value);
+  if (v === '') return false;
+  const titles = [req.page.title, ...req.tabs.map((t) => t.title)];
+  const hosts = [req.page.host, ...req.tabs.map((t) => t.host), ...noteHosts(req.notes)];
+  const labels = [
+    ...titles.flatMap((t) => [t, ...t.split(/[|·–—>‹»]/)]),
+    ...hosts.flatMap((h) => [h, registrableDomain(h), domainLabel(registrableDomain(h))]),
+  ];
+  return labels.some((label) => {
+    const l = norm(label);
+    return l !== '' && l === v;
+  });
+}
+
+function isSearchBox(control: OutlineControl): boolean {
+  return control.role === 'searchbox' || /\b(search|find|query)\b/i.test(control.name);
+}
+
+/**
+ * A search box the user is not typing in is the easiest place on any page to
+ * put a wrong value, because every page has one and any string fits. So one
+ * is only filled from what the user typed on this page, or from a note they
+ * read in the last ten minutes on a different site than the one being
+ * searched: a plan from another tab, not this site's own furniture.
+ */
+function aimedAtSearch(value: string, req: NextActionRequest): boolean {
+  const needle = norm(value);
+  const typed = req.controls.map((c) => c.value).filter((v): v is string => !!v);
+  if (typed.some((t) => norm(t).includes(needle))) return true;
+  return req.notes.some((note) => isFresh(note) && readElsewhere(note, req.page.host) && norm(note).includes(needle));
+}
+
+/** The age every note line opens with: "just now: ", "3m ago: ", "2h ago: ". */
+const NOTE_AGE_PARTS = /^(?:just now|(\d+)([smh]) ago): /;
+
+function isFresh(note: string): boolean {
+  const m = NOTE_AGE_PARTS.exec(note);
+  if (!m) return false;
+  if (m[1] === undefined) return true;
+  const n = Number(m[1]);
+  const ms = m[2] === 's' ? n * 1000 : m[2] === 'm' ? n * 60_000 : n * 3_600_000;
+  return ms <= FRESH_NOTE_MS;
+}
+
+function readElsewhere(note: string, host: string): boolean {
+  const from = noteOrigin(note);
+  return from !== 'this tab' && registrableDomain(from) !== registrableDomain(host);
+}
+
+function noteHosts(notes: readonly string[]): string[] {
+  return notes.map((n) => noteOrigin(n)).filter((h) => h !== 'this tab');
 }
 
 /** How long the line under a chip may run before it is clipped. */

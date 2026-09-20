@@ -4,7 +4,7 @@ import { DEFAULT_SETTINGS, EXAMPLE_VALUES } from '@carat/shared';
 import type { NextOptions, Provider } from '@carat/providers';
 import { RefineQueue } from '../src/background/refine';
 import type { SuggestDiag } from '../src/background/diag';
-import { FROM_AN_EXAMPLE, UNGROUNDED, clearActionCache, nextAction, nudgeLine, pick, validate } from '../src/background/orchestrate';
+import { A_LABEL, FROM_AN_EXAMPLE, UNGROUNDED, clearActionCache, nextAction, nudgeLine, pick, validate } from '../src/background/orchestrate';
 import { LAST_RESORT_CONFIDENCE, lastResort } from '../src/background/last-resort';
 import type { PageSnapshot } from '../src/messaging';
 
@@ -69,6 +69,36 @@ const request = (over: Partial<NextActionRequest> = {}): NextActionRequest => ({
   eagerness: 'eager',
   ...over,
 });
+
+/**
+ * The page from the owner's screenshot: the Reddit feed, nothing focused,
+ * a Slack tab still calling itself "Redirecting… | Slack", and a note made
+ * out of that title. The chip read Fill Search Reddit with "Redirecting… |
+ * Slack".
+ */
+const FEED_OUTLINE = `banner:
+  [1] searchbox "Search Reddit"
+main:
+  heading(1) "Popular posts"
+  text: Where is the best brunch in town?
+  [2] link "Where is the best brunch in town?"
+  [3] button "Join"
+(2.4 more screens below; 31 controls not shown)`;
+
+const FEED_CONTROLS: OutlineControl[] = [
+  { n: 1, role: 'searchbox', name: 'Search Reddit' },
+  { n: 2, role: 'link', name: 'Where is the best brunch in town?' },
+  { n: 3, role: 'button', name: 'Join' },
+];
+
+const FEED_PAGE = { host: 'www.reddit.com', title: 'Reddit — the front page', path: '/', scroll: { y: 0, pages: 3.4, more: true } };
+const SLACK_TAB: OpenTab = { id: 8, host: 'app.slack.com', title: 'Redirecting… | Slack' };
+const SLACK_NOTE = '2m ago: Redirecting… | Slack (read on app.slack.com)';
+
+const feedSnapshot = (): PageSnapshot => ({ page: FEED_PAGE, outline: FEED_OUTLINE, controls: FEED_CONTROLS, focused: undefined });
+
+const redditFeed = (over: Partial<NextActionRequest> = {}): NextActionRequest =>
+  request({ page: FEED_PAGE, outline: FEED_OUTLINE, controls: FEED_CONTROLS, focused: undefined, notes: [SLACK_NOTE], tabs: [SLACK_TAB], ...over });
 
 beforeEach(() => {
   clearActionCache();
@@ -212,6 +242,38 @@ describe('validation is safety only', () => {
       expect(validate(action({ kind: 'fill', target: 1, value }), request({ notes: [`Dinner at ${value}.`] }), s, diag)).toBeNull();
       expect(diag.refused).toBe(FROM_AN_EXAMPLE);
     }
+  });
+
+  it('refuses a page name, a tab name or a site name as a value to type', () => {
+    const feed = redditFeed();
+    const diag: SuggestDiag = { at: 0, host: 'www.reddit.com', controls: 3, gate: 'ok', eagerness: 'eager' };
+    for (const value of ['Redirecting… | Slack', 'Slack', 'app.slack.com', 'reddit', 'Reddit — the front page']) {
+      expect(validate(action({ kind: 'fill', target: 1, value }), feed, s, diag), value).toBeNull();
+    }
+    expect(diag.refused).toBe(A_LABEL);
+  });
+
+  it('fills a search box the user is not in only from their typing or a fresh note from elsewhere', () => {
+    const fill = (value: string) => action({ kind: 'fill', target: 1, value });
+    const outline = 'banner:\n  [1] searchbox "Search Reddit"\nmain:\n  text: quarry lane tavern is worth a visit\n  [2] link "Best brunch"';
+    const page = { ...request().page, host: 'www.reddit.com', title: 'reddit' };
+    const unfocused = (over: Partial<NextActionRequest> = {}) =>
+      request({ page, outline, controls: [{ n: 1, role: 'searchbox', name: 'Search Reddit' }], focused: undefined, tabs: [], ...over });
+
+    // On the page, so grounded, and still not a reason to search for it.
+    expect(validate(fill('quarry lane tavern'), unfocused(), s)).toBeNull();
+    // A note from another site, read in the last ten minutes: that is a reason.
+    expect(validate(fill('quarry lane tavern'), unfocused({ notes: ['4m ago: Dinner at quarry lane tavern. (read on app.slack.com)'] }), s)?.kind).toBe('fill');
+    // The same note, gone cold.
+    expect(validate(fill('quarry lane tavern'), unfocused({ notes: ['40m ago: Dinner at quarry lane tavern. (read on app.slack.com)'] }), s)).toBeNull();
+    // And the same note, read on the site being searched.
+    expect(validate(fill('quarry lane tavern'), unfocused({ notes: ['4m ago: Dinner at quarry lane tavern. (read on www.reddit.com)'] }), s)).toBeNull();
+    // What the user has typed on this page always counts.
+    const typed = unfocused({ controls: [{ n: 1, role: 'searchbox', name: 'Search Reddit', value: 'quarry lane tav' }] });
+    expect(validate(fill('quarry lane tav'), typed, s)).toBeNull(); // the field's own value
+    expect(validate(fill('quarry lane'), typed, s)?.kind).toBe('fill');
+    // And the box the user is actually in is theirs to fill.
+    expect(validate(fill('quarry lane tavern'), unfocused({ focused: 1 }), s)?.kind).toBe('fill');
   });
 
   it('leaves a select alone: its value is an option, which is on the page', () => {
@@ -393,6 +455,32 @@ describe('never silent at eager', () => {
     expect(seen[1]?.history.at(-1)).toBe(nudgeLine(UNGROUNDED));
     expect(diags.at(-1)?.reasked).toBe(UNGROUNDED);
     expect(res.action?.label).toBe('Click "Directions"');
+  });
+
+  it('reads on rather than type a tab’s name into the feed’s search box', async () => {
+    const seen: NextActionRequest[] = [];
+    const copies: Provider = {
+      id: 'openai',
+      next: async (req) => {
+        seen.push(req);
+        return action({ kind: 'fill', target: 1, value: 'Redirecting… | Slack', confidence: 0.86, label: 'Fill Search Reddit with "Redirecting… | Slack"' });
+      },
+    };
+    const diags: SuggestDiag[] = [];
+    const res = await nextAction(feedSnapshot(), { tabId: 1, origin: 'x' }, {
+      settings: async () => settings(),
+      localProvider: nothing,
+      createProvider: () => copies,
+      notes: { lines: async () => [SLACK_NOTE] },
+      tabs: async () => [SLACK_TAB],
+      onDiag: (d) => diags.push(d),
+    });
+    expect(seen).toHaveLength(2);
+    expect(seen[1]?.history.at(-1)).toBe(nudgeLine(A_LABEL));
+    expect(diags.at(-1)?.reasked).toBe(A_LABEL);
+    // Nothing on the feed asks to be typed into, and there are three screens
+    // below: the page's own plainest step is to read on.
+    expect(res.action?.kind).toBe('scroll');
   });
 
   it('scrolls rather than say nothing when both tries come back empty', async () => {

@@ -53,6 +53,8 @@ describe('buildNextActionMessages', () => {
       expect(text).toContain('A note from long ago or from an unrelated site is weak evidence');
       expect(text).toContain('If the page gives no reason to type a particular value, do not fill');
       expect(text).toContain('a search box on an unrelated site is not a place for a note about dinner');
+      expect(text).toContain('A page title, a site name, a tab name');
+      expect(text).toContain('the next step is almost never a search fill');
       // And it says so before it says anything else about choosing.
       expect(text.indexOf('Evidence, in order of weight')).toBeLessThan(text.indexOf('<goal> is what the user'));
     }
