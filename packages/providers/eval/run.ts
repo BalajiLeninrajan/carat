@@ -1,15 +1,12 @@
-// Usage: tsx eval/run.ts [--provider local|openai|baseten|cloudflare] [--model <id>] [--base-url <url>] [--eagerness conservative|balanced|eager]
+// Usage: tsx eval/run.ts [--provider local|openai|baseten] [--model <id>] [--base-url <url>] [--eagerness conservative|balanced|eager]
 // Runs every fixture in eval/fixtures against one provider at one eagerness level and exits 1 on any
 // failure. With --provider local (the default) each fixture is judged against its `expectLocal`: what
 // the offline regex placeholder must answer with no network at all. Any other provider is judged
 // against `expect`: the action itself.
 //   openai, baseten:  OPENAI_API_KEY
-//   cloudflare:       CF_ACCOUNT_ID and CF_API_TOKEN; with OPENAI_API_KEY also set, the
-//                     chat model races Jev and the surer answer wins.
 import { parseArgs } from 'node:util';
 import { DEFAULT_SETTINGS, EAGERNESS, LIMITS, isEagerness, type Settings } from '@carat/shared';
 import { createProvider } from '../src/provider';
-import { JEV_MODEL } from '../src/jev';
 import { NONE_EXPECTED, judge, loadFixtures, type Verdict } from './fixtures';
 
 const { values } = parseArgs({
@@ -22,8 +19,8 @@ const { values } = parseArgs({
 });
 
 const provider = values.provider;
-if (provider !== 'local' && provider !== 'openai' && provider !== 'baseten' && provider !== 'cloudflare') {
-  console.error(`unknown provider "${provider}"; use local, openai, baseten or cloudflare`);
+if (provider !== 'local' && provider !== 'openai' && provider !== 'baseten') {
+  console.error(`unknown provider "${provider}"; use local, openai or baseten`);
   process.exit(2);
 }
 
@@ -34,19 +31,8 @@ if (!isEagerness(eagerness)) {
 }
 
 const apiKey = process.env.OPENAI_API_KEY ?? '';
-const cfAccountId = process.env.CF_ACCOUNT_ID ?? '';
-const cfApiToken = process.env.CF_API_TOKEN ?? '';
 if ((provider === 'openai' || provider === 'baseten') && apiKey === '') {
   console.error(`--provider ${provider} needs OPENAI_API_KEY in the environment`);
-  process.exit(2);
-}
-if (provider === 'cloudflare' && (cfAccountId === '' || cfApiToken === '')) {
-  const missing = [cfAccountId === '' && 'CF_ACCOUNT_ID', cfApiToken === '' && 'CF_API_TOKEN'].filter(Boolean).join(' and ');
-  console.error(
-    `--provider cloudflare needs ${missing} in the environment.\n` +
-      'CF_ACCOUNT_ID is the Workers AI account id; CF_API_TOKEN is an API token with the Workers AI permission.\n' +
-      'Set OPENAI_API_KEY as well to race the chat model against Jev.',
-  );
   process.exit(2);
 }
 
@@ -54,8 +40,6 @@ const settings: Settings = {
   ...DEFAULT_SETTINGS,
   provider,
   apiKey,
-  cfAccountId,
-  cfApiToken,
   model: values.model ?? DEFAULT_SETTINGS.model,
   baseURL: values['base-url'] ?? DEFAULT_SETTINGS.baseURL,
   eagerness,
@@ -67,9 +51,7 @@ const nameWidth = Math.max(...fixtures.map((f) => f.name.length));
 const label =
   p.id === 'local'
     ? 'provider=local (judging the offline placeholder)'
-    : p.id === 'cloudflare'
-      ? `provider=cloudflare model=${JEV_MODEL}${apiKey ? ` and ${settings.model}` : ' (no OPENAI_API_KEY: Jev alone)'}`
-      : `provider=${p.id} model=${settings.model}`;
+    : `provider=${p.id} model=${settings.model}`;
 console.log(`${label} eagerness=${eagerness} (floor ${EAGERNESS[eagerness].minConfidence}) fixtures=${fixtures.length}\n`);
 
 let failures = 0;

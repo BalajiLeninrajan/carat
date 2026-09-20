@@ -104,7 +104,7 @@ export function createWarmer(deps: WarmDeps): Warmer {
       if (notes.length === 0 && history.length === 0) return;
 
       const provider = (deps.createProvider ?? createProvider)(settings);
-      // A race of the regex placeholder and Jev has no prefix to put anywhere.
+      // A race of the regex placeholder alone has no prefix to put anywhere.
       if (!provider.warm || (provider instanceof RaceProvider && !provider.warms)) return;
       const req: NextActionRequest = {
         page: { host: page.host, title: '', path: page.path, scroll: { y: 0, pages: 1, more: false } },

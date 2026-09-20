@@ -21,14 +21,6 @@ describe('describeStatus', () => {
     expect(describeStatus({ ...settings, provider: 'local' }, 'https://a.test/').provider).toBe('local');
   });
 
-  it('names jev for cloudflare with credentials, jev+model when a chat key is set too, and falls back like openai without them', () => {
-    const cf = { ...settings, provider: 'cloudflare' as const, cfAccountId: 'acct', cfApiToken: 'cf-x' };
-    expect(describeStatus({ ...cf, apiKey: '' }, 'https://a.test/')).toMatchObject({ provider: 'cloudflare', model: 'jev' });
-    expect(describeStatus(cf, 'https://a.test/')).toMatchObject({ provider: 'cloudflare', model: 'jev+gpt-5.6-luna' });
-    expect(describeStatus({ ...cf, cfApiToken: '' }, 'https://a.test/').model).toBe('gpt-5.6-luna');
-    expect(describeStatus({ ...cf, cfApiToken: '', apiKey: '' }, 'https://a.test/').model).toBe('local');
-    expect(statusText(describeStatus({ ...cf, apiKey: '' }, 'https://a.test/'))).toBe('carat · jev');
-  });
 
   it('explains why it is not running, in priority order', () => {
     expect(describeStatus({ ...settings, enabled: false }, 'https://a.test/')).toMatchObject({

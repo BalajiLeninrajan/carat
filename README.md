@@ -85,7 +85,7 @@ The floor is applied again in the service worker, so a weak answer never reaches
 
 The chip has to be up before the model has answered, so every request runs two things.
 
-The placeholder answers in the first tick with no network at all: the regex pass over the notes, matched to the focused text control or the first empty one, as a `fill`. It has no page rules and answers `none` for most pages. With Cloudflare credentials, Jev gets one choice question over the numbered controls plus a scroll and nothing, fed the same notes and history, and its calibrated probability becomes the confidence.
+The placeholder answers in the first tick with no network at all: the regex pass over the notes, matched to the focused text control or the first empty one, as a `fill`. It has no page rules and answers `none` for most pages.
 
 The model runs behind it with a ticket. Its answer replaces the placeholder unless the placeholder was a fill backed by something the user read and is surer of it. The ring moves as soon as `target` streams; the words change when the action lands. An answer is cached for 60 seconds per page, keyed by the outline's hash and the length of the timeline, so a page that has not changed is not asked about twice. Both the cache and the tickets that are still open are mirrored into `chrome.storage.session`: a service worker that restarts mid-answer would otherwise reply to the poll with nothing, which the chip reads as "nothing better". A ticket the new worker cannot place is answered as lost, and the page asks again on the spot.
 

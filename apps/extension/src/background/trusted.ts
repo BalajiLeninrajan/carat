@@ -15,5 +15,5 @@ export function isExtensionPage(sender: chrome.runtime.MessageSender, base: stri
 
 /** What a content script may learn about settings: everything but the keys. */
 export function redactSettings(settings: Settings): Settings {
-  return { ...settings, apiKey: '', cfApiToken: '' };
+  return { ...settings, apiKey: '' };
 }

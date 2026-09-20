@@ -1,5 +1,4 @@
 import type { ImageInput, NextAction, NextActionRequest, Settings } from '@carat/shared';
-import { JevProvider } from './jev';
 import { LocalProvider } from './local';
 import { OpenAICompatProvider } from './openai-compat';
 import type { ReasoningEffort, RelaxStore } from './openai-compat';
@@ -45,26 +44,22 @@ export interface VisionProvider extends Provider {
  * local: the regex placeholder alone, no network. Anything else races the
  * placeholder against the model so a chip is up in the first tick and the
  * model replaces it behind a ticket: openai/baseten add the chat model when a
- * key is set; cloudflare adds Jev when an account id and token are set, and
- * the chat model at baseURL when a key is set too. Start order is also rank
- * on a tie: chat beats Jev beats regex.
+ * key is set. Start order is also rank on a tie: chat beats regex.
  */
 export function createProvider(settings: Settings, fetchImpl: typeof fetch = fetch, relax?: RelaxStore): Provider {
   if (settings.provider === 'local') return new LocalProvider();
   const sources: Provider[] = [new LocalProvider()];
-  const jev = settings.provider === 'cloudflare' && settings.cfAccountId && settings.cfApiToken;
-  if (jev) sources.push(new JevProvider({ accountId: settings.cfAccountId, apiToken: settings.cfApiToken }, fetchImpl));
   const llm = chatProvider(settings, settings.model, 'none', fetchImpl, relax);
   if (llm) sources.push(llm);
   if (sources.length === 1) return sources[0]!;
-  return new RaceProvider(sources, { id: jev ? 'cloudflare' : llm!.id });
+  return new RaceProvider(sources, { id: llm!.id });
 }
 
 /**
  * The model that reads screenshots and writes notes: the same one by default,
  * with low reasoning instead of none; `smartModel` swaps in a bigger one.
  * Undefined when there is no chat model at all, since neither the regex
- * placeholder nor Jev can read an image or write a sentence.
+ * placeholder cannot read an image or write a sentence.
  */
 export function createVisionProvider(settings: Settings, fetchImpl: typeof fetch = fetch, relax?: RelaxStore): VisionProvider | undefined {
   if (settings.provider === 'local') return undefined;
@@ -79,8 +74,7 @@ function chatProvider(
   relax: RelaxStore | undefined,
 ): OpenAICompatProvider | null {
   if (settings.provider === 'local' || !settings.apiKey) return null;
-  const chat: 'openai' | 'baseten' =
-    settings.provider === 'cloudflare' ? (isOpenAI(settings.baseURL) ? 'openai' : 'baseten') : settings.provider;
+  const chat: 'openai' | 'baseten' = settings.provider;
   return new OpenAICompatProvider(
     {
       id: chat,
