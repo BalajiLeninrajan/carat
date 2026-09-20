@@ -12,8 +12,8 @@ const events = vi.hoisted(() => {
       addListener: (l: Listener) => listeners.push(l),
       removeListener: () => undefined,
       hasListener: () => false,
-      // Every worker restart in this file adds another listener; only the last set matters.
-      fire: (...args: unknown[]) => listeners.slice(-1).forEach((l) => l(...(args as never[]))),
+      // Every worker restart in this file adds another listener; only the last one matters.
+      fire: (...args: unknown[]) => Promise.all(listeners.slice(-1).map((l) => l(...(args as never[])))),
     };
   };
   const fake = globalThis as unknown as { chrome: Record<string, Record<string, unknown>> } & {
@@ -29,11 +29,14 @@ const events = vi.hoisted(() => {
   return { onCommand, onDetach };
 });
 
+import { COMMANDS } from '../entrypoints/background';
 import { isPaused, pause } from '../src/engine/background/cdp';
 
 /** Every one-shot message the worker answers, by name, as the popup would reach it. */
-const handlers = new Map<string, (msg: { data: unknown; sender: unknown }) => unknown>();
-const sendMessage = vi.fn(async () => undefined);
+const { handlers, sendMessage } = vi.hoisted(() => ({
+  handlers: new Map<string, (msg: { data: unknown; sender: unknown }) => unknown>(),
+  sendMessage: vi.fn(async () => undefined),
+}));
 
 vi.mock('../src/messaging', () => ({
   sendMessage,
@@ -72,6 +75,13 @@ describe('a tab paused by the debugging bar', () => {
   it('asks that tab for a suggestion as soon as it is resumed', async () => {
     await pause(7);
     await ask('resumeTab', { tabId: 7 });
+    expect(sendMessage).toHaveBeenCalledWith('forceSuggest', undefined, 7);
+  });
+
+  it('is resumed by Alt+Shift+C as well, before the question goes out', async () => {
+    await pause(7);
+    await events.onCommand.fire(COMMANDS.suggest, { id: 7 });
+    expect(await isPaused(7)).toBe(false);
     expect(sendMessage).toHaveBeenCalledWith('forceSuggest', undefined, 7);
   });
 });

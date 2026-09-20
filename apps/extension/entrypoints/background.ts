@@ -381,9 +381,11 @@ export default defineBackground(() => {
 
   /**
    * Ask this tab for a suggestion now, past the idle wait. Alt+Shift+C and the
-   * popup's Resume button both end here.
+   * popup's Resume button both end here. Asking on a paused tab means the user
+   * wants carat back, so the pause goes first.
    */
   async function askNow(tabId: number): Promise<void> {
+    if (await isPaused(tabId)) await resume(tabId);
     await sendMessage('forceSuggest', undefined, tabId).catch(() => undefined);
   }
 
