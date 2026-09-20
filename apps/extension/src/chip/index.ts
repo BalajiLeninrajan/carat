@@ -6,7 +6,7 @@ import { deepActiveElement, shouldInterceptTab } from './keys';
 import { placeChip } from './position';
 import { PREVIEW_CSS, PREVIEW_DELAY_MS } from './preview';
 import { createSounds } from './sound';
-import { CHIP_CSS, TIMING } from './styles';
+import { CHIP_CSS, TAB_GLYPH, TIMING } from './styles';
 
 /**
  * Why the chip went away. `escape` and `typed` are the user saying no to the
@@ -110,6 +110,8 @@ export interface Chip {
   readonly pending: boolean;
   /** Whether the first Tab of an irreversible action has landed. */
   readonly armed: boolean;
+  /** The keycap's glyph and the key it names; the shadow root is closed, so tests read it here. */
+  readonly keycap: { readonly glyph: string; readonly name: string | null };
   /** The options page's "Sound on Tab". Off means no AudioContext is ever built. */
   setSound(on: boolean): void;
   /** What the pill is wearing; the shadow root is closed, so tests read it here. */
@@ -185,12 +187,10 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
   peek.className = 'preview';
   peek.hidden = true;
   text.append(label, sub, peek);
-  const spinner = doc.createElement('span');
-  spinner.className = 'pending';
-  spinner.hidden = true;
   const key = doc.createElement('kbd');
-  key.textContent = 'Tab';
-  pill.append(text, spinner, key);
+  key.textContent = TAB_GLYPH;
+  key.setAttribute('aria-label', 'Tab');
+  pill.append(text, key);
   const previewStyle = doc.createElement('style');
   previewStyle.textContent = PREVIEW_CSS;
   root.append(style, previewStyle, pill);
@@ -480,7 +480,6 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
 
   function setPending(next: boolean): void {
     pending = next;
-    spinner.hidden = !next;
     const title = next ? (reason ? `${reason} · ${PENDING_HINT}` : PENDING_HINT) : reason;
     if (title) pill.setAttribute('title', title);
     else pill.removeAttribute('title');
@@ -501,7 +500,7 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
     previewText = opts.preview ?? '';
     reason = opts.reason ?? '';
     setPending(opts.pending === true);
-    key.textContent = 'Tab';
+    key.textContent = TAB_GLYPH;
     label.classList.remove('is-fresh');
     if (!host.isConnected) doc.documentElement.appendChild(host);
     // Capture phase so the page's own Tab handlers never see an accepted Tab.
@@ -792,6 +791,9 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
     },
     get armed() {
       return armed;
+    },
+    get keycap() {
+      return { glyph: key.textContent ?? '', name: key.getAttribute('aria-label') };
     },
     get classes() {
       return [...pill.classList];

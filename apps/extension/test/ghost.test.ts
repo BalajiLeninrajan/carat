@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { KEYCAP, KEYCAP_CSS } from '../src/chip/styles';
+import { KEYCAP, KEYCAP_CSS, TAB_GLYPH } from '../src/chip/styles';
 import { Ghost } from '../src/engine/content/ghost';
 
 describe('the Tab hint at the end of ghost text', () => {
@@ -22,15 +22,15 @@ describe('the Tab hint at the end of ghost text', () => {
   it('draws the key after the last glyph of the suggestion', () => {
     ghost.show(field, 'en Shores Cafe');
     const drawn = ghost.drawn;
-    expect(drawn?.hint).toBe('Tab');
+    expect(drawn?.hint).toBe(TAB_GLYPH);
     expect(drawn?.ghost).toBe('en Shores Cafe');
     // Every glyph in order: the field's own text, the suggestion, then the key.
-    expect(drawn?.line).toBe('seven Shores CafeTab');
+    expect(drawn?.line).toBe(`seven Shores Cafe${TAB_GLYPH}`);
   });
 
   it('keeps the key on the same line as the last word', () => {
     ghost.show(field, 'en Shores Cafe');
-    expect(ghost.drawn?.tail).toBe('CafeTab');
+    expect(ghost.drawn?.tail).toBe(`Cafe${TAB_GLYPH}`);
   });
 
   it('draws the same key the chip does', () => {
@@ -41,7 +41,7 @@ describe('the Tab hint at the end of ghost text', () => {
 
   it('goes when the ghost does, whether it was taken or refused', () => {
     ghost.show(field, 'en Shores Cafe');
-    expect(ghost.drawn?.hint).toBe('Tab');
+    expect(ghost.drawn?.hint).toBe(TAB_GLYPH);
     ghost.hide();
     expect(ghost.drawn).toBeNull();
 

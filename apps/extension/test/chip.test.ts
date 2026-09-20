@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { ARM_MS, AUTO_DISMISS_MS, CHIP_SETTLE_MS, CORNER_INSET_PX, PENDING_HINT, createChip, type Chip, type DismissReason } from '../src/chip';
 import { placeAt } from '../src/chip/position';
-import { CHIP_CSS, FX_CSS, KEYCAP, KEYFRAME_CLASSES, PILL, TIMING, TYPE } from '../src/chip/styles';
+import { CHIP_CSS, FX_CSS, KEYCAP, KEYFRAME_CLASSES, LINE_PX, PILL, TAB_GLYPH, TIMING, TYPE } from '../src/chip/styles';
 import { RING, Ring } from '../src/engine/content/ring';
 
 /** jsdom has no Web Audio; this is enough of a context to count how many were built. */
@@ -297,25 +297,29 @@ describe('chip', () => {
   });
 
   describe('the Tab keycap', () => {
-    /** A keycap's outer box: its own line box, plus its padding and border. */
-    const capHeight = (fontPx: number, padY: number): number => fontPx + padY * 2 + KEYCAP.borderPx * 2;
-
     it("is set in the label's size", () => {
       expect(KEYCAP.fontPx).toBe(TYPE.fontPx);
-      expect(KEYCAP.bannerFontPx).toBe(TYPE.bannerFontPx);
       expect(CHIP_CSS).toContain(`font: 600 ${KEYCAP.fontPx}px/1`);
     });
 
-    it("stands exactly as tall as the label's line box", () => {
-      expect(capHeight(KEYCAP.lineHeightPx, KEYCAP.padYPx)).toBe(TYPE.fontPx * TYPE.lineHeight);
-      expect(capHeight(KEYCAP.bannerLineHeightPx, KEYCAP.bannerPadYPx)).toBe(TYPE.bannerFontPx * TYPE.lineHeight);
+    it("is a fixed box exactly one text line tall, with the glyph centred in it", () => {
+      expect(KEYCAP.heightPx).toBe(LINE_PX);
+      expect(LINE_PX).toBe(TYPE.fontPx * TYPE.lineHeight);
+      expect(CHIP_CSS).toContain(`height: ${LINE_PX}px`);
+      expect(CHIP_CSS).toContain('align-items: center');
+      expect(CHIP_CSS).toContain(`.label { line-height: ${LINE_PX}px;`);
     });
 
-    it("has a radius that fits the smaller box, and sits inside the pill's own", () => {
-      expect(KEYCAP.radiusPx).toBeLessThan(KEYCAP.bannerRadiusPx);
-      expect(KEYCAP.radiusPx * 2).toBeLessThan(capHeight(KEYCAP.lineHeightPx, KEYCAP.padYPx));
+    it('shows the tab glyph and names the key for a reader', () => {
+      show();
+      expect(chip.keycap.glyph).toBe(TAB_GLYPH);
+      expect(TAB_GLYPH).toBe('\u21E5');
+      expect(chip.keycap.name).toBe('Tab');
+    });
+
+    it("has a radius that fits its box and sits inside the pill's own", () => {
+      expect(KEYCAP.radiusPx * 2).toBeLessThan(KEYCAP.heightPx);
       expect(KEYCAP.radiusPx).toBeLessThan(PILL.radiusPx);
-      expect(KEYCAP.bannerRadiusPx).toBeLessThan(PILL.bannerRadiusPx);
     });
 
     it("takes the pill's box from the prototype's hint, and leaves the ring rounder", () => {
@@ -381,18 +385,18 @@ describe('chip', () => {
     });
   });
 
-  it('carries the waiting dot until it settles, and puts the reason on the tooltip', () => {
+  it('stays pending until it settles, and puts the reason on the tooltip', () => {
     show({ pending: true, reason: 'the note names the place' });
     expect(chip.pending).toBe(true);
     chip.settle();
     expect(chip.pending).toBe(false);
   });
 
-  it('shows a dot that stands still while a better answer may land', () => {
+  it('puts nothing on the pill for pending: no dot, no spinner', () => {
     show({ pending: true });
     expect(chip.pending).toBe(true);
-    const rule = CHIP_CSS.slice(CHIP_CSS.indexOf('.pending {'), CHIP_CSS.indexOf('.pending[hidden]'));
-    expect(rule).not.toContain('animation');
+    expect(CHIP_CSS).not.toContain('.pending');
+    expect(chip.classes).not.toContain('pending');
   });
 
   it('loops nothing at all', () => {

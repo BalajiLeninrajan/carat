@@ -37,11 +37,6 @@ export const PILL = {
   /** The side the keycap is on, which needs less. */
   padKeyPx: 5,
   gapPx: 6,
-  bannerRadiusPx: 8,
-  bannerPadYPx: 8,
-  bannerPadTextPx: 14,
-  bannerPadKeyPx: 8,
-  bannerGapPx: 10,
 } as const;
 
 /**
@@ -53,30 +48,21 @@ export const PILL = {
 export const TYPE = {
   fontPx: 12,
   lineHeight: 1.25,
-  /** The banner says the same things larger; the keycap follows it up. */
-  bannerFontPx: 16,
 } as const;
 
-const KEYCAP_BORDER_PX = 1;
+/** One line of pill text, in pixels. Everything on the pill is this tall. */
+export const LINE_PX = TYPE.fontPx * TYPE.lineHeight;
 
-/** The padding that makes a keycap's box match the line box of `fontPx` text. */
-function keycapPadY(fontPx: number): number {
-  return (fontPx * TYPE.lineHeight - fontPx - KEYCAP_BORDER_PX * 2) / 2;
-}
+/** What the keycap shows. It means Tab; the name is on the aria-label. */
+export const TAB_GLYPH = '\u21E5';
 
 export const KEYCAP = {
   fontPx: TYPE.fontPx,
-  /** `font: 600 12px/1`: the cap's own line box is its font size. */
-  lineHeightPx: TYPE.fontPx,
-  borderPx: KEYCAP_BORDER_PX,
-  padYPx: keycapPadY(TYPE.fontPx),
+  /** A fixed box the height of one text line, with the glyph centred in it. */
+  heightPx: LINE_PX,
+  borderPx: 1,
   padXPx: 5,
   radiusPx: 4,
-  bannerFontPx: TYPE.bannerFontPx,
-  bannerLineHeightPx: TYPE.bannerFontPx,
-  bannerPadYPx: keycapPadY(TYPE.bannerFontPx),
-  bannerPadXPx: 7,
-  bannerRadiusPx: 5,
 } as const;
 
 /**
@@ -84,8 +70,12 @@ export const KEYCAP = {
  * and the hint at the end of ghost text draw the same key to the pixel.
  */
 export const KEYCAP_CSS = `
-  display: inline-block;
-  padding: ${KEYCAP.padYPx}px ${KEYCAP.padXPx}px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  height: ${KEYCAP.heightPx}px;
+  padding: 0 ${KEYCAP.padXPx}px;
   border-radius: ${KEYCAP.radiusPx}px;
   background: #313244;
   color: #cdd6f4;
@@ -138,25 +128,12 @@ export const CHIP_CSS = `
   -webkit-user-select: none;
 }
 .chip:hover { background: #181825; }
-.text { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
+.text { display: flex; flex-direction: column; justify-content: center; min-width: 0; gap: 1px; }
 /* The label is what gives way when the two lines do not both fit. */
-.label { overflow: hidden; text-overflow: ellipsis; }
+.label { line-height: ${LINE_PX}px; overflow: hidden; text-overflow: ellipsis; }
 .sub { font-size: 11px; line-height: 1.2; color: #a6adc8; overflow: hidden; text-overflow: ellipsis; }
 .sub[hidden] { display: none; }
 .value { font-weight: 600; color: #f5e0dc; }
-/* A better answer is still on its way, so the value on screen may yet change.
-   The dot says that standing still: nothing on the chip loops. */
-.pending {
-  display: inline-block;
-  flex: none;
-  width: 7px;
-  height: 7px;
-  margin-left: -2px;
-  border-radius: 50%;
-  background: var(--carat-accent);
-  opacity: 0.8;
-}
-.pending[hidden] { display: none; }
 /* A replaced value arrives on the spot the old one held, so only the word changes. */
 .value.is-fresh, .label.is-fresh { animation: carat-fade var(--carat-fresh-ms) ease-out; }
 @keyframes carat-fade {
@@ -197,23 +174,12 @@ kbd.is-press { background: #232334; color: #9399b2; }
 .chip.is-armed .value { color: #1e1e2e; }
 .chip.is-armed .sub { color: #4c4f69; }
 .chip.is-armed kbd { background: #1e1e2e; color: var(--carat-amber); border-color: #1e1e2e; }
-/* The tab offer has no field to sit beside, so it reads as a banner: larger type, wider, centred. */
+/* The tab offer has no field to sit beside, so it sits centred at the bottom. Same pill otherwise. */
 .chip.is-banner {
-  max-width: min(640px, calc(100vw - 32px));
-  gap: ${PILL.bannerGapPx}px;
-  padding: ${PILL.bannerPadYPx}px ${PILL.bannerPadKeyPx}px ${PILL.bannerPadYPx}px ${PILL.bannerPadTextPx}px;
-  border-radius: ${PILL.bannerRadiusPx}px;
-  font-size: ${TYPE.bannerFontPx}px;
-  box-shadow: 0 10px 30px rgba(17, 17, 27, 0.45), 0 0 0 1px rgba(205, 214, 244, 0.1);
+  max-width: min(480px, calc(100vw - 32px));
+  box-shadow: 0 6px 20px rgba(17, 17, 27, 0.4), 0 0 0 1px rgba(205, 214, 244, 0.1);
 }
-.chip.is-banner .sub { font-size: 12px; }
-.chip.is-banner .pending { width: 9px; height: 9px; margin-left: -6px; }
-.chip.is-banner kbd {
-  padding: ${KEYCAP.bannerPadYPx}px ${KEYCAP.bannerPadXPx}px;
-  border-radius: ${KEYCAP.bannerRadiusPx}px;
-  font-size: ${KEYCAP.bannerFontPx}px;
-}
-/* Sized off the label, not off itself: see KEYCAP above. */
+/* One text line tall, glyph centred: see KEYCAP above. */
 kbd {
   all: initial;${KEYCAP_CSS}}
 `;

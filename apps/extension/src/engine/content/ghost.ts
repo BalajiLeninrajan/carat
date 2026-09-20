@@ -14,7 +14,7 @@
  * taken off them are the page's own and are never touched.
  */
 
-import { KEYCAP_CSS } from "../../chip/styles";
+import { KEYCAP_CSS, TAB_GLYPH } from "../../chip/styles";
 
 type TextField = HTMLInputElement | HTMLTextAreaElement;
 
@@ -80,10 +80,10 @@ export class Ghost {
       kbd.hint {
         all: initial;${KEYCAP_CSS}
         margin-left: 4px;
-        vertical-align: baseline;
+        vertical-align: middle;
       }
       kbd.hint[hidden] { display: none; }
-    </style><div class="box"><div class="inner"><span class="typed"></span><span class="ghost"></span><span class="tail"><span class="word"></span><kbd class="hint">Tab</kbd></span></div></div>`;
+    </style><div class="box"><div class="inner"><span class="typed"></span><span class="ghost"></span><span class="tail"><span class="word"></span><kbd class="hint" aria-label="Tab">${TAB_GLYPH}</kbd></span></div></div>`;
     this.box = root.querySelector(".box")!;
     this.inner = root.querySelector(".inner")!;
     this.typedSpan = root.querySelector(".typed")!;
