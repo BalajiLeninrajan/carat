@@ -65,11 +65,20 @@ export default defineBackground(() => {
       .recordAction({ tabId, host: hostOf(chip.url), kind: chip.kind, label: chip.label, value: chip.value, accepted })
       .catch(() => undefined);
 
-  /** Expired tasks are dropped in the background, not on the prediction path. */
-  void chrome.alarms.create(SWEEP_ALARM, { periodInMinutes: SWEEP_MINUTES });
-  chrome.alarms.onAlarm.addListener((alarm) => {
-    if (alarm.name === SWEEP_ALARM) void elastic.sweepExpiredTasks();
-  });
+  /**
+   * Expired tasks are dropped in the background, not on the prediction path.
+   * Guarded because this is an optional extra: if the alarms permission is
+   * ever missing, the sweep should stop, not take the whole worker down with
+   * it and leave the browser with no chips at all.
+   */
+  if (chrome.alarms) {
+    void chrome.alarms.create(SWEEP_ALARM, { periodInMinutes: SWEEP_MINUTES });
+    chrome.alarms.onAlarm.addListener((alarm) => {
+      if (alarm.name === SWEEP_ALARM) void elastic.sweepExpiredTasks();
+    });
+  } else {
+    console.warn('[carat] no alarms permission; expired Elastic tasks will not be swept');
+  }
 
   chrome.runtime.onInstalled.addListener(async (details) => {
     const settings = await loadSettings();
