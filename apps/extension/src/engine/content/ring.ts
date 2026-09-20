@@ -110,7 +110,6 @@ const CSS = `
     background: #1e1e2e; padding: 5px 8px 5px 5px; border-radius: 6px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, .25); pointer-events: none; max-width: 320px;
   }
-  .chip.armed { background: ${RING.armed}; color: #1e1e2e; }
   .chip.error { background: #b91c1c; }
   .chip span.label { overflow: hidden; text-overflow: ellipsis; }
   kbd {

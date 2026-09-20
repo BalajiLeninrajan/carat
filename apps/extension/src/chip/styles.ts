@@ -73,6 +73,12 @@ export const KEYCAP_CSS = `
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  /* Centre the ink, not the em box. A cap and an arrow are both drawn from the
+     baseline up, so the descender space the font reserves below them would
+     ride the glyphs high in the box. Trimming to cap and baseline takes that
+     space off, and what is left to centre is exactly what is drawn. */
+  text-box-trim: trim-both;
+  text-box-edge: cap alphabetic;
   box-sizing: border-box;
   height: ${KEYCAP.heightPx}px;
   padding: 0 ${KEYCAP.padXPx}px;
@@ -102,7 +108,7 @@ export const CHIP_CSS = `
 
   /* The whole feel, in one place. */
   --carat-accent: ${RING.accent};
-  --carat-amber: ${RING.armed};
+  --carat-alarm: ${RING.alarm};
   --carat-enter-ms: ${TIMING.enterMs}ms;
   --carat-fresh-ms: ${TIMING.freshMs}ms;
   --carat-exit-ms: ${TIMING.exitMs}ms;
@@ -130,7 +136,7 @@ export const CHIP_CSS = `
 .chip:hover { background: #181825; }
 .text { display: flex; flex-direction: column; justify-content: center; min-width: 0; gap: 1px; }
 /* The label is what gives way when the two lines do not both fit. */
-.label { line-height: ${LINE_PX}px; overflow: hidden; text-overflow: ellipsis; }
+.label { line-height: ${LINE_PX}px; text-box-trim: trim-both; text-box-edge: cap alphabetic; overflow: hidden; text-overflow: ellipsis; }
 .sub { font-size: 11px; line-height: 1.2; color: #a6adc8; overflow: hidden; text-overflow: ellipsis; }
 .sub[hidden] { display: none; }
 .value { font-weight: 600; color: #f5e0dc; }
@@ -154,7 +160,6 @@ export const CHIP_CSS = `
 /* --- the press --- */
 /* The keycap darkens under an accepted Tab and comes back. It does not move. */
 kbd.is-press { background: #232334; color: #9399b2; }
-.chip.is-armed kbd.is-press { background: #11111b; color: #d8c48d; }
 
 /* --- leaving --- */
 /* One exit for every way an offer can end: the pill fades where it stands. */
@@ -168,12 +173,9 @@ kbd.is-press { background: #232334; color: #9399b2; }
   .value.is-fresh, .label.is-fresh { animation: none; }
   .chip.is-entering, .chip.is-banner.is-entering, .chip.is-leaving { animation: none; }
 }
-/* Armed: the first Tab landed on something that cannot be undone, so the chip turns amber until the second. */
-.chip.is-armed { background: var(--carat-amber); color: #1e1e2e; box-shadow: 0 6px 18px rgba(${RING.armedRgb}, 0.35), 0 0 0 1px rgba(30, 30, 46, 0.2); }
-.chip.is-armed:hover { background: #f5d88a; }
-.chip.is-armed .value { color: #1e1e2e; }
-.chip.is-armed .sub { color: #4c4f69; }
-.chip.is-armed kbd { background: #1e1e2e; color: var(--carat-amber); border-color: #1e1e2e; }
+/* Armed: the first Tab landed on something that cannot be undone. The pill
+   keeps its own colour and says so in words; the red ring round the control
+   is what carries the warning, and one warning is enough. */
 /* The tab offer has no field to sit beside, so it sits centred at the bottom. Same pill otherwise. */
 .chip.is-banner {
   max-width: min(480px, calc(100vw - 32px));
@@ -206,7 +208,7 @@ export const FX_CSS = `
   pointer-events: none;
   border-radius: ${RING.radiusPx}px;
 }
-.fx.is-amber { --carat-accent: ${RING.armedRgb}; }
+.fx.is-alarm { --carat-accent: ${RING.alarmRgb}; }
 /* Accept: one hairline round the control, and then it is gone. */
 .fx.flash {
   border: 1px solid rgba(var(--carat-accent), 0.9);
