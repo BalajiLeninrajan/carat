@@ -44,6 +44,29 @@
       .toggle input { width: 14px; height: 14px; margin: 0; accent-color: var(--blue); }
       .site { padding: 6px 12px; border-bottom: 1px solid var(--surface0); font-size: 12px; }
       .site[hidden] { display: none; }
+      .goal {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        margin: 0;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--surface0);
+        font-size: 12px;
+      }
+      .goal[hidden] { display: none; }
+      .goal-label { color: var(--subtext0); white-space: nowrap; }
+      #goal-text { flex: 1; min-width: 0; color: var(--mauve); overflow-wrap: anywhere; }
+      #goal-drop {
+        flex: none;
+        padding: 0 6px;
+        border: 0;
+        background: none;
+        color: var(--subtext0);
+        font-size: 14px;
+        line-height: 1;
+        cursor: pointer;
+      }
+      #goal-drop:hover { color: var(--red); }
       #site-host { color: var(--text); }
       #list { list-style: none; margin: 0; padding: 4px 0; max-height: 420px; overflow-y: auto; }
       #list li { padding: 8px 12px; border-bottom: 1px solid var(--surface0); }
@@ -134,6 +157,12 @@
       </label>
 
       <p id="pinned-note" hidden>Pinned: nothing new is read and nothing expires until you unpin.</p>
+
+      <p class="goal" id="goal-row" hidden>
+        <span class="goal-label">Working on</span>
+        <span id="goal-text"></span>
+        <button type="button" id="goal-drop" title="Drop this goal" aria-label="Drop this goal">×</button>
+      </p>
 
       <p class="empty">Carat has not read anything yet</p>
       <ul id="list"></ul>

@@ -22,10 +22,11 @@ What the model is given, in this order, so that everything but the last part is 
 
 1. **Static instructions.** What each kind of action means, and how to choose between them: follow the flow the history shows, the focused control and its neighbours are the strongest signal, empty required fields come before submitting, do not lead away from the task (logout, footer links, ads), and when unsure take the primary action near the focus or the first item of the main content. Only the last paragraph moves, and only with the eagerness setting.
 2. **Three few-shots.** A link in the body of a Reddit post, the first matching card on a Maps results page, and a note from Discord dropped into the Maps search box.
-3. **`<notes>`** — at most eight facts distilled from pages read recently in other tabs, newest first.
-4. **`<history>`** — at most twelve lines of what happened in this tab, oldest first: `40s ago: clicked button "Add to cart"`.
-5. **`<tabs>`** — the open tabs, so `switch` has something to name.
-6. **The page**, last: an accessibility-style outline read from the DOM, landmarks indented, text inline, every control the user could operate numbered `[n]` with its role, name, value and state, the focused one marked. At most 9000 characters, or 4000 when the caller wants a first fast ask, trimmed by distance from the focus.
+3. **`<goal>`** — one line for what the user is trying to get done across every tab, in their own terms: `book a flight ZRH to LON on Friday, cheapest`. Left out entirely when Carat has not worked one out, which is most pages.
+4. **`<notes>`** — at most eight facts distilled from pages read recently in other tabs, newest first.
+5. **`<history>`** — at most twelve lines of what happened in this tab, oldest first: `40s ago: clicked button "Add to cart"`.
+6. **`<tabs>`** — the open tabs, so `switch` has something to name.
+7. **The page**, last: an accessibility-style outline read from the DOM, landmarks indented, text inline, every control the user could operate numbered `[n]` with its role, name, value and state, the focused one marked. At most 9000 characters, or 4000 when the caller wants a first fast ask, trimmed by distance from the focus.
 
 Only what is on screen goes into that outline. A block or a control whose box sits entirely above the fold, or more than a quarter of a viewport below it, is left out whole, and the controls inside it are neither numbered nor sent, so the model cannot offer a link the user would have to scroll twice to find. The focused control's own region is an exception: it is described to the end even where it runs past the fold, because the button that submits the field you are typing in is part of the same step. What is missing is said rather than hidden. The outline opens with `(1.5 screens above)` when the page is scrolled and closes with `(3.2 more screens below; 14 controls not shown)`, which is how the model knows that `scroll` is an answer. Scrolling changes the visible set, so it changes the outline's hash, and the page is asked about again.
 
@@ -88,6 +89,8 @@ The content script sends the outline and nothing else about the page. Everything
 
 **The timeline** is per tab, in `chrome.storage.session`: clicks and typing reported by the page, navigations from `webNavigation`, and Carat's own accepted and dismissed chips. Values from password, card and code fields never leave the page.
 
+**The goal** is the one thing the notes and the timeline cannot say on their own. Search flights, pick a fare, pay on the airline's site: three sites, and no single sentence the model is answering against. So after each notes distillation and each accepted chip, the same model that writes the notes is given the newest eight notes, the last twelve timeline lines across every tab and the goal it wrote last time, and answers with one line of at most 120 characters or `none`. It runs at most once every twenty seconds, lives half an hour, and goes when two derivations running answer `none`, when the user clicks the × beside it in the popup, or on any clear. `<goal>` sits inside the cached prefix, so a goal that changes costs one prefix-cache miss; a goal changes on the order of minutes and a page on the order of seconds, and the warm-up on the next navigation sends the new one.
+
 **The notes** are what the user read elsewhere. When a tab is hidden, the text it last captured goes to the model, which writes at most five self-contained facts; they live for an hour. Without a model, or when the call fails, the regex candidates stand in so the offline path still has something. Opt in to "Screenshots of tabs with little text" and a tab that is mostly an image is photographed once while it is in front, read into text by the vision model, and distilled into notes the same way; the picture is deleted.
 
 Context lives only in `chrome.storage.session` and is never written to disk. The API key stays in the service worker; content scripts never receive it.
@@ -105,6 +108,7 @@ The popup shows what Carat currently knows and a few controls:
 
 - An "On for <host>" switch for the tab it was opened over. Off means Carat neither reads that site nor offers chips on it. Hosts match exactly.
 - Pin. While pinned nothing new is read and nothing expires, so a stray tab cannot change what Carat knows mid-demo. Clear also unpins.
+- The goal, when there is one, with a × that drops it. The next derivation is free to find another.
 - Debug lines for the current tab: what happened to its last capture, and how its last request went — what answered first and how long the page waited, each provider's latency, the action's kind, the model's own label and reason, whether it asks for a second Tab, why one was refused, what the second ask was for, whether the model replaced the placeholder, and, when the page ended up with no chip on it, why.
 
 Three keys, all of them changeable at `chrome://extensions/shortcuts`:

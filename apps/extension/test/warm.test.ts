@@ -43,6 +43,7 @@ function setup(
     settings?: Partial<Settings>;
     notes?: string[];
     history?: string[];
+    goal?: string;
     warm?: (req: NextActionRequest, opts: { signal: AbortSignal }) => Promise<void>;
   } = {},
 ) {
@@ -63,6 +64,7 @@ function setup(
     notes: async () => over.notes ?? NOTES,
     history: async () => over.history ?? [],
     tabs: async () => [{ id: 8, host: 'discord.com', title: 'Discord' }],
+    goal: async () => over.goal,
     createProvider: () => provider,
     now: () => clock,
   });
@@ -84,6 +86,20 @@ describe('the navigation warm-up', () => {
     const real = { ...req, outline: 'search:\n  [1] searchbox "Search Google Maps"', controls: [{ n: 1, role: 'searchbox' as const, name: 'Search' }] };
     expect(renderPrefix(real)).toBe(renderPrefix(req));
     expect(JSON.stringify(buildNextActionMessages(real).slice(0, -1))).toBe(JSON.stringify(buildNextActionMessages(req).slice(0, -1)));
+  });
+
+  it('warms the goal with the rest, so the real request on the page still hits the cache', async () => {
+    const goal = 'book a flight ZRH to LON on Friday, cheapest';
+    const { warmer, seen } = setup({ goal });
+    await warmer.onCommitted(committed());
+    const req = seen[0]!;
+    expect(req.goal).toBe(goal);
+
+    const real = { ...req, outline: 'search:\n  [1] searchbox "Search"', controls: [{ n: 1, role: 'searchbox' as const, name: 'Search' }] };
+    expect(renderPrefix(real)).toBe(renderPrefix(req));
+    expect(warmer.warmed(7, real)).toBe(true);
+    // A goal that moved on in between is a prefix the provider has not seen.
+    expect(warmer.warmed(7, { ...real, goal: 'find brunch in Waterloo' })).toBe(false);
   });
 
   it('warms a tab at most once every thirty seconds', async () => {
