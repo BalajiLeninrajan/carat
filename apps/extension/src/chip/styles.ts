@@ -13,7 +13,7 @@ import { RING } from '../engine/content/ring';
 export const TIMING = {
   /** The fade a new chip arrives on. */
   enterMs: 120,
-  /** The keycap darkening under an accepted Tab. */
+  /** The keycap darkening under an accepted tap. */
   pressMs: 60,
   /** A replaced value cross-fading in place. */
   freshMs: 120,
@@ -52,9 +52,6 @@ export const TYPE = {
 
 /** One line of pill text, in pixels. Everything on the pill is this tall. */
 export const LINE_PX = TYPE.fontPx * TYPE.lineHeight;
-
-/** What the keycap shows. It means Tab; the name is on the aria-label. */
-export const TAB_GLYPH = '\u21E5';
 
 export const KEYCAP = {
   fontPx: TYPE.fontPx,
@@ -158,7 +155,7 @@ export const CHIP_CSS = `
 }
 
 /* --- the press --- */
-/* The keycap darkens under an accepted Tab and comes back. It does not move. */
+/* The keycap darkens under an accepted tap and comes back. It does not move. */
 kbd.is-press { background: #232334; color: #9399b2; }
 
 /* --- leaving --- */
@@ -173,7 +170,7 @@ kbd.is-press { background: #232334; color: #9399b2; }
   .value.is-fresh, .label.is-fresh { animation: none; }
   .chip.is-entering, .chip.is-banner.is-entering, .chip.is-leaving { animation: none; }
 }
-/* Armed: the first Tab landed on something that cannot be undone. The pill
+/* Armed: the first tap landed on something that cannot be undone. The pill
    keeps its own colour and says so in words; the red ring round the control
    is what carries the warning, and one warning is enough. */
 /* The tab offer has no field to sit beside, so it sits centred at the bottom. Same pill otherwise. */

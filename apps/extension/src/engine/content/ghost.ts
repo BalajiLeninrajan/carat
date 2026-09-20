@@ -5,7 +5,7 @@
  * exactly over the field, with the field's font, padding, border widths,
  * alignment and wrapping copied over. It holds the field's current text in a
  * transparent span (so glyph advance matches to the pixel) followed by the
- * suggestion in a dimmed span, and then the Tab keycap that takes it. The
+ * suggestion in a dimmed span, and then the keycap that takes it. The
  * mirror scrolls with the field and never takes pointer events. Its host is
  * aria-hidden so the suggestion never shows up in the accessibility tree
  * Carat reads.
@@ -14,7 +14,8 @@
  * taken off them are the page's own and are never touched.
  */
 
-import { KEYCAP_CSS, TAB_GLYPH } from "../../chip/styles";
+import { ACCEPT_GLYPH, ACCEPT_KEY_NAME } from "../../chip/accept-key";
+import { KEYCAP_CSS } from "../../chip/styles";
 
 type TextField = HTMLInputElement | HTMLTextAreaElement;
 
@@ -83,7 +84,7 @@ export class Ghost {
         vertical-align: middle;
       }
       kbd.hint[hidden] { display: none; }
-    </style><div class="box"><div class="inner"><span class="typed"></span><span class="ghost"></span><span class="tail"><span class="word"></span><kbd class="hint" aria-label="Tab">${TAB_GLYPH}</kbd></span></div></div>`;
+    </style><div class="box"><div class="inner"><span class="typed"></span><span class="ghost"></span><span class="tail"><span class="word"></span><kbd class="hint" aria-label="${ACCEPT_KEY_NAME}">${ACCEPT_GLYPH}</kbd></span></div></div>`;
     this.box = root.querySelector(".box")!;
     this.inner = root.querySelector(".inner")!;
     this.typedSpan = root.querySelector(".typed")!;

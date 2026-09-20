@@ -37,7 +37,7 @@ export interface Settings {
   blocklist: string[];
   /** Ours: the pill in the bottom-left corner that says whether Carat is running here. */
   statusLine: boolean;
-  /** Ours: the chip's short note on Tab. Off means no AudioContext is ever built. */
+  /** Ours: the chip's short note on accept. Off means no AudioContext is ever built. */
   sound: boolean;
   /**
    * Ours: optional Elasticsearch context layer. With a URL and an API key,

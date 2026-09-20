@@ -54,7 +54,7 @@ export interface LogMessage {
   url: string;
 }
 
-/** Tab pressed on a ready action suggestion (after arming, if irreversible). */
+/** Carat's key tapped on a ready action suggestion (after arming, if irreversible). */
 export interface AcceptMessage {
   type: "accept";
   reqId: number;

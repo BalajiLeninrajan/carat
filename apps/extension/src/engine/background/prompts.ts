@@ -254,7 +254,7 @@ Output fields:
 - target: the [n] of the control, or the [Tn] number for "switch". 0 for "open".
 - kind: one of the kinds above.
 - value: the text to type or the option to select; "" for click. Keep it short, at most about 300 characters: for long free-text fields (descriptions, messages, essays) give only the opening sentence or two, and the user continues from there with autocomplete.
-- label: 1 to 4 words for the Tab hint, e.g. "Send reply", "Checkout", "Status: Resolved", "Quantity 2".
+- label: 1 to 4 words for the chip hint, e.g. "Send reply", "Checkout", "Status: Resolved", "Quantity 2".
 - irreversible: true if the action sends, submits, posts, publishes, pays, buys, deletes, or otherwise cannot be undone.`;
 
 /** Ours: the highlight goes directly under the PAGE line, where the model reads the page from. */
