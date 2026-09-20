@@ -1,6 +1,7 @@
 import { defineContentScript } from 'wxt/utils/define-content-script';
 import { createChip } from '../src/chip';
 import { createPageState, send, startActions, startCapture, startStatus } from '../src/content';
+import { startDebug } from '../src/debug';
 import { startFrameAgent } from '../src/frames';
 import { startHistoryRecorder } from '../src/history';
 import { createStatusLine } from '../src/status';
@@ -21,6 +22,8 @@ export default defineContentScript({
     // Shared between the two schedulers: once a chip has shown here, no picture of this page.
     const page = createPageState();
     const status = startStatus(ctx, createStatusLine(document), document);
+    // Alt+Shift+D. Nothing is collected on either side until it has been opened once here.
+    const debug = startDebug(ctx, document);
     const suggestions = startActions(ctx, createChip(document), document, {
       page,
       onRequest: () => status.setBusy(true),
@@ -29,7 +32,11 @@ export default defineContentScript({
         status.refresh();
       },
       // Shift+Tab: the pill counts the quiet minute down instead of naming the model.
-      onQuiet: (until) => status.setQuiet(until),
+      onQuiet: (until) => {
+        status.setQuiet(until);
+        debug.setQuiet(until);
+      },
+      onEvent: (event) => debug.event(event),
     });
     // The page's own text is what a navigation chip is built from, so a new capture re-asks.
     startCapture(ctx, document, { page, onCaptured: () => suggestions.refresh() });

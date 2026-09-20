@@ -105,7 +105,22 @@ The popup shows what Carat currently knows and a few controls:
 - Pin. While pinned nothing new is read and nothing expires, so a stray tab cannot change what Carat knows mid-demo. Clear also unpins.
 - Debug lines for the current tab: what happened to its last capture, and how its last request went — what answered first and how long the page waited, each provider's latency, the action's kind, the model's own label and reason, whether it asks for a second Tab, why one was refused, what the second ask was for, whether the model replaced the placeholder, and, when the page ended up with no chip on it, why.
 
-`Alt+Shift+C` asks again on the current page right now, past the 60-second cache and past anything dismissed with Esc. Change the key at `chrome://extensions/shortcuts`.
+Three keys, all of them changeable at `chrome://extensions/shortcuts`:
+
+- `Alt+Shift+C` asks again on the current page right now, past the 60-second cache and past anything dismissed with Esc.
+- `Alt+Shift+X` clears what carat remembers.
+- `Alt+Shift+D` opens the debug panel on the page, and closes it again.
+
+## The debug panel
+
+`Alt+Shift+D` puts a panel in the bottom-right corner of the page with what carat is thinking about that tab, live. It is off until you press the key, and nothing beyond the popup's ordinary debug line is collected before that; closing it stops the collecting and throws away what was collected. Drag it by its header, resize it from its top-left corner, close it with the same key or with Esc while it has focus. It is one of carat's own surfaces, so clicking in it does not take the chip down, and it never takes Tab from the page: the key only reaches the panel once you have clicked into it.
+
+Four sections:
+
+- **Request.** The outline exactly as it was sent, with the numbered controls picked out, the `<notes>`, `<history>` and `<tabs>` blocks as the prefix carries them, `now`, the eagerness level, the answer cache key and the `prompt_cache_key`. "copy request" puts the whole request on the clipboard as JSON.
+- **Answer.** What the placeholder had, and what the model replaced it with: kind, target, label, confidence, irreversible, reason. Under that, the reply exactly as it streamed, which provider won the race, the placeholder, first-partial and final timings, whether the prefix was warm, the validator's line for each pass, and the reason there is no chip when there is none.
+- **Timeline.** The tab's history entries and the scheduler's own events in one scrolling log: which trigger asked and what refused it, memo hits, snoozes and lost tickets, each with a relative timestamp.
+- **Gate.** The last verdict and every precondition behind it: the global switch, the per-site switch, the denylist, a password field, whether there was a snapshot at all, whether the tab is hidden, and how much of a Shift+Tab minute is left.
 
 ## Tests and eval
 

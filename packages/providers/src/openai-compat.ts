@@ -121,6 +121,9 @@ export class OpenAICompatProvider implements VisionProvider {
       opts.onPartial({ target });
     });
     if (text === null) return null;
+    // The body exactly as it streamed, before anything is made of it. Only the
+    // debug panel asks for this, and only while it is open on the tab.
+    opts.onRaw?.(text);
     const parsed = parseNextAction(text);
     return parsed.ok ? parsed.action : null;
   }

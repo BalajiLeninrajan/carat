@@ -1,3 +1,4 @@
+import { fromSurface } from '../dom/surfaces';
 import { SCROLL_SETTLE_MS, caratScrolling } from '../scroll';
 import { deepActiveElement, shouldInterceptTab } from './keys';
 import { placeChip } from './position';
@@ -168,6 +169,10 @@ export function createChip(doc: Document = document): Chip {
 
   const onKeydown = (e: KeyboardEvent): void => {
     if (!session) return;
+    // A key pressed inside one of carat's own surfaces — the debug panel — is
+    // the user working carat, not answering the chip. Esc closes the panel,
+    // Tab moves inside it, and neither reaches this.
+    if (fromSurface(e)) return;
     // A chip the user cannot see must not eat their keys; neither should one
     // they can see while an IME is still composing.
     if (!session.onScreen || e.isComposing) return;
@@ -220,10 +225,15 @@ export function createChip(doc: Document = document): Chip {
     return !!interceptFrom && (interceptFrom === node || interceptFrom.contains(node));
   }
 
-  /** The chip lives in a closed root, so its host is as deep as a path from outside goes. */
+  /**
+   * The chip lives in a closed root, so its host is as deep as a path from
+   * outside goes. Carat's other surfaces count the same way: a click in the
+   * debug panel is not the user getting on with the page.
+   */
   function onTheChip(e: Event): boolean {
     const path = typeof e.composedPath === 'function' ? e.composedPath() : [];
     if (path.includes(host)) return true;
+    if (fromSurface(e)) return true;
     return e.target instanceof Node && host.contains(e.target);
   }
 
@@ -239,8 +249,10 @@ export function createChip(doc: Document = document): Chip {
    * not seen stop, and the first settle window of the chip's life, which is
    * the tail of whatever brought this target into view.
    */
-  const onUserScroll = (): void => {
+  const onUserScroll = (e: Event): void => {
     if (!session || caratScrolling() || Date.now() - session.shownAt < CHIP_SETTLE_MS) return;
+    // Scrolling the debug panel's own log is not reading on down the page.
+    if (fromSurface(e)) return;
     dismiss('scrolled');
   };
 

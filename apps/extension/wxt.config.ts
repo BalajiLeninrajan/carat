@@ -16,6 +16,10 @@ export default defineConfig({
         suggested_key: { default: 'Alt+Shift+X' },
         description: 'Clear what Carat remembers',
       },
+      toggleDebug: {
+        suggested_key: { default: 'Alt+Shift+D' },
+        description: 'Show what Carat is thinking on this page',
+      },
     },
   },
 });

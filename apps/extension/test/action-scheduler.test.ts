@@ -132,6 +132,25 @@ describe('the one-chip scheduler', () => {
     chip.destroy();
   });
 
+  it('names every trigger and every refusal for the debug panel', async () => {
+    document.body.innerHTML = '<main><input aria-label="Title"><button>Save</button></main>';
+    layAll();
+    answer(action({ kind: 'fill', target: 1, value: 'Dinner', label: 'Fill Title with "Dinner"' }));
+    const events: Array<{ name: string; detail?: string }> = [];
+    const chip = createChip(document);
+    startActions(fakeCtx(), chip, document, { hub: noFrames, onEvent: (e) => events.push(e) });
+    await firstAsk();
+    expect(events.map((e) => e.name)).toContain('first');
+
+    // Shift+Tab on the chip: the snooze is an event of its own, and what it refuses after it says so.
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }));
+    document.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await settled();
+    expect(events.some((e) => e.name === 'snooze')).toBe(true);
+    expect(events.some((e) => e.detail === 'snoozed')).toBe(true);
+    chip.destroy();
+  });
+
   it('shows a scroll as the bottom banner and performs it with no control at all', async () => {
     document.body.innerHTML = '<main><p>a long article</p><button>Save</button></main>';
     layAll();
