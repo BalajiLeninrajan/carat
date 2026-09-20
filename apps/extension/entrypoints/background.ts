@@ -15,6 +15,7 @@ import {
   chromeTabsApi,
   clearActionCache,
   createKeepWarm,
+  createGhostRunner,
   createNotes,
   createVisionPipeline,
   createWarmer,
@@ -82,6 +83,13 @@ export default defineBackground(() => {
   chrome.webNavigation.onCommitted.addListener((d) => {
     if (d.frameId === 0) void keepWarm.check();
   });
+  // The other half of Tab: grey text after the caret while the user types.
+  const ghost = createGhostRunner({
+    settings: () => settings.get(),
+    notes: (tabId) => notes.top({ tabId }),
+    onDiag: (tabId, d) => void diag.recordGhost(tabId, d),
+  });
+
   const vision = createVisionPipeline({
     store,
     shots,
@@ -155,6 +163,17 @@ export default defineBackground(() => {
       });
     } catch {
       return { action: null };
+    }
+  });
+
+  onMessage('ghost', async ({ data, sender }) => {
+    const tabId = sender.tab?.id;
+    const at = parseLocation(sender.tab?.url ?? '');
+    const host = at ? new URL(at.origin).host : '';
+    try {
+      return await ghost.handle(data, { ...(tabId !== undefined ? { tabId } : {}), host, path: at?.path ?? '' });
+    } catch {
+      return { text: '', more: false };
     }
   });
 
