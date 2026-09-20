@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { ARM_MS, AUTO_DISMISS_MS, CHIP_SETTLE_MS, CORNER_INSET_PX, PENDING_HINT, createChip, type Chip, type DismissReason } from '../src/chip';
 import { placeAt } from '../src/chip/position';
-import { CHIP_CSS, FX_CSS, KEYCAP, KEYFRAME_CLASSES, TIMING, TYPE } from '../src/chip/styles';
-import { Ring } from '../src/engine/content/ring';
+import { CHIP_CSS, FX_CSS, KEYCAP, KEYFRAME_CLASSES, PILL, TIMING, TYPE } from '../src/chip/styles';
+import { RING, Ring } from '../src/engine/content/ring';
 
 /** jsdom has no Web Audio; this is enough of a context to count how many were built. */
 class FakeAudioContext {
@@ -300,9 +300,19 @@ describe('chip', () => {
       expect(capHeight(KEYCAP.bannerLineHeightPx, KEYCAP.bannerPadYPx)).toBe(TYPE.bannerFontPx * TYPE.lineHeight);
     });
 
-    it('has a radius that fits the smaller box', () => {
+    it("has a radius that fits the smaller box, and sits inside the pill's own", () => {
       expect(KEYCAP.radiusPx).toBeLessThan(KEYCAP.bannerRadiusPx);
       expect(KEYCAP.radiusPx * 2).toBeLessThan(capHeight(KEYCAP.lineHeightPx, KEYCAP.padYPx));
+      expect(KEYCAP.radiusPx).toBeLessThan(PILL.radiusPx);
+      expect(KEYCAP.bannerRadiusPx).toBeLessThan(PILL.bannerRadiusPx);
+    });
+
+    it("takes the pill's box from the prototype's hint, and leaves the ring rounder", () => {
+      expect(PILL.radiusPx).toBe(6);
+      expect(RING.radiusPx).toBe(7);
+      expect(TYPE.fontPx).toBe(12);
+      expect(CHIP_CSS).toContain(`border-radius: ${PILL.radiusPx}px`);
+      expect(CHIP_CSS).not.toContain('999px');
     });
   });
 

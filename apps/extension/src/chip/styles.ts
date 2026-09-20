@@ -24,13 +24,34 @@ export const TIMING = {
 } as const;
 
 /**
+ * The pill's own box, taken from the prototype's hint chip so the offer and
+ * the ring read as one family: a 6px radius rather than a capsule, and the
+ * hint's padding, mirrored because our keycap sits on the right where its
+ * kbd sat on the left. The ring keeps its own slightly rounder 7px.
+ */
+export const PILL = {
+  radiusPx: 6,
+  padYPx: 5,
+  /** The side the text is on. */
+  padTextPx: 8,
+  /** The side the keycap is on, which needs less. */
+  padKeyPx: 5,
+  gapPx: 6,
+  bannerRadiusPx: 8,
+  bannerPadYPx: 8,
+  bannerPadTextPx: 14,
+  bannerPadKeyPx: 8,
+  bannerGapPx: 10,
+} as const;
+
+/**
  * The pill's text, and the keycap sized off it. The keycap's outer box is
  * exactly the label's line box: same font size, and whatever padding is left
  * once its border is taken off. A key that stands taller than the words next
  * to it makes the pill look like a toolbar.
  */
 export const TYPE = {
-  fontPx: 13,
+  fontPx: 12,
   lineHeight: 1.25,
   /** The banner says the same things larger; the keycap follows it up. */
   bannerFontPx: 16,
@@ -45,7 +66,7 @@ function keycapPadY(fontPx: number): number {
 
 export const KEYCAP = {
   fontPx: TYPE.fontPx,
-  /** `font: 600 13px/1`: the cap's own line box is its font size. */
+  /** `font: 600 12px/1`: the cap's own line box is its font size. */
   lineHeightPx: TYPE.fontPx,
   borderPx: KEYCAP_BORDER_PX,
   padYPx: keycapPadY(TYPE.fontPx),
@@ -87,12 +108,12 @@ export const CHIP_CSS = `
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: ${PILL.gapPx}px;
   /* Narrow viewports get the same pill, just less of the label: the second
      line is an instruction and has to stay whole. */
   max-width: min(360px, calc(100vw - 24px));
-  padding: 6px 8px 6px 12px;
-  border-radius: 999px;
+  padding: ${PILL.padYPx}px ${PILL.padKeyPx}px ${PILL.padYPx}px ${PILL.padTextPx}px;
+  border-radius: ${PILL.radiusPx}px;
   background: #1e1e2e;
   color: #cdd6f4;
   font: ${TYPE.fontPx}px/${TYPE.lineHeight} -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -165,9 +186,9 @@ kbd.is-press { background: #232334; color: #9399b2; }
 /* The tab offer has no field to sit beside, so it reads as a banner: larger type, wider, centred. */
 .chip.is-banner {
   max-width: min(640px, calc(100vw - 32px));
-  gap: 14px;
-  padding: 12px 14px 12px 20px;
-  border-radius: 16px;
+  gap: ${PILL.bannerGapPx}px;
+  padding: ${PILL.bannerPadYPx}px ${PILL.bannerPadKeyPx}px ${PILL.bannerPadYPx}px ${PILL.bannerPadTextPx}px;
+  border-radius: ${PILL.bannerRadiusPx}px;
   font-size: ${TYPE.bannerFontPx}px;
   box-shadow: 0 10px 30px rgba(17, 17, 27, 0.45), 0 0 0 1px rgba(205, 214, 244, 0.1);
 }
