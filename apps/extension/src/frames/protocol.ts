@@ -7,11 +7,28 @@ import type { FillOutcome } from '../fill';
  * top frame, over `postMessage`. The top frame owns the one chip and the
  * conversation with the service worker; a child frame only describes what
  * it has, performs one thing when asked, and relays the keys it hears while
- * a chip is up for one of its fields. Nothing in here carries page text, a
- * URL or anything from settings beyond what the descriptors already hold.
+ * a chip is up for one of its fields.
+ *
+ * A child describes itself the way the top describes a page, in outline
+ * lines with the prose left in. A comment widget or an embedded article is
+ * mostly text, and a frame that reported nothing but buttons read to the
+ * model as a form with no question on it. Nothing beyond that outline
+ * crosses: no settings, no key, and no URL but the child's own host, for
+ * the line the top writes above its lines.
  */
 export const FRAME_MARK = 'carat-frame';
 export const FRAME_VERSION = 1;
+
+/**
+ * Characters of the parent's outline one child frame builds against. The top
+ * trims what it splices in by distance from the focus like any other region,
+ * so this is only a first cut at the child's end, where the parent's budget
+ * is not known.
+ */
+export const FRAME_BUDGET = 2000;
+/** Lines one frame may contribute, and how deep their nesting is kept. */
+export const FRAME_MAX_LINES = 60;
+export const FRAME_MAX_INDENT = 4;
 
 /** A control that lives in a child frame: the registry element is the frame element, and the child performs. */
 export interface FrameRef {
@@ -27,10 +44,32 @@ export interface Box {
   h: number;
 }
 
+/** One line of a child frame's outline, for the top to splice in under the frame's own line. */
+export type FrameLineKind = 'struct' | 'heading' | 'text' | 'option';
+export type FrameLine =
+  /** Prose, a heading, a region's opening line or a select's option, already rendered by the child. */
+  | { kind: FrameLineKind; indent: number; text: string }
+  /** One of the report's controls, in the place the child put it. The top renders and renumbers it. */
+  | { kind: 'control'; indent: number; n: number };
+
 /** Everything the top frame needs to stand in for the child's own outline. */
 export interface FrameReport {
   /** The frame's own outline controls, numbered in its own space; the top splices them in with `fr` set. */
   controls: OutlineControl[];
+  /**
+   * The frame's outline in order, prose included, indented relative to the
+   * frame's own line. Absent from a child too old to send it, and the top
+   * then falls back to listing `controls` alone.
+   */
+  lines?: FrameLine[];
+  /**
+   * The child's own `(1.2 more screens below)` notes, sent only when the
+   * frame scrolls independently of the page around it. A frame sized to its
+   * content has nothing of its own below the fold to say.
+   */
+  summary?: string[];
+  /** The child's host, for the line the top writes above its lines. */
+  host?: string;
   /** Per control number (as a string), where it sits inside the frame, so the top can anchor a chip over it. */
   rects: Record<string, Box>;
 }
