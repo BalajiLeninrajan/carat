@@ -36,6 +36,17 @@
       header .spacer { flex: 1; }
       .toggle { display: flex; align-items: center; gap: 6px; color: var(--subtext0); cursor: pointer; }
       .toggle input { width: 14px; height: 14px; margin: 0; accent-color: var(--blue); }
+      .paused {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--surface0);
+        background: var(--mantle);
+        font-size: 12px;
+      }
+      .paused[hidden] { display: none; }
+      .paused p { margin: 0; flex: 1; }
       .site { padding: 6px 12px; border-bottom: 1px solid var(--surface0); font-size: 12px; }
       .site[hidden] { display: none; }
       #site-host { color: var(--text); }
@@ -77,6 +88,7 @@
       main[data-state="offline"] #clear,
       main[data-state="offline"] #model,
       main[data-state="offline"] .site,
+      main[data-state="offline"] .paused,
       main[data-state="offline"] footer { display: none; }
     </style>
   </head>
@@ -94,6 +106,11 @@
       <div id="offline">
         <p>Carat's background worker is not answering.</p>
         <button type="button" id="retry">Retry</button>
+      </div>
+
+      <div class="paused" id="paused-row" hidden>
+        <p>Paused on this tab: you dismissed Chrome's debugging bar.</p>
+        <button type="button" id="resume">Resume</button>
       </div>
 
       <label class="toggle site" id="site-row" hidden>

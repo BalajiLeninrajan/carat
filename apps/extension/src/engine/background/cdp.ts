@@ -5,7 +5,8 @@
  * If the user dismisses Chrome's "started debugging this browser" banner,
  * every session is detached with reason "canceled_by_user". Carat then marks
  * those tabs paused (badge "OFF") rather than immediately re-attaching, which
- * would just bring the banner straight back. Clicking the toolbar icon resumes.
+ * would just bring the banner straight back. The popup's Resume button and
+ * Alt+Shift+C both clear it.
  */
 
 const PROTOCOL_VERSION = "1.3";
@@ -38,7 +39,7 @@ async function setPaused(tabIds: number[], paused: boolean): Promise<void> {
     else set.delete(id);
     chrome.action.setBadgeText({ tabId: id, text: paused ? "OFF" : "" }).catch(() => {});
     chrome.action
-      .setTitle({ tabId: id, title: paused ? "Carat is paused on this tab. Click to resume." : "Carat" })
+      .setTitle({ tabId: id, title: paused ? "Carat is paused on this tab. Open Carat to resume." : "Carat" })
       .catch(() => {});
   }
   await chrome.storage.session.set({ [PAUSED_KEY]: [...set] });
@@ -46,6 +47,11 @@ async function setPaused(tabIds: number[], paused: boolean): Promise<void> {
 
 export async function isPaused(tabId: number): Promise<boolean> {
   return (await pausedTabs()).has(tabId);
+}
+
+/** Cancel was pressed on the debugging bar over this tab: stop reading it until told otherwise. */
+export function pause(tabId: number): Promise<void> {
+  return setPaused([tabId], true);
 }
 
 export function resume(tabId: number): Promise<void> {
@@ -120,7 +126,7 @@ chrome.debugger.onDetach.addListener((source, reason) => {
   idleTimers.delete(tabId);
   for (const l of detachListeners) l(tabId);
   console.info(`[carat] debugger detached from tab ${tabId}: ${reason}`);
-  if (reason === "canceled_by_user") setPaused([tabId], true);
+  if (reason === "canceled_by_user") void pause(tabId);
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
