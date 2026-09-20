@@ -1,5 +1,5 @@
-export type { NextOptions, Provider, VisionProvider } from './provider';
-export { createProvider, createVisionProvider } from './provider';
+export type { CompleteOptions, CompleteRequest, NextOptions, Provider, VisionProvider } from './provider';
+export { createCompleter, createProvider, createVisionProvider } from './provider';
 export { LocalProvider, localAction, NO_ACTION, PLACEHOLDER_CONFIDENCE } from './local';
 export { OpenAICompatProvider, cacheKey, memoryRelaxStore, paramFromMessage, readStream } from './openai-compat';
 export type { OpenAICompatOptions, OutputMode, ReasoningEffort, RelaxStore } from './openai-compat';

@@ -258,6 +258,7 @@ describe('settings store', () => {
       screenshots: false,
       smartModel: '',
       eagerness: 'eager',
+      ghost: true,
     });
   });
 

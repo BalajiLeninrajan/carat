@@ -27,6 +27,7 @@ const sound = field<HTMLInputElement>('sound');
 const smartModel = field<HTMLInputElement>('smartModel');
 const screenshots = field<HTMLInputElement>('screenshots');
 const eagerness = field<HTMLInputElement>('eagerness');
+const ghost = field<HTMLInputElement>('ghost');
 const eagernessNoteEl = document.getElementById('eagerness-note') as HTMLElement;
 
 // The thumb carries a position; everything a reader needs — the level's name
@@ -56,6 +57,7 @@ function render(s: Settings): void {
   sound.checked = s.sound;
   smartModel.value = s.smartModel;
   screenshots.checked = s.screenshots;
+  ghost.checked = s.ghost;
   eagerness.value = String(eagernessPosition(s.eagerness));
   showEagerness();
 }
@@ -72,6 +74,7 @@ function read(): Partial<Settings> {
     smartModel: smartModel.value,
     screenshots: screenshots.checked,
     eagerness: eagernessAt(eagerness.value),
+    ghost: ghost.checked,
   });
 }
 

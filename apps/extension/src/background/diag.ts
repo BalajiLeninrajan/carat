@@ -119,10 +119,32 @@ export interface PerformDiag {
   outcome: 'done' | 'partial';
 }
 
+/**
+ * Why the last ghost on a tab did or did not end up as grey text.
+ * `answered`: the model wrote a continuation. `empty`: it had nothing to add,
+ * which is how Tab goes back to the action chip. The rest say why no request
+ * was made at all.
+ */
+export type GhostVerdict = 'answered' | 'empty' | 'off' | 'disabled' | 'site-off' | 'denylisted' | 'no-model' | 'failed';
+
+export interface GhostDiag {
+  at: number;
+  host: string;
+  verdict: GhostVerdict;
+  /** Characters of the prefix the model was given; never the prefix itself. */
+  typed: number;
+  /** Characters of grey text it answered with. */
+  chars?: number;
+  /** From the request leaving to the first token, and to the whole answer. */
+  firstMs?: number;
+  ms?: number;
+}
+
 export interface TabDiag {
   capture?: CaptureDiag;
   suggest?: SuggestDiag;
   vision?: VisionDiag;
+  ghost?: GhostDiag;
   /** Newest last, at most MAX_PERFORMS. */
   performs?: PerformDiag[];
 }
@@ -155,6 +177,14 @@ export class DiagLog {
     const current = state[tabId]?.suggest;
     if (current && current.at > suggest.at) return;
     state[tabId] = { ...state[tabId], suggest };
+    this.write(tabId);
+  }
+
+  async recordGhost(tabId: number, ghost: GhostDiag): Promise<void> {
+    const state = await this.load();
+    const current = state[tabId]?.ghost;
+    if (current && current.at > ghost.at) return;
+    state[tabId] = { ...state[tabId], ghost };
     this.write(tabId);
   }
 
@@ -202,6 +232,7 @@ function latest(d: TabDiag): number {
     d.capture?.at ?? 0,
     d.suggest?.at ?? 0,
     d.vision?.at ?? 0,
+    d.ghost?.at ?? 0,
     d.performs?.at(-1)?.at ?? 0,
   );
 }

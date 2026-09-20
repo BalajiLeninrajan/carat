@@ -4,7 +4,9 @@ import type { ContextItem, NextAction, NextActionRequest, Settings } from '@cara
 import type { DebugSnapshot } from './background/debug';
 import type { TabDiag } from './background/diag';
 import type { HistoryEntry } from './history';
+import type { NavigationResult } from './background/navigation';
 import type { FeedbackInput } from './background/feedback';
+import type { GhostInput, GhostReply } from './background/ghost';
 import type { StatusInfo } from './background/status';
 import type { VisionCue } from './background/vision';
 
@@ -67,6 +69,14 @@ export interface Protocol {
   nextAction(data: PageSnapshot): NextActionResponse;
   /** Long-poll for the next word on a reply's `ticket`; polled again while the answer says `more`. */
   nextActionRefine(data: { ticket: string }): ActionUpdate;
+  /**
+   * The grey text after the caret. The first call on an `id` starts one
+   * completion and answers with the first token; the calls after it carry
+   * `have` and wait for more than that, until one comes back `more: false`.
+   * An empty answer means the model had nothing to continue, which hands Tab
+   * back to the action chip.
+   */
+  ghost(data: GhostInput): GhostReply;
   /** Screenshot cues from a tab; see VisionCue. */
   vision(data: VisionCue): void;
   forceSuggest(): void;
@@ -74,7 +84,13 @@ export interface Protocol {
   contextCleared(): void;
   feedback(data: FeedbackInput): void;
   /** Sent only from a Tab press on an `open` or `switch` chip; the background rebuilds the URL from the registry. */
-  navigate(data: { kind: 'open' | 'switch'; value: string }): { ok: boolean };
+  navigate(data: { kind: 'open' | 'switch'; value: string }): NavigationResult;
+  /**
+   * Ctrl+Z inside the undo window on a chip that opened or switched a tab.
+   * The tab carat opened is closed only while it is still on the URL carat
+   * opened it at; either way the tab the chip was on comes back to the front.
+   */
+  undoNavigate(data: { kind: 'open' | 'switch'; tabId?: number; url?: string }): { ok: boolean };
   getKnown(): { items: KnownItem[]; pinned: boolean; goal?: string };
   /** The × beside the goal line in the popup: drop it, and let the next derivation find another. */
   clearGoal(): void;

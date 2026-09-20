@@ -18,6 +18,7 @@ export interface SettingsFormValues {
   smartModel: string;
   screenshots: boolean;
   eagerness: string;
+  ghost: boolean;
 }
 
 const PROVIDERS: ReadonlySet<Settings['provider']> = new Set(['openai', 'baseten', 'local']);
@@ -42,6 +43,7 @@ export function normalizeSettings(v: SettingsFormValues): Partial<Settings> {
     smartModel, // blank is a setting of its own: the fast model with low reasoning
     screenshots: v.screenshots,
     eagerness: isEagerness(v.eagerness) ? v.eagerness : DEFAULT_SETTINGS.eagerness,
+    ghost: v.ghost,
   };
 }
 

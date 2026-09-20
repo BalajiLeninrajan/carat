@@ -10,6 +10,14 @@ Text you read in other tabs is one input to that prediction, not a precondition 
 
 When what you are reading names a place, a plan with a time or someone to email, and there is nothing on the page worth doing about it, the chip is the next tab instead: a banner centred at the bottom of the page that says `Open "Seven Shores Cafe" in Google Maps`. Tab opens that tab with the search prefilled through the URL, or switches to it if you already have Maps open. Carat never navigates on its own; a tab only opens or changes after a Tab press on a visible chip.
 
+## Ghost text
+
+Tab does two things now. Pause for a third of a second in a field you are typing in and Carat asks the model to finish the line, then draws the rest in grey after the caret: `Dinner at Seven` grows `Shores Cafe, Friday at 6`. Tab takes it as real text through the same path a filled chip uses, so React and the editors that watch for real keystrokes get an `input` event rather than a node that appeared from nowhere. Any other key drops it. Esc drops it and stays out of that field until what is in it has really changed, so one refusal is not undone by the next character.
+
+The model is given the page outline and the notes the chip question already carries, plus the text up to the caret, and answers in plain text: at most 24 tokens in a one-line field, 48 in a textarea or an editor. The first token is on screen before the last one is written. Nothing is inserted to make room. A native control gets a transparent mirror of itself with the grey text after the value, matched to its font, padding and scroll; an editor gets a span on the caret's own rect, so the page's DOM and its undo history are never touched.
+
+While grey text is up Tab belongs to it, and no chip goes up on that field. An empty answer is how it hands Tab back: nothing to continue means the next-action path owns the key again. Carat never offers it in a password, card or code field, never in an empty one, and never in a one-line field with under eight pixels of room left. The switch is on the options page, on by default.
+
 ## The errand it was built around
 
 A friend messages you on Discord: "dinner at Seven Shores Cafe, Friday at 6?" A chip on the Discord page offers to open the cafe in Google Maps; you press Tab and Maps opens with the search done. Back on Discord the next chip offers to add "Dinner at Seven Shores Cafe" to Google Calendar for Friday at 6; Tab opens the event form with the title, time and location set. If you open a new Calendar event by hand instead, Carat offers the title from the Discord message (Tab), then the address from the Maps panel for the location field (Tab). Either way, no copying.

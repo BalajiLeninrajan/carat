@@ -45,3 +45,4 @@ export { truncate, normalizeWhitespace } from './truncate';
 export { fnv1a, hashText } from './hash';
 export { domainLabel, registrableDomain } from './hosts';
 export * from './next-action';
+export * from './ghost-prompt';

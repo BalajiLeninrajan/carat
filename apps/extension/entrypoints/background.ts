@@ -17,6 +17,7 @@ import {
   createGoal,
   createGoalAsk,
   createKeepWarm,
+  createGhostRunner,
   createNotes,
   createVisionPipeline,
   createWarmer,
@@ -32,6 +33,7 @@ import {
   redactSettings,
   requesterFromSender,
   setPinned,
+  undoNavigation,
   useAnswerStorage,
 } from '../src/background';
 import type { CaptureVerdict, ScreenApi } from '../src/background';
@@ -99,6 +101,13 @@ export default defineBackground(() => {
   chrome.webNavigation.onCommitted.addListener((d) => {
     if (d.frameId === 0) void keepWarm.check();
   });
+  // The other half of Tab: grey text after the caret while the user types.
+  const ghost = createGhostRunner({
+    settings: () => settings.get(),
+    notes: (tabId) => notes.top({ tabId }),
+    onDiag: (tabId, d) => void diag.recordGhost(tabId, d),
+  });
+
   const vision = createVisionPipeline({
     store,
     shots,
@@ -178,6 +187,17 @@ export default defineBackground(() => {
     }
   });
 
+  onMessage('ghost', async ({ data, sender }) => {
+    const tabId = sender.tab?.id;
+    const at = parseLocation(sender.tab?.url ?? '');
+    const host = at ? new URL(at.origin).host : '';
+    try {
+      return await ghost.handle(data, { ...(tabId !== undefined ? { tabId } : {}), host, path: at?.path ?? '' });
+    } catch {
+      return { text: '', more: false };
+    }
+  });
+
   onMessage('nextActionRefine', async ({ data, sender }) => {
     try {
       return await refine.claim(data.ticket, sender.tab?.id);
@@ -208,6 +228,15 @@ export default defineBackground(() => {
     if (from && isSiteOff(current, new URL(from.origin).host)) return { ok: false };
     try {
       return await performNavigation(data, sender, tabs);
+    } catch {
+      return { ok: false };
+    }
+  });
+
+  // Ctrl+Z on that same chip, within its window: the tab carat opened goes away again.
+  onMessage('undoNavigate', async ({ data, sender }) => {
+    try {
+      return await undoNavigation(data, sender, tabs);
     } catch {
       return { ok: false };
     }

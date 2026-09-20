@@ -50,6 +50,11 @@ export interface Settings {
    * `conservative` only when the model is sure. See EAGERNESS.
    */
   eagerness: Eagerness;
+  /**
+   * Grey inline text after the caret while the user types, accepted with Tab.
+   * On by default; off leaves Tab to the action chip everywhere.
+   */
+  ghost: boolean;
 }
 
 /**
@@ -82,6 +87,7 @@ export const DEFAULT_SETTINGS: Settings = {
   screenshots: false,
   smartModel: '',
   eagerness: DEFAULT_EAGERNESS,
+  ghost: true,
 };
 
 export const LIMITS = {

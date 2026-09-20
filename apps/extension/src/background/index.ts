@@ -8,6 +8,8 @@ export type {
   CaptureDiag,
   CaptureVerdict,
   GateVerdict,
+  GhostDiag,
+  GhostVerdict,
   PerformDiag,
   ProviderAttempt,
   SuggestDiag,
@@ -18,6 +20,8 @@ export type {
 export { CACHE_MS, answerCacheFlushed, cacheKeyFor, clearActionCache, nextAction, pick, useAnswerStorage, validate } from './orchestrate';
 export { AnswerCache, ANSWER_KEY } from './answer-cache';
 export type { NextActionDeps } from './orchestrate';
+export { createGhostRunner } from './ghost';
+export type { Completer, GhostCaller, GhostDeps, GhostInput, GhostReply, GhostRunner } from './ghost';
 export { RefineQueue, TICKETS_KEY } from './refine';
 export type { RefineQueueOptions, RefineTicket } from './refine';
 export { createVisionPipeline } from './vision';
@@ -26,8 +30,8 @@ export { downscale, MAX_EDGE } from './downscale';
 export type { ImageEnv } from './downscale';
 export { handleFeedback } from './feedback';
 export type { FeedbackInput, FeedbackSinks, PerformOutcome } from './feedback';
-export { chromeTabsApi, describe, openTabs, performNavigation } from './navigation';
-export type { BrowserTab, TabsApi } from './navigation';
+export { chromeTabsApi, describe, openTabs, performNavigation, undoNavigation } from './navigation';
+export type { BrowserTab, NavigationResult, TabsApi } from './navigation';
 export { getKnown, clearKnown, setPinned } from './known';
 export { requesterFromSender } from './requester';
 export type { Requester } from './requester';

@@ -1,17 +1,22 @@
-import type { NextAction } from '@carat/shared';
+import type { NextAction, OutlineControl } from '@carat/shared';
 import type { Chip } from '../chip';
 import { QUIET_HINT } from '../chip';
+import { previewLine } from '../chip/preview';
 import { fromSurface } from '../dom/surfaces';
 import { performFill } from '../fill';
+import type { GhostHandle } from '../ghost';
 import type { FrameHub, KnownFrame } from '../frames';
 import { createFrameHub } from '../frames';
-import { performInteraction, roleOf, stillFits } from '../interact';
+import type { Undo } from '../interact';
+import { performInteractionUndoable, roleOf, stillFits } from '../interact';
+import { suggestionClause } from '../history';
 import type { OutlineTarget } from '../outline';
 import { assembleEvidence } from '../outline';
 import { caratScrollEnd, caratScrolling, inViewport, scrollPageDown, scrollToTarget, viewportsOf } from '../scroll';
 import type { ScriptContext } from './context';
 import type { PageState } from './page-state';
 import { send } from './send';
+import { UNDO_TIMING, createUndoDesk, fillUndo, scrollUndo, undoHint } from './undo';
 
 export const SNAPSHOT_TIMING = {
   /** The first ask goes out at DOMContentLoaded against a smaller outline, so it is cheap and early. */
@@ -71,7 +76,7 @@ export const SNAPSHOT_TIMING = {
 type Trigger = 'first' | 'quiet' | 'evidence' | 'focus' | 'performed' | 'settled' | 'user' | 'retry' | 'lost' | 'silent' | 'force';
 
 /** Why an ask did not go out. `snoozed` is the one the user chose. */
-type Refusal = 'gone' | 'snoozed' | 'performing' | 'awaiting' | 'queued';
+type Refusal = 'gone' | 'snoozed' | 'ghosting' | 'performing' | 'awaiting' | 'queued';
 
 export interface ActionsHandle {
   /** The page's own text changed; ask again unless a chip is already up. */
@@ -98,11 +103,23 @@ export interface RequestObserver {
   onEvent?(event: { name: string; detail?: string }): void;
 }
 
+/** What carrying one action out came to, and the way back out of it. */
+interface Carried {
+  outcome: 'done' | 'partial' | 'failed';
+  undo?: Undo;
+}
+
 export interface ActionOptions extends RequestObserver {
   /** Shared with the capture scheduler: the first chip here marks this the page being acted on. */
   page?: PageState;
   /** The top frame's hub for cross-origin child frames; built here when not given. */
   hub?: FrameHub;
+  /**
+   * The grey text after the caret. It is told when the focus moves and when
+   * the user types, and while it has something on screen Tab is its and no
+   * chip goes up.
+   */
+  ghost?: GhostHandle;
 }
 
 /**
@@ -125,6 +142,8 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
   let seq = 0;
   let gen = 0;
   let registry = new Map<number, OutlineTarget>();
+  /** What the outline said about each numbered control, for the chip's preview line. */
+  let controls: OutlineControl[] = [];
   /** What carat has already done here, so the same chip is not offered twice on one page load. */
   const done = new Set<string>();
   /** Esc on an action keeps it quiet for the rest of this page load. */
@@ -164,6 +183,9 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
   /** Shift+Tab: when carat may speak on this tab again, or 0 when it may now. */
   let quietUntil = 0;
   let quietTimer: number | null = null;
+
+  /** The undo window for the last action carat performed here. */
+  const undoDesk = createUndoDesk(ctx, doc, { onUndone: afterUndo });
 
   const hub: FrameHub =
     opts.hub ??
@@ -240,6 +262,8 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     // Shift+Tab bought a minute of silence, and nothing buys its way past that:
     // the shortcut ends the snooze itself before it asks.
     if (quietUntil !== 0) return 'snoozed';
+    // Grey text is on screen in a field: Tab is the ghost's until it goes.
+    if (opts.ghost?.visible && trigger !== 'force') return 'ghosting';
     // The focus moving because carat filled a field is not the user moving it.
     if (performing && trigger !== 'force') return 'performing';
     // After Esc, only the user and the retry timer get carat talking again.
@@ -320,12 +344,15 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
           return;
         }
       }
+      // The ghost asks about the same page; it reads the outline from here rather than building its own.
+      opts.ghost?.noteOutline(request.outline);
       lastHash = hash;
       lastAt = now;
       lastEvents = events;
       lastSentAt = now;
       asked = true;
       registry = targets;
+      controls = request.controls;
 
       const mine = ++seq;
       observer.onRequest?.();
@@ -387,6 +414,11 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
       if (!chip.visible) chip.hide();
       return;
     }
+    // The chip stays off a field the ghost is writing in; that Tab is spoken for.
+    if (opts.ghost?.visible) {
+      chip.hide();
+      return;
+    }
     // Taken here, where the offer is made: a scroll's key holds the position
     // it was offered from, not the one the page has moved on to.
     const key = actionKey(action, win, doc);
@@ -398,6 +430,12 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     if (opts.page) opts.page.filling = true;
 
     const el = target?.el;
+    const control = action.target === null ? undefined : controls.find((c) => c.n === action.target);
+    const preview = previewLine({
+      action,
+      ...(control ? { control } : {}),
+      ...(action.kind === 'scroll' ? { below: screensBelow() } : {}),
+    });
     const shared = {
       label: action.label,
       reason: action.reason,
@@ -407,6 +445,7 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
       // Something here has already been refused since the user last moved, so
       // this one arrives without the glow: a retry is quieter than a first offer.
       ...(escapes > 0 ? { retry: true } : {}),
+      ...(preview ? { preview } : {}),
       // Said no this often and the user wants the key, not another answer.
       ...(escapes >= SNAPSHOT_TIMING.snoozeAfterEscapes ? { detail: QUIET_HINT } : {}),
       pending,
@@ -532,8 +571,9 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     done.add(key);
     lastActed = target?.el ?? null;
     performing = true;
+    let carried: Carried = { outcome: 'failed' };
     try {
-      const outcome = await perform(action, target);
+      carried = await perform(action, target);
       // The timeline has to carry this before the next question goes out, so the accept is awaited.
       await send('feedback', {
         kind: action.kind,
@@ -541,18 +581,50 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
         label: action.label,
         host: doc.location.host,
         accepted: true,
-        ...(outcome === 'partial' ? { outcome: 'partial' as const } : {}),
+        ...(carried.outcome === 'partial' ? { outcome: 'partial' as const } : {}),
         ...(action.irreversible ? { irreversible: true } : {}),
       });
     } finally {
       performing = false;
     }
+    offerUndo(action, target, carried);
     userActed();
     // Whatever just happened is the newest thing in the timeline. Ask as soon
     // as the DOM carries it, and leave the settle watcher behind that for a
     // page that goes on loading once the immediate question has gone out.
     askPerformed();
     afterPerform.soon();
+  }
+
+  /**
+   * The five seconds in which the platform's undo key takes it back, and the
+   * one line on screen that says so. Nothing irreversible is ever offered: the
+   * second Tab was the whole point of it, and there is no way back from what
+   * it did. Neither is anything that failed, or that has no inverse — a plain
+   * press is the same press again.
+   */
+  function offerUndo(action: NextAction, target: OutlineTarget | undefined, carried: Carried): void {
+    if (!carried.undo || carried.outcome === 'failed' || action.irreversible) return;
+    undoDesk.offer({
+      el: target?.el ?? null,
+      what: suggestionClause(action.kind, nameOf(action, target)),
+      run: carried.undo,
+    });
+    chip.flash(undoHint(), UNDO_TIMING.windowMs);
+  }
+
+  /**
+   * Carat put the page back. That is a line in the timeline the model has to
+   * read — otherwise the next answer is the same one again — and it is the
+   * user acting, so the page is asked again once it has settled. The action
+   * stays in `done`: undoing it is not a reason to offer it a second time.
+   */
+  function afterUndo(what: string): void {
+    if (!ctx.isValid) return;
+    chip.hide();
+    void send('history', { entries: [{ t: Date.now(), kind: 'undone', what }] });
+    userActed();
+    afterUser.soon();
   }
 
   /**
@@ -594,6 +666,12 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     cancelRetry();
   }
 
+  /** How much page is left under the fold, in viewports; what a scroll offer is worth. */
+  function screensBelow(): number {
+    const { y, pages } = viewportsOf(win, doc);
+    return Math.max(0, pages - y - 1);
+  }
+
   /** Whether this scroll follows another of carat's closely enough to be the user paging through. */
   function repeating(): boolean {
     const now = Date.now();
@@ -602,17 +680,28 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     return soon;
   }
 
-  /** Carry the action out. Returns 'partial' when a fill went in but the pick after it did not. */
-  async function perform(action: NextAction, target: OutlineTarget | undefined): Promise<'done' | 'partial' | 'failed'> {
+  /**
+   * Carry the action out. `outcome` is 'partial' when a fill went in but the
+   * pick after it did not; `undo` is the way back out of it, and is absent for
+   * everything that has no inverse: a plain press, a card pick, a control in a
+   * cross-origin frame, and any tab carat did not itself open.
+   */
+  async function perform(action: NextAction, target: OutlineTarget | undefined): Promise<Carried> {
     if (action.kind === 'scroll') {
+      const from = { x: win.scrollX, y: win.scrollY };
       await scrollPageDown(win, { instant: repeating() });
-      return 'done';
+      return { outcome: 'done', undo: scrollUndo(win, from) };
     }
     if (action.kind === 'open' || action.kind === 'switch') {
       const res = await send('navigate', { kind: action.kind, value: action.value });
-      return res?.ok ? 'done' : 'failed';
+      if (!res?.ok) return { outcome: 'failed' };
+      if (action.kind === 'switch') return { outcome: 'done', undo: async () => void (await send('undoNavigate', { kind: 'switch' })) };
+      // Without the tab's id there is nothing to close; the tab stays.
+      const { tabId, url } = res;
+      if (tabId === undefined || url === undefined) return { outcome: 'done' };
+      return { outcome: 'done', undo: async () => void (await send('undoNavigate', { kind: 'open', tabId, url })) };
     }
-    if (!target?.el.isConnected) return 'failed';
+    if (!target?.el.isConnected) return { outcome: 'failed' };
     const frame = knownFrame(target);
     if (frame && target.frame) {
       const reply = await hub.perform(frame, {
@@ -622,18 +711,23 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
         value: action.value,
         host: doc.location.host,
       });
-      return reply.ok ? (reply.outcome ?? 'done') : 'failed';
+      return { outcome: reply.ok ? (reply.outcome ?? 'done') : 'failed' };
     }
     // A control the chip sat on as a banner may be off screen; bring it into view before acting.
     if (!inViewport(target.el, win)) await scrollToTarget(target.el, win, { instant: repeating() });
     if (action.kind === 'fill') {
+      // Read before the fill: afterwards the value it would restore is gone.
+      const undo = fillUndo(target.el);
       const outcome = await performFill(target.el, action.value, doc.location.host, locale() ? { locale: locale()! } : {});
-      return outcome ?? 'failed';
+      if (outcome === null) return { outcome: 'failed' };
+      return undo ? { outcome, undo } : { outcome };
     }
     const role = roleOf(target.el) ?? 'button';
     const verb = action.kind === 'select' ? 'choose' : 'click';
-    if (!stillFits(target.el, verb, role)) return 'failed';
-    return performInteraction(target.el, verb, action.value, role) ? 'done' : 'failed';
+    if (!stillFits(target.el, verb, role)) return { outcome: 'failed' };
+    const { ok, undo } = performInteractionUndoable(target.el, verb, action.value, role);
+    if (!ok) return { outcome: 'failed' };
+    return undo ? { outcome: 'done', undo } : { outcome: 'done' };
   }
 
   function knownFrame(target: OutlineTarget | undefined): KnownFrame | undefined {
@@ -660,12 +754,14 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     afterSilence.cancel();
     cancelRetry();
     endSnooze();
+    undoDesk.clear();
     escapes = 0;
     pending = false;
     chip.hide();
     done.clear();
     dismissed.clear();
     registry = new Map();
+    controls = [];
     lastActed = null;
     lastHash = '';
     lastAt = 0;
@@ -687,15 +783,25 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     afterUser.soon();
   };
   // A click, a keystroke or a scroll of the user's own: ask again once they pause.
-  for (const type of ['click', 'input'] as const) ctx.addEventListener(doc, type, onUser);
+  ctx.addEventListener(doc, 'click', onUser);
+  // Typing is the ghost's cue as much as this scheduler's; it owns what happens inside the field.
+  ctx.addEventListener(doc, 'input', (e) => {
+    opts.ghost?.typed();
+    onUser(e);
+  });
   // Carat's own smooth scroll fires these too; that one is not the user moving.
   const onScrolled = (e: Event): void => {
     if (caratScrolling()) return;
     onUser(e);
   };
   ctx.addEventListener(win, 'scroll', onScrolled, { passive: true } as AddEventListenerOptions);
+  // The platform's undo key, while carat's window is open. Capture, and ahead
+  // of the chip's own listener, so the page never sees a key carat took.
+  ctx.addEventListener(win, 'keydown', (e) => undoDesk.handle(e), { capture: true });
   // The focus moving is the strongest signal there is; that one does not wait.
   ctx.addEventListener(doc, 'focusin', (e) => {
+    // The field lost the focus whatever took it, so the grey text goes either way.
+    opts.ghost?.focused();
     // Clicking into the debug panel moves the focus, but not the user's place on the page.
     if (fromSurface(e)) return;
     userActed();
