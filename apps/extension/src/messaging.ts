@@ -6,6 +6,7 @@ import type { HistoryEntry } from './history';
 import type { FeedbackInput } from './background/feedback';
 import type { StatusInfo } from './background/status';
 import type { VisionCue } from './background/vision';
+import type { ElasticDebugEvent } from './background/elastic';
 
 export type KnownItem = Pick<ContextItem, 'id' | 'origin' | 'title' | 'kind' | 'capturedAt'> & {
   preview: string;
@@ -71,6 +72,9 @@ export interface Protocol {
   clearKnown(): void;
   setPinned(data: { pinned: boolean }): { pinned: boolean };
   getDiag(data: { tabId: number }): { diag: TabDiag | null };
+  /** Session-only Elastic trace entries for the popup and options dashboard. */
+  getElasticDebug(data: { tabId?: number; limit?: number; kind?: ElasticDebugEvent['kind'] | 'all' }): { events: ElasticDebugEvent[] };
+  clearElasticDebug(): { ok: boolean };
   /** What the status line on a page may show: running or not, and the model in use. Never the key. */
   getStatus(): StatusInfo;
   getSettings(): Settings;

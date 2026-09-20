@@ -17,6 +17,10 @@ export interface SettingsFormValues {
   cfAccountId: string;
   cfApiToken: string;
   smartModel: string;
+  elasticUrl: string;
+  elasticApiKey: string;
+  elasticIndexPrefix: string;
+  elasticInferenceId: string;
   screenshots: boolean;
   eagerness: string;
 }
@@ -27,24 +31,39 @@ const PROVIDERS: ReadonlySet<Settings['provider']> = new Set(['openai', 'baseten
 // never produce a request to "/chat/completions" or a request with model "".
 // Trailing slashes are stripped because the provider concatenates the path.
 export function normalizeSettings(v: SettingsFormValues): Partial<Settings> {
-  const baseURL = v.baseURL.trim().replace(/\/+$/, '');
-  const model = v.model.trim();
-  const smartModel = v.smartModel.trim();
+  const baseURL = clean(v.baseURL).replace(/\/+$/, '');
+  const model = clean(v.model);
+  const smartModel = clean(v.smartModel);
+  const elasticUrl = clean(v.elasticUrl).replace(/\/+$/, '');
+  const elasticIndexPrefix = clean(v.elasticIndexPrefix)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
   return {
     enabled: v.enabled,
     provider: PROVIDERS.has(v.provider as Settings['provider'])
       ? (v.provider as Settings['provider'])
       : DEFAULT_SETTINGS.provider,
     baseURL: baseURL === '' ? DEFAULT_SETTINGS.baseURL : baseURL,
-    apiKey: v.apiKey.trim(),
+    apiKey: clean(v.apiKey),
     model: model === '' ? DEFAULT_SETTINGS.model : model,
     statusLine: v.statusLine,
-    cfAccountId: v.cfAccountId.trim(),
-    cfApiToken: v.cfApiToken.trim(),
+    cfAccountId: clean(v.cfAccountId),
+    cfApiToken: clean(v.cfApiToken),
     smartModel, // blank is a setting of its own: the fast model with low reasoning
+    elasticUrl,
+    elasticApiKey: clean(v.elasticApiKey),
+    elasticIndexPrefix: elasticIndexPrefix || DEFAULT_SETTINGS.elasticIndexPrefix,
+    elasticInferenceId: clean(v.elasticInferenceId),
     screenshots: v.screenshots,
     eagerness: isEagerness(v.eagerness) ? v.eagerness : DEFAULT_SETTINGS.eagerness,
   };
+}
+
+function clean(v: string): string {
+  const text = v.trim();
+  return text === 'undefined' || text === 'null' ? '' : text;
 }
 
 /**

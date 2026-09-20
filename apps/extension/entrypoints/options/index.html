@@ -27,7 +27,7 @@
         color: var(--text);
         font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
       }
-      main { max-width: 520px; margin: 0 auto; }
+      main { max-width: 920px; margin: 0 auto; }
       h1 { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
       .lede { margin: 0 0 20px; color: var(--subtext0); }
       form { display: grid; gap: 14px; }
@@ -107,7 +107,111 @@
       #offline { display: none; padding: 12px; border-radius: 6px; background: var(--surface0); }
       #offline p { margin: 0 0 8px; }
       main[data-state="offline"] #offline { display: block; }
-      main[data-state="offline"] form { display: none; }
+      main[data-state="offline"] form, main[data-state="offline"] #elastic-dashboard { display: none; }
+      #elastic-dashboard {
+        margin-top: 24px;
+        padding-top: 18px;
+        border-top: 1px solid var(--surface0);
+      }
+      .dashboard-head {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .dashboard-head p { margin: 2px 0 0; color: var(--subtext0); }
+      .dashboard-controls {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .dashboard-controls select { width: auto; min-width: 140px; }
+      #elastic-summary {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 12px 0;
+      }
+      .metric {
+        padding: 4px 8px;
+        border: 1px solid var(--surface0);
+        border-radius: 6px;
+        background: var(--mantle);
+        font-size: 12px;
+        color: var(--subtext0);
+      }
+      .metric strong { color: var(--text); }
+      #elastic-events {
+        display: grid;
+        gap: 8px;
+      }
+      .event {
+        border: 1px solid var(--surface0);
+        border-radius: 6px;
+        background: var(--mantle);
+      }
+      .event summary {
+        display: grid;
+        grid-template-columns: auto auto auto 1fr;
+        gap: 8px;
+        align-items: center;
+        padding: 8px 10px;
+        cursor: pointer;
+      }
+      .badge {
+        padding: 1px 6px;
+        border-radius: 999px;
+        background: var(--surface0);
+        color: var(--blue);
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+      .badge.fail { color: var(--red); }
+      .event-title {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .event-body {
+        display: grid;
+        gap: 8px;
+        padding: 0 10px 10px;
+      }
+      .event-path {
+        color: var(--subtext0);
+        overflow-wrap: anywhere;
+        font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+      .event-body h3 {
+        margin: 4px 0;
+        font-size: 12px;
+        color: var(--subtext0);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .event-body pre {
+        max-height: 340px;
+        margin: 0;
+        padding: 8px;
+        overflow: auto;
+        border: 1px solid var(--surface0);
+        border-radius: 6px;
+        background: #11111b;
+        color: var(--text);
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+      .empty-log {
+        margin: 0;
+        padding: 14px;
+        border: 1px dashed var(--surface1);
+        border-radius: 6px;
+        color: var(--subtext0);
+      }
     </style>
   </head>
   <body>
@@ -202,6 +306,32 @@
           <span class="hint">A token with the Workers AI permission. Stored like the API key above: local extension storage, background worker only. Jev only picks among regex candidates; it never reads a screenshot and never gives the second opinion. Those go to the chat model above.</span>
         </label>
 
+        <h2>Elasticsearch context</h2>
+
+        <label>
+          <span class="name">Elasticsearch URL</span>
+          <input type="url" name="elasticUrl" placeholder="https://your-deployment.es.us-central1.gcp.cloud.es.io" autocomplete="off" spellcheck="false" />
+          <span class="hint">Blank means Carat keeps using session notes only. With a URL and API key, captures and distilled facts are indexed and searched before each model call.</span>
+        </label>
+
+        <label>
+          <span class="name">Elasticsearch API key</span>
+          <input type="password" name="elasticApiKey" autocomplete="off" spellcheck="false" />
+          <span class="hint">Stored like the model key: local extension storage, background worker only.</span>
+        </label>
+
+        <label>
+          <span class="name">Index prefix</span>
+          <input type="text" name="elasticIndexPrefix" placeholder="carat" autocomplete="off" spellcheck="false" />
+          <span class="hint">Carat creates and writes to &lt;prefix&gt;-observations, &lt;prefix&gt;-facts and &lt;prefix&gt;-actions.</span>
+        </label>
+
+        <label>
+          <span class="name">Inference endpoint (optional)</span>
+          <input type="text" name="elasticInferenceId" placeholder="default, .elser-2-elasticsearch, or blank" autocomplete="off" spellcheck="false" />
+          <span class="hint">Use default for Elastic's semantic_text default endpoint, or set a specific semantic_text inference endpoint id. Blank keeps retrieval BM25-only.</span>
+        </label>
+
         <h2>Screenshots and display</h2>
 
         <label class="row">
@@ -223,6 +353,33 @@
           <span id="status" role="status" aria-live="polite"></span>
         </div>
       </form>
+
+      <section id="elastic-dashboard" aria-label="Elasticsearch debug dashboard">
+        <div class="dashboard-head">
+          <div>
+            <h2>Elastic dashboard</h2>
+            <p>Session-only trace of mapping, ingest pipeline, index uploads, BM25/hybrid search and ES|QL calls.</p>
+          </div>
+          <div class="dashboard-controls">
+            <label>
+              <span class="name">Show</span>
+              <select id="elastic-kind">
+                <option value="all">All</option>
+                <option value="mapping">Mappings</option>
+                <option value="pipeline">Pipelines</option>
+                <option value="index">Index uploads</option>
+                <option value="search">Searches</option>
+                <option value="esql">ES|QL</option>
+                <option value="cleanup">Cleanup</option>
+              </select>
+            </label>
+            <button type="button" id="elastic-refresh">Refresh</button>
+            <button type="button" id="elastic-clear">Clear</button>
+          </div>
+        </div>
+        <div id="elastic-summary" aria-live="polite"></div>
+        <div id="elastic-events"></div>
+      </section>
 
       <p class="note">Nothing Carat reads is written to disk. Context lives in session storage and is gone when the browser closes.</p>
     </main>

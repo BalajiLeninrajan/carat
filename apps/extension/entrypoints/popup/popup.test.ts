@@ -89,6 +89,15 @@ describe('popup', () => {
     expect(app.dataset.state).toBe('empty');
   });
 
+  it('treats a missing enabled setting from an older background as on', async () => {
+    sendMessage.mockImplementation(async (type: string) =>
+      type === 'getSettings' ? { disabledHosts: [] } : type === 'getKnown' ? { items: [] } : undefined,
+    );
+    await import('./main');
+    await flush();
+    expect((document.getElementById('enabled') as HTMLInputElement).checked).toBe(true);
+  });
+
   it('flips to offline when the background hangs, and retries', async () => {
     vi.useFakeTimers();
     sendMessage.mockImplementation(() => new Promise(() => {}));

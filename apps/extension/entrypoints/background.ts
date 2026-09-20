@@ -10,6 +10,7 @@ import {
   chromeTabsApi,
   clearActionCache,
   clearKnown,
+  createElasticMemory,
   createNotes,
   createVisionPipeline,
   describeStatus,
@@ -23,10 +24,11 @@ import {
   requesterFromSender,
   setPinned,
 } from '../src/background';
-import type { CaptureVerdict, ScreenApi } from '../src/background';
+import type { CaptureVerdict, ElasticDebugEvent, ScreenApi } from '../src/background';
 
 const SWEEP_ALARM = 'carat-sweep';
 const SUGGEST_COMMAND = 'carat-suggest';
+const MAX_ELASTIC_DEBUG_EVENTS = 120;
 
 export default defineBackground(() => {
   // Constructed eagerly, loaded lazily: the first store call after a wake reads storage.session back.
@@ -38,6 +40,12 @@ export default defineBackground(() => {
   const trusted = (sender: chrome.runtime.MessageSender) => isExtensionPage(sender, extensionBase);
   const tabs = chromeTabsApi();
   const refine = new RefineQueue();
+  const elasticDebug: ElasticDebugEvent[] = [];
+  const rememberElasticDebug = (event: ElasticDebugEvent) => {
+    elasticDebug.push(event);
+    if (elasticDebug.length > MAX_ELASTIC_DEBUG_EVENTS) elasticDebug.splice(0, elasticDebug.length - MAX_ELASTIC_DEBUG_EVENTS);
+  };
+  const elastic = createElasticMemory({ settings: () => settings.get(), onDebug: rememberElasticDebug });
   // What the user did, per tab: clicks and typing from the page, navigations and carat's own chips from here.
   const history = new HistoryStore(chrome.storage.session);
   history.attach(chrome.webNavigation, chrome.tabs);
@@ -48,6 +56,7 @@ export default defineBackground(() => {
       const provider = createVisionProvider(await settings.get());
       return provider ? provider.distill(text, host, signal) : [];
     },
+    onDistilled: (item, made) => void elastic.indexFacts(item, made),
     pinned: () => store.isPinned(),
   });
   const vision = createVisionPipeline({
@@ -76,7 +85,10 @@ export default defineBackground(() => {
     const input = { tabId, url: data.url, title: data.title, text: data.text };
     const item = data.kind === 'selection' ? await store.upsertSelection(input) : await store.upsertPage(input);
     // A page the user is leaving is finished being read, so it is distilled now.
-    if (item) notes.onCapture(item, data.leaving === true);
+    if (item) {
+      void elastic.indexObservation(item);
+      notes.onCapture(item, data.leaving === true);
+    }
     return note(item ? 'stored' : 'empty');
   });
 
@@ -99,6 +111,7 @@ export default defineBackground(() => {
         settings: () => settings.get(),
         history,
         notes: { lines: async () => notes.top({ tabId }) },
+        elasticsearch: { lines: (req, id) => elastic.retrieve(req, id) },
         tabs: () => describedTabs(tabId),
         refine,
         ...(tabId !== undefined ? { onDiag: (d) => void diag.recordSuggest(tabId, d) } : {}),
@@ -125,6 +138,16 @@ export default defineBackground(() => {
         if (data.accepted) void history.recordAccepted(tabId, line).catch(() => undefined);
         else void history.recordDismissed(tabId, line).catch(() => undefined);
       },
+      onElastic: (tabId) =>
+        void elastic.recordAction({
+          tabId,
+          host: data.host,
+          kind: data.kind,
+          label: data.label,
+          name: data.name,
+          value: data.value,
+          accepted: data.accepted,
+        }),
     }),
   );
 
@@ -154,6 +177,23 @@ export default defineBackground(() => {
   onMessage('getDiag', async ({ data, sender }) =>
     trusted(sender) ? { diag: (await diag.get(data.tabId)) ?? null } : { diag: null },
   );
+  onMessage('getElasticDebug', ({ data, sender }) => {
+    if (!trusted(sender)) return { events: [] };
+    const tabId = data?.tabId;
+    const kind = data?.kind;
+    const limit = Math.max(1, Math.min(120, data?.limit ?? 12));
+    const events = elasticDebug.filter(
+      (event) =>
+        (tabId === undefined || event.tabId === undefined || event.tabId === tabId) &&
+        (!kind || kind === 'all' || event.kind === kind),
+    );
+    return { events: events.slice(-limit) };
+  });
+  onMessage('clearElasticDebug', ({ sender }) => {
+    if (!trusted(sender)) return { ok: false };
+    elasticDebug.length = 0;
+    return { ok: true };
+  });
   // The status line is the one thing a page may learn about settings beyond the redacted view: a verdict and a model name.
   onMessage('getStatus', async ({ sender }) => describeStatus(await settings.get(), sender.tab?.url ?? sender.url));
   onMessage('getSettings', async ({ sender }) => {
@@ -183,6 +223,7 @@ export default defineBackground(() => {
     void shots.sweep();
     void history.sweep();
     void notes.sweep();
+    void elastic.sweepExpiredTasks();
   });
 });
 

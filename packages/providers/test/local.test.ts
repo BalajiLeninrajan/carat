@@ -57,6 +57,17 @@ describe('the offline placeholder', () => {
     expect(action.kind).toBe('none');
   });
 
+  it('does not fill a Discord conversation search box from notes', () => {
+    const action = localAction(
+      request([{ n: 1, role: 'searchbox', name: 'Search crazydodo' }], {
+        focused: 1,
+        page: { host: 'discord.com', title: 'Discord | @Crazydodo', path: '/channels/@me/1', scroll: { y: 0, pages: 1, more: false } },
+        notes: ['Boosts Level appeared in page chrome.'],
+      }),
+    );
+    expect(action.kind).toBe('none');
+  });
+
   it('never types a control its own name back into it', () => {
     const action = localAction(request([{ n: 1, role: 'searchbox', name: 'Seven Shores Cafe' }], { focused: 1 }));
     expect(action.value).not.toBe('Seven Shores Cafe');

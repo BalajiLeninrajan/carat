@@ -6,11 +6,13 @@ import {
   isIrreversibleLabel,
   normalizeWhitespace,
   resolveIntentValue,
+  type ResolvedIntent,
 } from '@carat/shared';
 import type { Provider } from '@carat/providers';
 import { LocalProvider, RaceProvider, createProvider } from '@carat/providers';
 import type { NextActionResponse, PageSnapshot } from '../messaging';
 import type { AnswerOrigin, SuggestDiag } from './diag';
+import { TASK_LINE_PREFIX } from './elastic';
 import { explainGate } from './gate';
 import type { HistoryStore } from './history';
 
@@ -26,6 +28,8 @@ export interface NextActionDeps {
   history?: Pick<HistoryStore, 'lines'>;
   /** Facts distilled from pages read in other tabs, newest first. */
   notes?: { lines(host: string): Promise<string[]> };
+  /** Optional Elasticsearch evidence retrieved from indexed messy context. */
+  elasticsearch?: { lines(req: NextActionRequest, tabId?: number): Promise<string[]> };
   /** The user's open tabs, so `switch` has something to name. */
   tabs?: () => Promise<OpenTab[]>;
   /** Where the model's later answer goes. Without it the reply waits for the model. */
@@ -87,6 +91,17 @@ export async function nextAction(input: PageSnapshot, requester: Requester, deps
     now: new Date(started).toISOString(),
     eagerness: settings.eagerness,
   };
+  // The task line leads, because it names the one thing this page can finish.
+  // The user's own notes keep their place behind it: retrieved context is
+  // support, and it must not push what they actually read out of the window.
+  if (deps.elasticsearch) {
+    const elastic = await deps.elasticsearch.lines(req, requester.tabId).catch(() => []);
+    if (elastic.length) {
+      const task = elastic.filter((line) => line.startsWith(TASK_LINE_PREFIX));
+      const evidence = elastic.filter((line) => !line.startsWith(TASK_LINE_PREFIX));
+      req.notes = [...task, ...req.notes, ...evidence].slice(0, 12);
+    }
+  }
 
   const key = cacheKeyFor(req);
   const hit = input.force ? undefined : cache.get(key);
@@ -214,16 +229,23 @@ export function validate(action: NextAction | null, req: NextActionRequest, sett
     case 'fill': {
       if (action.value === '') return refuse('a fill needs a value');
       if (echoes(action.value, control!)) return refuse("that is the field's own name");
+      if (sourceSearchControl(req, control!)) return refuse('source page search is not the task target');
+      if (!grounded(action.value, req)) return refuse('fill value is not grounded');
       break;
     }
     case 'select':
       if (action.value === '') return refuse('a select needs an option');
+      if (!grounded(action.value, req)) return refuse('select value is not grounded');
       break;
     case 'scroll':
       if (!req.page.scroll.more) return refuse('nothing below the fold');
       break;
     case 'open':
-      if (!resolveIntentValue(action.value)) return refuse('not a destination carat can build');
+      {
+        const intent = resolveIntentValue(action.value);
+        if (!intent) return refuse('not a destination carat can build');
+        if (!intentGrounded(intent, req)) return refuse('open destination is not grounded');
+      }
       break;
     case 'switch':
       if (!req.tabs.some((t) => String(t.id) === action.value)) return refuse('no such tab is open');
@@ -237,6 +259,46 @@ export function validate(action: NextAction | null, req: NextActionRequest, sett
 function echoes(value: string, control: OutlineControl): boolean {
   const v = normalizeWhitespace(value).toLowerCase();
   return [control.name, control.value].some((t) => t && normalizeWhitespace(t).toLowerCase() === v);
+}
+
+function sourceSearchControl(req: NextActionRequest, control: OutlineControl): boolean {
+  if (control.role !== 'searchbox') return false;
+  if (!/\b(search|find|filter)\b/i.test(control.name)) return false;
+  return /(^|\.)discord\.com$|(^|\.)slack\.com$|(^|\.)teams\.microsoft\.com$/i.test(req.page.host);
+}
+
+function grounded(value: string, req: NextActionRequest): boolean {
+  const needle = compact(value);
+  if (needle.length < 2) return false;
+  return contextStrings(req).some((line) => compact(line).includes(needle));
+}
+
+function intentGrounded(intent: ResolvedIntent, req: NextActionRequest): boolean {
+  const parts = [intent.entity.value, intent.entity.location].filter((part) => compact(part).length >= 2);
+  if (parts.some((part) => grounded(part, req))) return true;
+  if (intent.intent === 'gmail') return grounded(intent.entity.value, req);
+  return false;
+}
+
+function contextStrings(req: NextActionRequest): string[] {
+  return [
+    req.page.host,
+    req.page.title,
+    req.page.path,
+    req.outline,
+    ...req.history,
+    ...req.notes,
+    ...req.tabs.map((t) => `${t.host} ${t.title}`),
+    ...req.controls.flatMap((c) => [c.name, c.value ?? '', c.state ?? '']),
+  ];
+}
+
+function compact(text: string): string {
+  return normalizeWhitespace(text)
+    .toLowerCase()
+    .replace(/[“”"']/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function fallbackLabel(action: NextAction, control: OutlineControl | undefined): string {

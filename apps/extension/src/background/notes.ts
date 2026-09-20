@@ -50,6 +50,7 @@ export type Distill = (text: string, host: string, signal: AbortSignal) => Promi
 export interface NotesDeps {
   area: StorageArea;
   distill?: Distill;
+  onDistilled?: (item: ContextItem, notes: Note[]) => void;
   /** While the store is pinned nothing new is remembered, as with every other capture. */
   pinned?: () => Promise<boolean>;
   now?: () => number;
@@ -137,6 +138,7 @@ export function createNotes(deps: NotesDeps): Notes {
       const kept = list.filter((n) => n.origin !== item.origin && !seen.has(key(n.text)));
       return [...kept, ...notes];
     });
+    deps.onDistilled?.(item, notes);
     return notes;
   }
 

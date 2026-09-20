@@ -26,7 +26,7 @@ export function gate(input: GateInput, settings: Settings): boolean {
 
 /** Same checks as `gate`, but says which one stopped the request. */
 export function explainGate(input: GateInput, settings: Settings): GateVerdict {
-  if (!settings.enabled) return 'disabled';
+  if (settings.enabled === false) return 'disabled';
   if (isSiteOff(settings, input.page.host)) return 'site-off';
   if (isDenylisted(input.page.host)) return 'denylisted';
   if (input.password || input.controls.some((c) => PASSWORD_NAME.test(c.name))) return 'password';

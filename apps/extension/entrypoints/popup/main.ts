@@ -1,4 +1,5 @@
 import type { TabDiag } from '@/src/background/diag';
+import type { ElasticDebugEvent } from '@/src/background/elastic';
 import { relativeAge } from '@/src/format/age';
 import { describeCapture, describePerform, describeSuggest, describeVision } from '@/src/format/diag';
 import { sendMessage, type KnownItem } from '@/src/messaging';
@@ -18,6 +19,7 @@ const diagCapture = document.getElementById('diag-capture') as HTMLElement;
 const diagSuggest = document.getElementById('diag-suggest') as HTMLElement;
 const diagVision = document.getElementById('diag-vision') as HTMLElement;
 const diagPerform = document.getElementById('diag-perform') as HTMLElement;
+const elasticLog = document.getElementById('elastic-log') as HTMLElement;
 
 // The host of the tab the popup was opened over; undefined on chrome:// and friends.
 let activeHost: string | undefined;
@@ -46,6 +48,14 @@ async function fetchDiag(tabId: number | undefined): Promise<TabDiag | null> {
   }
 }
 
+async function fetchElasticDebug(tabId: number | undefined): Promise<ElasticDebugEvent[]> {
+  try {
+    return (await withTimeout(sendMessage('getElasticDebug', { tabId }))).events ?? [];
+  } catch {
+    return [];
+  }
+}
+
 function renderDiag(diag: TabDiag | null): void {
   const now = Date.now();
   diagCapture.textContent = diag?.capture ? describeCapture(diag.capture, now) : 'no capture from this tab yet';
@@ -57,6 +67,35 @@ function renderDiag(diag: TabDiag | null): void {
   const perform = diag?.performs?.at(-1);
   diagPerform.hidden = !perform;
   diagPerform.textContent = perform ? describePerform(perform, now) : '';
+}
+
+function renderElasticDebug(events: ElasticDebugEvent[]): void {
+  if (events.length === 0) {
+    elasticLog.textContent = 'no Elastic calls yet';
+    return;
+  }
+  elasticLog.textContent = events.map(formatElasticEvent).join('\n\n');
+}
+
+function formatElasticEvent(event: ElasticDebugEvent): string {
+  const time = new Date(event.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const status = event.status ? ` ${event.status}` : '';
+  return [
+    `${time} ${event.kind.toUpperCase()} ${event.ok ? 'ok' : 'failed'}${status}`,
+    event.summary,
+    event.path,
+    `request: ${formatJson(event.request)}`,
+    `response: ${formatJson(event.response)}`,
+  ].join('\n');
+}
+
+function formatJson(value: unknown): string {
+  if (value === undefined) return '(none)';
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
 }
 
 function renderSite(settings: { disabledHosts?: string[] }): void {
@@ -124,11 +163,13 @@ async function load(): Promise<void> {
       Promise.all([sendMessage('getSettings', undefined), sendMessage('getKnown', undefined), findActiveTab()]),
     );
     activeHost = tab.host;
-    enabled.checked = settings.enabled;
+    enabled.checked = settings.enabled ?? true;
     renderSite(settings);
     renderList(known.items);
     renderPinned(known.pinned === true);
-    renderDiag(await fetchDiag(tab.id));
+    const [diag, elasticDebug] = await Promise.all([fetchDiag(tab.id), fetchElasticDebug(tab.id)]);
+    renderDiag(diag);
+    renderElasticDebug(elasticDebug);
   } catch {
     app.dataset.state = 'offline';
   } finally {
@@ -140,7 +181,7 @@ enabled.addEventListener('change', async () => {
   const next = enabled.checked;
   try {
     const s = await withTimeout(sendMessage('setSettings', { enabled: next }));
-    enabled.checked = s.enabled;
+    enabled.checked = s.enabled ?? true;
   } catch {
     enabled.checked = !next;
     app.dataset.state = 'offline';

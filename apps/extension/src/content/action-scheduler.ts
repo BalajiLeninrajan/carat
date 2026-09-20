@@ -50,7 +50,7 @@ export interface ActionOptions extends RequestObserver {
  */
 export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = document, opts: ActionOptions = {}): ActionsHandle {
   const maybeWin = doc.defaultView;
-  if (!maybeWin) return NO_HANDLE;
+  if (!maybeWin || !doc.documentElement) return NO_HANDLE;
   const win: Window = maybeWin;
   const observer: RequestObserver = opts;
 
@@ -141,7 +141,7 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
       onAccept: () => void accept(action, target),
       onDismiss: (why: string) => {
         if (why === 'escape') dismissed.add(key);
-        void send('feedback', { kind: action.kind, name: nameOf(action, target), label: action.label, host: doc.location.host, accepted: false });
+        void send('feedback', { kind: action.kind, name: nameOf(action, target), label: action.label, value: action.value, host: doc.location.host, accepted: false });
       },
     };
     // A control the user can see gets the chip on it; everything else is the banner.
@@ -161,6 +161,7 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
       kind: action.kind,
       name: nameOf(action, target),
       label: action.label,
+      value: action.value,
       host: doc.location.host,
       accepted: true,
       ...(outcome === 'partial' ? { outcome: 'partial' as const } : {}),
@@ -223,7 +224,11 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     if (doc.visibilityState === 'visible') snapshotSoon();
   });
   const mutations = typeof MutationObserver === 'function' ? new MutationObserver(snapshotSoon) : null;
-  mutations?.observe(doc.documentElement, { childList: true, subtree: true });
+  try {
+    mutations?.observe(doc.documentElement, { childList: true, subtree: true });
+  } catch {
+    mutations?.disconnect();
+  }
   ctx.setTimeout(() => void snapshot(), SNAPSHOT_TIMING.initialMs);
   ctx.onInvalidated(() => {
     mutations?.disconnect();

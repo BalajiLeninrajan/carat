@@ -38,7 +38,7 @@ export const EAGERNESS: Record<Eagerness, EagernessKnobs> = {
   eager: { minConfidence: 0.35, jevGateMin: 0.25, maxSuggestions: 4, sameOriginContext: true, looseNames: true, primaryWithoutFill: true, priorMin: 0.5 },
 };
 
-export const DEFAULT_EAGERNESS: Eagerness = 'eager';
+export const DEFAULT_EAGERNESS: Eagerness = 'balanced';
 
 /** One line per level, for the options page and anywhere else the choice is explained. */
 export const EAGERNESS_HELP: Record<Eagerness, string> = {

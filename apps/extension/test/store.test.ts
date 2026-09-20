@@ -258,7 +258,11 @@ describe('settings store', () => {
       statusLine: false,
       screenshots: false,
       smartModel: '',
-      eagerness: 'eager',
+      elasticUrl: '',
+      elasticApiKey: '',
+      elasticIndexPrefix: 'carat',
+      elasticInferenceId: '',
+      eagerness: 'balanced',
     });
   });
 
@@ -268,12 +272,12 @@ describe('settings store', () => {
     expect('allowPayments' in saved).toBe(false);
   });
 
-  it('keeps eagerness to the three levels and defaults it to eager', async () => {
+  it('keeps eagerness to the three levels and defaults it to balanced', async () => {
     const settings = createSettingsStore(new FakeArea());
     expect((await settings.set({ eagerness: 'balanced' })).eagerness).toBe('balanced');
     expect((await settings.set({ eagerness: 'conservative' })).eagerness).toBe('conservative');
-    expect((await settings.set({ eagerness: 'reckless' as never })).eagerness).toBe('eager');
-    expect((await settings.set({ eagerness: 3 as never })).eagerness).toBe('eager');
+    expect((await settings.set({ eagerness: 'reckless' as never })).eagerness).toBe('balanced');
+    expect((await settings.set({ eagerness: 3 as never })).eagerness).toBe('balanced');
   });
 
   it('keeps screenshots off unless stored as true and keeps a blank smart model blank', async () => {
@@ -311,6 +315,38 @@ describe('settings store', () => {
     expect(next.baseURL).toBe('https://x.test/v1');
     expect(await settings.get()).toEqual(next);
     expect((await settings.set({ provider: 'cloudflare' })).provider).toBe('cloudflare');
+  });
+
+  it('trims and normalizes the Elasticsearch settings', async () => {
+    const settings = createSettingsStore(new FakeArea());
+    const next = await settings.set({
+      elasticUrl: ' https://elastic.example.com// ',
+      elasticApiKey: ' es-key ',
+      elasticIndexPrefix: ' Carat Demo!! ',
+      elasticInferenceId: ' .elser-2-elasticsearch ',
+    });
+    expect(next.elasticUrl).toBe('https://elastic.example.com');
+    expect(next.elasticApiKey).toBe('es-key');
+    expect(next.elasticIndexPrefix).toBe('carat-demo');
+    expect(next.elasticInferenceId).toBe('.elser-2-elasticsearch');
+    expect((await settings.set({ elasticIndexPrefix: '   ' })).elasticIndexPrefix).toBe('carat');
+  });
+
+  it('cleans literal undefined values left by an older options page', async () => {
+    const area = new FakeArea();
+    area.data['settings'] = {
+      elasticUrl: 'undefined',
+      elasticApiKey: 'undefined',
+      elasticIndexPrefix: 'undefined',
+      elasticInferenceId: 'null',
+      apiKey: 'undefined',
+    };
+    const got = await createSettingsStore(area).get();
+    expect(got.elasticUrl).toBe('');
+    expect(got.elasticApiKey).toBe('');
+    expect(got.elasticIndexPrefix).toBe('carat');
+    expect(got.elasticInferenceId).toBe('');
+    expect(got.apiKey).toBe('');
   });
 
   it('keeps disabled hosts lowercased, deduped and free of junk', async () => {

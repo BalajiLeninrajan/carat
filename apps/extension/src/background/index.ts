@@ -35,5 +35,7 @@ export { HistoryStore, HISTORY_KEY } from './history';
 export type { CommittedDetails, NavigationEvents, TabEvents } from './history';
 export { createNotes, fallbackFacts, NOTES_KEY, NOTES_LIMITS } from './notes';
 export type { Distill, Note, Notes, NotesDeps } from './notes';
+export { createElasticMemory } from './elastic';
+export type { ElasticDebugEvent, ElasticDebugKind, ElasticMemory } from './elastic';
 export { describeTabs, describedTabs } from './tabs';
 export type { RawTab } from './tabs';

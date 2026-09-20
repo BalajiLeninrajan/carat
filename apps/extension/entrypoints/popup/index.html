@@ -92,14 +92,31 @@
         border-bottom: 1px solid var(--surface0);
       }
       #pinned-note[hidden] { display: none; }
-      #diag {
+      #diag, #elastic-debug {
         padding: 6px 12px;
         border-top: 1px solid var(--surface0);
         font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
         color: var(--subtext0);
       }
       #diag p { margin: 0; overflow-wrap: anywhere; }
-      main[data-state="offline"] #diag { display: none; }
+      #elastic-debug summary {
+        cursor: pointer;
+        color: var(--text);
+        font-weight: 600;
+      }
+      #elastic-log {
+        max-height: 240px;
+        margin: 6px 0 0;
+        padding: 8px;
+        overflow: auto;
+        border: 1px solid var(--surface0);
+        border-radius: 6px;
+        background: var(--mantle);
+        color: var(--subtext0);
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      main[data-state="offline"] #diag, main[data-state="offline"] #elastic-debug { display: none; }
       button:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
       #offline, .empty { display: none; }
       main[data-state="offline"] #offline { display: block; }
@@ -138,6 +155,11 @@
         <p id="diag-vision" hidden></p>
         <p id="diag-perform" hidden></p>
       </section>
+
+      <details id="elastic-debug">
+        <summary>Elastic trace</summary>
+        <pre id="elastic-log">no Elastic calls yet</pre>
+      </details>
 
       <footer>
         <a href="#" id="options">Settings</a>

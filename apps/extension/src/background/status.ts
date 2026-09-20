@@ -19,7 +19,7 @@ export interface StatusInfo {
 export function describeStatus(settings: Settings, url: string | undefined): StatusInfo {
   const location = url ? parseLocation(url) : undefined;
   const host = location ? new URL(location.origin).host : '';
-  const reason = !settings.enabled
+  const reason = settings.enabled === false
     ? 'disabled'
     : !location
       ? 'not-http'

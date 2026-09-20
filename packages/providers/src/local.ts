@@ -59,10 +59,21 @@ const SENSITIVE = /\b(card|cvv|cvc|cvn|expiry|expiration|password|passcode|pin|s
 /** The focused text control when it is empty, else the first empty one in the outline. */
 function fillTarget(req: NextActionRequest): OutlineControl | undefined {
   const empty = (c: OutlineControl): boolean =>
-    TEXT_ROLES.has(c.role) && !c.value && !c.risky && !SENSITIVE.test(c.name) && !/\bdisabled\b/.test(c.state ?? '');
+    TEXT_ROLES.has(c.role) &&
+    !c.value &&
+    !c.risky &&
+    !SENSITIVE.test(c.name) &&
+    !/\bdisabled\b/.test(c.state ?? '') &&
+    !sourceSearchControl(req, c);
   const focused = req.controls.find((c) => c.n === req.focused);
   if (focused && empty(focused)) return focused;
   return req.controls.find(empty);
+}
+
+function sourceSearchControl(req: NextActionRequest, control: OutlineControl): boolean {
+  if (control.role !== 'searchbox') return false;
+  if (!/\b(search|find|filter)\b/i.test(control.name)) return false;
+  return /(^|\.)discord\.com$|(^|\.)slack\.com$|(^|\.)teams\.microsoft\.com$/i.test(req.page.host);
 }
 
 /** Cues in a control's name that say what kind of value belongs in it. */

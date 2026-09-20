@@ -39,8 +39,8 @@ describe('buildNextActionMessages', () => {
     expect(new Set(tails).size).toBe(EAGERNESS_LEVELS.length);
   });
 
-  it('forbids "none" at eager and allows it at the quieter levels', () => {
-    expect(actionInstructions('eager')).toContain('always suggest an action');
+  it('allows none when even eager has no grounded action', () => {
+    expect(actionInstructions('eager')).toContain('not grounded');
     expect(actionInstructions('balanced')).toContain('"none"');
     expect(actionInstructions('conservative')).toContain('"none"');
   });

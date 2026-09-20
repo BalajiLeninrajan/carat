@@ -17,6 +17,8 @@ export interface FeedbackInput {
   name: string;
   /** What the chip said, for the timeline. */
   label: string;
+  /** The actual value acted on, when the action has one. */
+  value?: string;
   host: string;
   accepted: boolean;
   outcome?: PerformOutcome;
@@ -29,6 +31,8 @@ export interface FeedbackSinks {
   onPerform?: (tabId: number, entry: PerformDiag) => void;
   /** The per-tab timeline, so the next request knows what just happened here. */
   onHistory?: (tabId: number | undefined, line: string) => void;
+  /** Optional durable action audit sink, currently Elasticsearch. */
+  onElastic?: (tabId: number | undefined) => void;
 }
 
 /**
@@ -38,6 +42,7 @@ export interface FeedbackSinks {
  * the next snapshot.
  */
 export async function handleFeedback(data: FeedbackInput, store: ContextStore, tabId?: number, sinks: FeedbackSinks = {}): Promise<void> {
+  sinks.onElastic?.(tabId);
   // The timeline wraps this in "accepted suggestion:" or "dismissed suggestion:".
   const clause = `${verb(data.kind)}${data.name ? ` "${data.name}"` : ''}`;
   if (!data.accepted) {

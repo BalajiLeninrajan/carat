@@ -27,7 +27,10 @@ Kinds:
 How to decide:
 - Follow the flow the history shows. Read it as a sequence: what was the user getting done, and what step comes next? A filled-in form wants its submit button; an opened dialog wants its primary action; a just-added cart item wants checkout.
 - The focused control and the controls near it are the strongest signal. Required fields that are still empty come before submitting.
-- <notes> often explain why the user came to this page. When the page is where they would act on a note, the next step is usually to put the note's details into the page (fill the matching field, select the matching option) or to press the control that acts on it.
+- <notes> often explain why the user came to this page. A line beginning with "[task]" is the one thing Carat's Elasticsearch context layer believes this page can finish, grouped from what the user read elsewhere; when this page has somewhere to put it, that is almost always the action. Lines beginning with "[elasticsearch]" are the supporting context behind it: prefer recent, specific ones. When a "[task]" line says "conflict", two sources disagree about the detail it names, so do not fill that detail: choose an action that does not depend on it.
+- Never type or open a named value just because it appeared in an example. A fill/select/open value must be grounded in this request's page, notes, history, tabs, or Elasticsearch lines.
+- When the page is where they would act on a note, the next step is usually to put the note's details into the page (fill the matching field, select the matching option) or to press the control that acts on it.
+- Chat, forum and document pages are usually source pages: read the newest relevant text, but do not fill their in-page search boxes with extracted names. If the text implies an external action, use "open" for Maps, Calendar or Gmail instead.
 - A place, a person or a plan named in <notes> with nowhere on this page to put it is an "open" instead; a destination the user already has open in <tabs> is a "switch".
 - Only use numbers that appear in the outline. Never target a disabled control.
 - Do not repeat the action the history shows the user just took, and never propose something they dismissed.
@@ -49,7 +52,7 @@ Output fields:
  * the quieter levels are allowed the "none" kind when nothing clears the bar.
  */
 const LAST_RULE: Record<Eagerness, string> = {
-  eager: `You must always suggest an action. There is no "none" answer at this setting: even when the next step is uncertain, pick the single most likely one and say how sure you are.`,
+  eager: `You should usually suggest an action, but still use \`kind: "none"\` when the best action is not grounded in this request. Even at this setting, do not invent a value or destination.`,
   balanced: `Prefer to answer. Use \`kind: "none"\` (target null, value "", confidence 0) only when nothing on the page, in the notes or in the history points at a next step you would put at ${EAGERNESS.balanced.minConfidence} or better.`,
   conservative: `Answer only when you are sure. Use \`kind: "none"\` (target null, value "", confidence 0) whenever your best guess is under ${EAGERNESS.conservative.minConfidence}: here no suggestion beats a wrong one.`,
 };
@@ -262,6 +265,8 @@ export const DISTILL_PROMPT = [
   'Extract the facts they are likely to act on soon, possibly on a different website: requests or plans addressed to them, things they agreed to, and the concrete details needed to act on them (names, places, dates and times, amounts, quantities, product or item names, reference numbers, addresses).',
   '',
   '- Write each note as one short, self-contained sentence that still makes sense later on another site: say who or what it concerns and include the specifics.',
+  '- Treat message/post/email content as the source of truth. Do not create a note from nearby page chrome, sidebars, menus, search placeholders, bookmark labels, notification badges, ads or unrelated DOM text.',
+  '- If a page has multiple messages, each note must be supported by one message or a tight local exchange, not by stitching unrelated text from around the page together.',
   '- When the page shows when something was written and a date is relative ("tomorrow", "next Friday"), keep the wording and add the absolute date if the page lets you work it out.',
   '- Ignore navigation, menus, ads, boilerplate, and anything the user is unlikely to act on.',
   '- Never include passwords, card numbers or other secrets.',

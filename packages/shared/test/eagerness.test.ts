@@ -3,9 +3,9 @@ import { DEFAULT_EAGERNESS, EAGERNESS, EAGERNESS_LEVELS, isEagerness, weakBelow 
 import { DEFAULT_SETTINGS } from '../src/types';
 
 describe('EAGERNESS', () => {
-  it('defaults to eager', () => {
-    expect(DEFAULT_EAGERNESS).toBe('eager');
-    expect(DEFAULT_SETTINGS.eagerness).toBe('eager');
+  it('defaults to balanced', () => {
+    expect(DEFAULT_EAGERNESS).toBe('balanced');
+    expect(DEFAULT_SETTINGS.eagerness).toBe('balanced');
   });
 
   it('loosens every knob monotonically from conservative to eager', () => {

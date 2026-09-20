@@ -8,7 +8,23 @@ import {
   normalizeSettings,
 } from './settings-form';
 
-const base = { enabled: true, provider: 'openai', baseURL: '', apiKey: '', model: '', statusLine: false, cfAccountId: '', cfApiToken: '', smartModel: '', screenshots: false, eagerness: 'eager' };
+const base = {
+  enabled: true,
+  provider: 'openai',
+  baseURL: '',
+  apiKey: '',
+  model: '',
+  statusLine: false,
+  cfAccountId: '',
+  cfApiToken: '',
+  smartModel: '',
+  elasticUrl: '',
+  elasticApiKey: '',
+  elasticIndexPrefix: '',
+  elasticInferenceId: '',
+  screenshots: false,
+  eagerness: 'eager',
+};
 
 describe('normalizeSettings', () => {
   it('fills blank baseURL and model with the defaults', () => {
@@ -57,6 +73,39 @@ describe('normalizeSettings', () => {
     expect(s.cfApiToken).toBe('cf-x');
     expect(normalizeSettings(base).cfAccountId).toBe('');
     expect(normalizeSettings(base).cfApiToken).toBe('');
+  });
+
+  it('normalizes the Elasticsearch fields', () => {
+    const s = normalizeSettings({
+      ...base,
+      elasticUrl: ' https://elastic.example.com// ',
+      elasticApiKey: ' es-key ',
+      elasticIndexPrefix: ' Carat Demo!! ',
+      elasticInferenceId: ' .elser-2-elasticsearch ',
+    });
+    expect(s.elasticUrl).toBe('https://elastic.example.com');
+    expect(s.elasticApiKey).toBe('es-key');
+    expect(s.elasticIndexPrefix).toBe('carat-demo');
+    expect(s.elasticInferenceId).toBe('.elser-2-elasticsearch');
+    expect(normalizeSettings(base).elasticIndexPrefix).toBe(DEFAULT_SETTINGS.elasticIndexPrefix);
+  });
+
+  it('treats literal undefined and null strings as blank optional fields', () => {
+    const s = normalizeSettings({
+      ...base,
+      apiKey: 'undefined',
+      cfApiToken: 'null',
+      elasticUrl: 'undefined',
+      elasticApiKey: 'undefined',
+      elasticIndexPrefix: 'undefined',
+      elasticInferenceId: 'null',
+    });
+    expect(s.apiKey).toBe('');
+    expect(s.cfApiToken).toBe('');
+    expect(s.elasticUrl).toBe('');
+    expect(s.elasticApiKey).toBe('');
+    expect(s.elasticIndexPrefix).toBe(DEFAULT_SETTINGS.elasticIndexPrefix);
+    expect(s.elasticInferenceId).toBe('');
   });
 
   it('saves the level the slider is on, whatever the thumb reports', () => {

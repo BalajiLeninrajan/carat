@@ -43,8 +43,25 @@ export interface Settings {
    */
   smartModel: string;
   /**
-   * How readily a chip is offered. `eager` (the default) always answers;
-   * `conservative` only when the model is sure. See EAGERNESS.
+   * Optional Elasticsearch context layer. When `elasticUrl` and
+   * `elasticApiKey` are present, captures, distilled facts and accepted
+   * actions are indexed under `elasticIndexPrefix` and retrieved before each
+   * model call.
+   */
+  elasticUrl: string;
+  elasticApiKey: string;
+  elasticIndexPrefix: string;
+  /**
+   * Optional Elastic inference endpoint for `semantic_text`. Blank keeps the
+   * index lexical-only. Set it to `default` to use Elastic's deployment
+   * default, or an endpoint id such as `.elser-2-elasticsearch`/a configured
+   * Jina endpoint, to enable RRF hybrid retrieval.
+   */
+  elasticInferenceId: string;
+  /**
+   * How readily a chip is offered. `balanced` is the default; `eager`
+   * guesses more readily and `conservative` only answers when the model is sure.
+   * See EAGERNESS.
    */
   eagerness: Eagerness;
 }
@@ -79,6 +96,10 @@ export const DEFAULT_SETTINGS: Settings = {
   statusLine: false,
   screenshots: false,
   smartModel: '',
+  elasticUrl: '',
+  elasticApiKey: '',
+  elasticIndexPrefix: 'carat',
+  elasticInferenceId: '',
   eagerness: DEFAULT_EAGERNESS,
 };
 

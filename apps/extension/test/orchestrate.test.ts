@@ -56,7 +56,7 @@ const request = (over: Partial<NextActionRequest> = {}): NextActionRequest => ({
   controls: CONTROLS,
   focused: 1,
   history: [],
-  notes: [],
+  notes: ['Dinner at Seven Shores Cafe on Friday at 6.'],
   tabs: [{ id: 8, host: 'discord.com', title: 'Discord' }],
   now: '2026-09-16T14:04:00-04:00',
   eagerness: 'eager',
@@ -71,7 +71,7 @@ describe('one action per page', () => {
   it('gates on the switches, the denylist and a password field', async () => {
     const seen: string[] = [];
     const deps = {
-      settings: async () => settings(),
+      settings: async () => settings({ eagerness: 'eager' }),
       createProvider: () => new Fixed(action()),
       localProvider: nothing,
       onDiag: (d: { gate: string }) => seen.push(d.gate),
@@ -87,9 +87,10 @@ describe('one action per page', () => {
     const placeholder = action({ kind: 'fill', target: 1, value: 'Seven Shores Cafe', confidence: 0.5, label: 'Fill Search with "Seven Shores Cafe"' });
     const model = action({ confidence: 0.8 });
     const res = await nextAction(snapshot(), { tabId: 1, origin: 'x' }, {
-      settings: async () => settings(),
+      settings: async () => settings({ eagerness: 'eager' }),
       localProvider: new Fixed(placeholder),
       createProvider: () => new Fixed(model, 0, 2),
+      notes: { lines: async () => ['Dinner at Seven Shores Cafe on Friday at 6.'] },
       refine,
     });
     expect(res.action?.value).toBe('Seven Shores Cafe');
@@ -99,6 +100,33 @@ describe('one action per page', () => {
     expect(await refine.claim(res.ticket!, 1)).toMatchObject({ action: { label: 'Click "Directions"' } });
   });
 
+  it('leads with the task line and never lets evidence evict the user\'s own notes', async () => {
+    let seen: string[] = [];
+    class Capture implements Provider {
+      readonly id = 'openai' as const;
+      async next(req: NextActionRequest): Promise<NextAction | null> {
+        seen = [...req.notes];
+        return null;
+      }
+    }
+    const evidence = Array.from({ length: 10 }, (_, i) => `[elasticsearch] fact from discord.com: evidence ${i}`);
+    await nextAction(snapshot(), { tabId: 1, origin: 'x' }, {
+      settings: async () => settings(),
+      localProvider: new Capture(),
+      createProvider: () => new Capture(),
+      notes: { lines: async () => ['Dinner at Seven Shores Cafe on Friday at 6.', 'Alex is bringing the tickets.'] },
+      elasticsearch: {
+        lines: async () => ['[task] maps_lookup from discord.com: Seven Shores Cafe', ...evidence],
+      },
+    });
+
+    expect(seen[0]).toBe('[task] maps_lookup from discord.com: Seven Shores Cafe');
+    // Both local notes survive a full complement of retrieved evidence.
+    expect(seen[1]).toBe('Dinner at Seven Shores Cafe on Friday at 6.');
+    expect(seen[2]).toBe('Alex is bringing the tickets.');
+    expect(seen).toHaveLength(12);
+  });
+
   it('keeps a surer context-backed fill over the model', async () => {
     const refine = new RefineQueue(() => undefined);
     const placeholder = action({ kind: 'fill', target: 1, value: 'Seven Shores Cafe', confidence: 0.9 });
@@ -106,6 +134,7 @@ describe('one action per page', () => {
       settings: async () => settings(),
       localProvider: new Fixed(placeholder),
       createProvider: () => new Fixed(action({ confidence: 0.6 })),
+      notes: { lines: async () => ['Dinner at Seven Shores Cafe on Friday at 6.'] },
       refine,
     });
     expect(res.action?.value).toBe('Seven Shores Cafe');
@@ -174,6 +203,23 @@ describe('validation is safety only', () => {
     expect(validate(action({ kind: 'fill', target: 1, value: 'Search Google Maps' }), request(), s)).toBeNull();
     expect(validate(action({ kind: 'fill', target: 1, value: '' }), request(), s)).toBeNull();
     expect(validate(action({ kind: 'fill', target: 1, value: 'Seven Shores Cafe' }), request(), s)?.value).toBe('Seven Shores Cafe');
+  });
+
+  it('refuses named values that are not grounded in this request', () => {
+    const ungrounded = request({ notes: [], history: [], outline: 'search:\n  >> FOCUSED [1] searchbox "Search Google Maps"' });
+    expect(validate(action({ kind: 'fill', target: 1, value: 'Seven Shores Cafe' }), ungrounded, s)).toBeNull();
+    expect(validate(action({ kind: 'open', target: null, value: 'maps:Seven Shores Cafe' }), ungrounded, s)).toBeNull();
+  });
+
+  it('refuses to fill source-page search boxes even when the value is grounded', () => {
+    const req = request({
+      page: { host: 'discord.com', title: 'Discord | @Crazydodo', path: '/channels/@me/1', scroll: { y: 0, pages: 1, more: false } },
+      outline: 'header:\n  >> FOCUSED [1] searchbox "Search crazydodo"\nmain:\n  text: Boosts Level',
+      controls: [{ n: 1, role: 'searchbox', name: 'Search crazydodo' }],
+      focused: 1,
+      notes: ['Boosts Level appeared in page chrome.'],
+    });
+    expect(validate(action({ kind: 'fill', target: 1, value: 'Boosts Level' }), req, s)).toBeNull();
   });
 
   it('scrolls only when there is more page below', () => {

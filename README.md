@@ -103,6 +103,72 @@ The popup shows what Carat currently knows and a few controls:
 
 `Alt+Shift+C` asks again on the current page right now, past the 60-second cache and past anything dismissed with Esc. Change the key at `chrome://extensions/shortcuts`.
 
+## Elasticsearch context layer
+
+Carat can optionally use Elasticsearch as its longer-lived context layer. In
+the options page, fill in:
+
+- Elasticsearch URL
+- Elasticsearch API key
+- Index prefix, default `carat`
+- Optional inference endpoint id, or `default`
+
+With a URL and API key set, the background worker auto-creates four indices:
+
+- `<prefix>-observations`: captured page text, selections and vision text
+- `<prefix>-facts`: distilled actionable facts from pages the user left
+- `<prefix>-actions`: accepted and dismissed Carat suggestions
+- `<prefix>-tasks`: unresolved tasks grouped from facts by action type, likely entity and date bucket, carrying `status: conflict` and a reason when two sources disagree
+
+It also auto-creates an ingest pipeline named `<prefix>-carat-ingest` and sends
+every write through it. The pipeline adds `received_at`, normalized host/origin
+fields, lightweight ECS-style `event.*` metadata, `carat.*` schema metadata,
+and redacts card-like digit sequences before the document is indexed. Carat
+still does app-level extraction and conflict detection before indexing; the
+ingest pipeline handles Elastic-native normalization and safety cleanup at
+write time.
+
+If the inference endpoint id is blank, retrieval is BM25/full-text only. Set it
+to `default` to use Elastic's deployment default `semantic_text` endpoint, or to
+a specific `semantic_text` inference endpoint id. New indices then include a
+`text_semantic` field and Carat retrieves with RRF over BM25 plus semantic
+matching. The extension does not create custom inference endpoints itself;
+create one in Elastic/Kibana first if you do not want to use `default`.
+Existing indices are left alone, so delete the demo indices or use a fresh
+prefix after changing the inference endpoint.
+
+Distilled facts also pass through a small messy-context resolver. A fact like
+`Dinner at Seven Shores Cafe on Friday at 6` becomes an unresolved
+`calendar_event` task. If another source later says the same event is at 7,
+the task keeps one document and flips to `status: conflict` with a
+`conflictReason`, so the disagreement travels with the task rather than beside
+it.
+
+Before each model call, Carat works out what the page in front of the user can
+actually finish. The host decides when it is one of Carat's own destinations
+(Calendar, Maps, Gmail) and then it decides alone; otherwise the capability has
+to be named by a control the model could type into, so an article that merely
+mentions a date does not claim to be a calendar. Retrieval is then two queries
+run side by side under a single deadline, over two different windows, because a
+task and a fact age differently:
+
+- **the task**: `<prefix>-tasks`, unresolved or in conflict, filtered to that
+  capability, from the last **5 minutes** — hot intent, the same window the
+  cleanup sweep expires tasks on. Ranked by relevance to the page rather than
+  recency, with conflicts boosted, and capped at one.
+- **the context behind it**: `<prefix>-observations` and `<prefix>-facts` from
+  the last **12 hours**, hybrid-ranked, capped at three.
+
+An ES|QL rollup adds one line counting what is still open, and only runs when
+the page can complete something. The result reaches the model as one `[task]`
+line naming the single thing to finish and a few `[elasticsearch]` lines
+supporting it — the task line goes in front of the user's own notes, the
+supporting lines behind them, so retrieved context can never push out what the
+user actually read. When the task line says `conflict`, the prompt tells the
+model not to fill the disputed detail. Accepting or dismissing a chip runs a
+delete-by-query that closes the matching task out, so the loop ends where it
+started.
+
 ## Tests and eval
 
 ```

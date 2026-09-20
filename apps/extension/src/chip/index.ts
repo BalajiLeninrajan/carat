@@ -177,7 +177,11 @@ export function createChip(doc: Document = document): Chip {
   const onMousedown = (e: MouseEvent): void => e.preventDefault();
 
   const reposition = (): void => {
-    positionRing();
+    try {
+      positionRing();
+    } catch {
+      clearRing();
+    }
     if (!session || session.mode !== 'control') return;
     if (!session.target.isConnected) {
       dismiss('detached');
@@ -186,11 +190,18 @@ export function createChip(doc: Document = document): Chip {
     const wasHidden = host.style.display === 'none';
     if (wasHidden) host.style.visibility = 'hidden';
     host.style.display = 'block';
-    const anchored = session.anchor ? session.anchor() : undefined;
-    const { top, left, visible } =
-      anchored === null
-        ? { top: 0, left: 0, visible: false }
-        : placeChip(session.target, pill.offsetWidth, pill.offsetHeight, anchored);
+    let placement = { top: 0, left: 0, visible: false };
+    try {
+      const anchored = session.anchor ? session.anchor() : undefined;
+      placement =
+        anchored === null
+          ? { top: 0, left: 0, visible: false }
+          : placeChip(session.target, pill.offsetWidth, pill.offsetHeight, anchored);
+    } catch {
+      dismiss('detached');
+      return;
+    }
+    const { top, left, visible } = placement;
     session.onScreen = visible;
     host.style.visibility = '';
     if (!visible) {
@@ -226,7 +237,19 @@ export function createChip(doc: Document = document): Chip {
     pill.classList.toggle('is-armed', armed);
   }
 
-  function mount(opts: ChipText): SessionBase {
+  function mount(node: HTMLElement): boolean {
+    if (node.isConnected) return true;
+    try {
+      const root = doc.documentElement;
+      if (!root) return false;
+      root.appendChild(node);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function begin(opts: ChipText): SessionBase | null {
     const keepRing = ringTarget;
     hide();
     ringTarget = keepRing;
@@ -235,7 +258,9 @@ export function createChip(doc: Document = document): Chip {
     reason = opts.reason ?? '';
     setPending(opts.pending === true);
     key.textContent = 'Tab';
-    if (!host.isConnected) doc.documentElement.appendChild(host);
+    if (!mount(host)) {
+      return null;
+    }
     // Capture phase so the page's own Tab handlers never see an accepted Tab.
     win.addEventListener('keydown', onKeydown, true);
     pill.addEventListener('click', onClick);
@@ -258,9 +283,14 @@ export function createChip(doc: Document = document): Chip {
     // Re-showing on the same control is a swap: the words change, the chip does not move.
     const swap = session?.mode === 'control' && session.target === opts.target && session.onScreen;
     const held = swap ? { top: host.style.top, left: host.style.left } : null;
-    const base = mount(opts);
+    const base = begin(opts);
+    if (!base) return;
     const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(() => reposition()) : null;
-    observer?.observe(opts.target);
+    try {
+      observer?.observe(opts.target);
+    } catch {
+      observer?.disconnect();
+    }
     const targetWin = opts.target.ownerDocument.defaultView;
     session = {
       ...base,
@@ -294,7 +324,8 @@ export function createChip(doc: Document = document): Chip {
   }
 
   function showBanner(opts: BannerShowOptions): void {
-    const base = mount(opts);
+    const base = begin(opts);
+    if (!base) return;
     session = { ...base, mode: 'banner', onScreen: true, target: opts.target ?? null, interceptFrom: opts.interceptFrom ?? null };
     pill.classList.add('is-banner');
     host.style.top = 'auto';
@@ -311,10 +342,17 @@ export function createChip(doc: Document = document): Chip {
   /** Put the ring on a control before there is anything to say about it. */
   function ring(target: Element): void {
     ringTarget = target;
-    if (!ringHost.isConnected) doc.documentElement.appendChild(ringHost);
+    if (!mount(ringHost)) {
+      clearRing();
+      return;
+    }
     ringHost.style.display = 'block';
     ringHost.style.borderStyle = session ? 'solid' : 'dashed';
-    positionRing();
+    try {
+      positionRing();
+    } catch {
+      clearRing();
+    }
   }
 
   function positionRing(): void {
