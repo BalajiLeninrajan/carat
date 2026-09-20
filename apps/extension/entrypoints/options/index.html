@@ -146,6 +146,21 @@
         </label>
         <span class="hint">When you leave a page, Carat asks the model to note the facts on it you might act on elsewhere, keeps them for an hour in session memory, and includes them in later prompts. The page's visible text is sent to the API to do this. Off by default. Skipped on blocklisted sites and pages with a password field.</span>
 
+        <label class="row">
+          <input type="checkbox" name="listenEnabled" />
+          <span class="name">Listen through the microphone</span>
+        </label>
+        <span class="hint">
+          The microphone runs in the background whenever a Chrome window is focused, and stops when you leave Chrome.
+          Speech is sent to OpenAI to be transcribed; the audio is never stored. The transcript is distilled into the
+          same notes reading memory keeps, for an hour in session memory, and then dropped. Off by default. Chrome asks
+          for microphone access the first time, on this page.
+        </span>
+        <div class="actions">
+          <button type="button" id="mic">Enable microphone</button>
+          <span id="micStatus" role="status" aria-live="polite" class="hint"></span>
+        </div>
+
         <h2>Clipboard</h2>
 
         <p class="hint">

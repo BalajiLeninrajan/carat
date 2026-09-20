@@ -22,6 +22,10 @@ import {
   type ElasticDebugEvent,
   type Observation,
 } from '../src/background/elastic';
+// Side-effect imports: each keeps its own listeners. listen.ts opens and
+// closes the offscreen microphone document to match the listenEnabled setting
+// and Chrome's window focus, and turns what it hears into notes.
+import '../src/engine/background/listen';
 import '../src/engine/background/visits';
 import { PORT_NAME, type ActionKind, type ContentToWorker, type IdleMessage, type WorkerToContent } from '../src/engine/shared/protocol';
 import { isBlocked, loadSettings, saveSettings, type Settings } from '../src/engine/shared/settings';

@@ -1,7 +1,7 @@
 import { DEFAULT_SETTINGS, indexPrefix, type Settings } from '@/src/engine/shared/settings';
 
 const TEXT_KEYS = ['apiKey', 'baseUrl', 'textModel', 'actionModel', 'elasticUrl', 'elasticApiKey', 'elasticIndexPrefix', 'elasticInferenceId'] as const;
-const BOOL_KEYS = ['enabled', 'textEnabled', 'actionsEnabled', 'memoryEnabled', 'sound', 'statusLine'] as const;
+const BOOL_KEYS = ['enabled', 'textEnabled', 'actionsEnabled', 'memoryEnabled', 'listenEnabled', 'sound', 'statusLine'] as const;
 const TIERS: ReadonlySet<Settings['serviceTier']> = new Set(['auto', 'default', 'priority']);
 
 function input(form: HTMLFormElement, name: string): HTMLInputElement {
