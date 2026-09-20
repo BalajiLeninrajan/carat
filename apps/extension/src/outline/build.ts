@@ -3,8 +3,8 @@ import { hashText, normalizeWhitespace, registrableDomain, truncate } from '@car
 import { isVisible } from '../capture/visibility';
 import { isSecretField } from '../dom/secret';
 import { isIframe, isInput, isSelect, isTextArea } from '../dom/tags';
-import type { FrameRef } from '../frames/protocol';
-import { frameNumber } from '../frames/protocol';
+import type { FrameLine, FrameRef } from '../frames/protocol';
+import { FRAME_MAX_INDENT, FRAME_MAX_LINES, frameNumber } from '../frames/protocol';
 import { accessibleName } from '../interact';
 import { labelOf } from '../snapshot/labels';
 import { documentHeight, inViewport, viewportRect } from '../scroll';
@@ -120,6 +120,12 @@ export interface FrameOutline {
   /** The hub's token for the frame; the top performs there by the control's own number. */
   token: string;
   controls: readonly OutlineControl[];
+  /** The child's own outline lines, prose included. Without them only the controls are spliced. */
+  lines?: readonly FrameLine[];
+  /** The child's notes about its own fold, when it scrolls independently. */
+  summary?: readonly string[];
+  /** The child's host, for the line written above its lines. */
+  host?: string;
 }
 
 export interface OutlineOptions {
@@ -308,24 +314,72 @@ export function buildOutline(doc: Document, win: Window | null = doc.defaultView
     }
   };
 
+  /**
+   * A cross-origin child frame's own outline, put where its frame element
+   * sits, under a line naming the frame. The child's lines keep their order
+   * and their nesting; its controls are renumbered into this page's sequence
+   * and registered against the frame, so performing one goes back through
+   * the hub. Everything in the report is another document's text. It is
+   * truncated and normalised here, and it counts against this page's budget
+   * like a region of the page's own.
+   */
   const spliceFrame = (report: FrameOutline, ctx: WalkContext): void => {
+    const clean = (text: string, chars: number): string => truncate(normalizeWhitespace(String(text ?? '')), chars);
     const fr = frameNumber(doc, report.frame);
-    const index = push('struct', 'frame:', ctx);
-    const inner: WalkContext = { ...ctx, indent: ctx.indent + 1, region: index, fr };
-    for (const c of report.controls) {
+    const host = clean(report.host ?? '', OUTLINE_LIMITS.nameChars);
+    const index = push('struct', host ? `frame ${host}:` : 'frame:', ctx);
+    const base = ctx.indent + 1;
+    const byNumber = new Map<number, OutlineControl>();
+    for (const c of report.controls) byNumber.set(c.n, c);
+
+    // Child indent -> the line index that opened it, so a nested region's lines are trimmed with it.
+    const openedAt = new Map<number, number>();
+    const regionFor = (depth: number): number => {
+      for (let d = depth - 1; d >= 0; d--) {
+        const at = openedAt.get(d);
+        if (at !== undefined) return at;
+      }
+      return index;
+    };
+
+    const placed = new Set<number>();
+    const addRemote = (c: OutlineControl, at: { indent: number; region: number }): void => {
+      placed.add(c.n);
+      const name = clean(c.name, OUTLINE_LIMITS.nameChars);
       const entry: RawControl = {
         el: report.frame,
         role: c.role,
-        name: truncate(c.name, OUTLINE_LIMITS.nameChars),
-        ...(c.value ? { value: truncate(c.value, OUTLINE_LIMITS.valueChars) } : {}),
-        ...(c.state ? { state: c.state } : {}),
-        ...(c.host ? { host: c.host } : {}),
+        name,
+        ...(c.value ? { value: clean(c.value, OUTLINE_LIMITS.valueChars) } : {}),
+        ...(c.state ? { state: clean(c.state, OUTLINE_LIMITS.nameChars) } : {}),
+        ...(c.host ? { host: clean(c.host, OUTLINE_LIMITS.nameChars) } : {}),
         fr,
         frame: { token: report.token, remoteId: String(c.n) },
-        ...(c.risky || isRiskyName(c.name) ? { risky: true } : {}),
+        ...(c.risky || isRiskyName(name) ? { risky: true } : {}),
       };
       raw.push(entry);
-      push('control', renderControl(entry), inner, { control: raw.length - 1 });
+      push('control', renderControl(entry), at, { control: raw.length - 1 });
+    };
+
+    for (const line of (report.lines ?? []).slice(0, FRAME_MAX_LINES)) {
+      const depth = Math.min(Math.max(Math.trunc(line.indent) || 0, 0), FRAME_MAX_INDENT);
+      for (const open of [...openedAt.keys()]) if (open >= depth) openedAt.delete(open);
+      const at = { indent: base + depth, region: regionFor(depth) };
+      if (line.kind === 'control') {
+        const c = byNumber.get(line.n);
+        if (c && !placed.has(c.n)) addRemote(c, at);
+        continue;
+      }
+      const text = clean(line.text, OUTLINE_LIMITS.textChars);
+      if (!text) continue;
+      const opened = push(line.kind, text, at);
+      if (line.kind === 'struct') openedAt.set(depth, opened);
+    }
+    // A child too old to send lines, or one whose lines lost a control: list what is left flat.
+    for (const c of report.controls) if (!placed.has(c.n)) addRemote(c, { indent: base, region: index });
+    for (const note of report.summary ?? []) {
+      const text = clean(note, OUTLINE_LIMITS.nameChars);
+      if (text) push('text', text, { indent: base, region: index });
     }
   };
 
