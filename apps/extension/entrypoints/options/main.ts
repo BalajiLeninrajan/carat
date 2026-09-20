@@ -7,6 +7,8 @@ const form = document.getElementById('form') as HTMLFormElement;
 const status = document.getElementById('status') as HTMLElement;
 const saveButton = document.getElementById('save') as HTMLButtonElement;
 const retryButton = document.getElementById('retry') as HTMLButtonElement;
+const micButton = document.getElementById('mic') as HTMLButtonElement;
+const micStatus = document.getElementById('micStatus') as HTMLElement;
 
 // A fresh service worker can take a moment to wake; a dead one never answers.
 // Cap the wait so the page can offer a retry instead of hanging.
@@ -74,5 +76,25 @@ clipboardRead.addEventListener('change', async () => {
 });
 
 retryButton.addEventListener('click', () => void load());
+
+/**
+ * An offscreen document cannot show Chrome's microphone prompt, so the grant
+ * has to be asked for from a real extension page. Once granted it holds for
+ * the extension, and the worker's offscreen document opens the device without
+ * asking again.
+ */
+micButton.addEventListener('click', async () => {
+  micButton.disabled = true;
+  micStatus.textContent = 'Asking…';
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    for (const track of stream.getTracks()) track.stop();
+    micStatus.textContent = 'Microphone allowed';
+  } catch (err) {
+    micStatus.textContent = err instanceof Error ? `Refused: ${err.message}` : 'Refused';
+  } finally {
+    micButton.disabled = false;
+  }
+});
 
 void load();

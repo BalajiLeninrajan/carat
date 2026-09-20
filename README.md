@@ -107,6 +107,8 @@ The content script sends the outline and nothing else about the page. Everything
 
 **The notes** are what the user read elsewhere. When a tab is hidden, the text it last captured goes to the model, which writes at most five self-contained facts; they live for an hour. Without a model, or when the call fails, the regex candidates stand in so the offline path still has something. Opt in to "Screenshots of tabs with little text" and a tab that is mostly an image is photographed once while it is in front, read into text by the vision model, and distilled into notes the same way; the picture is deleted.
 
+**What it hears** is off until you turn on "Listen through the microphone" on the options page. The worker then opens an offscreen document, which is the only place in an extension that can hold a microphone, and closes it again when the setting goes off or you leave Chrome for more than three seconds. An energy gate in that document tracks the room's noise floor and cuts speech into utterances at pauses; silence never leaves the machine. Each utterance is downsampled to 16 kHz mono, WAV-encoded and transcribed by OpenAI, and the transcript is distilled into the same notes a read page produces, after twenty seconds of quiet or two minutes of talk. No audio is stored, and the transcript is gone once it has been distilled.
+
 Context lives only in `chrome.storage.session` and is never written to disk. The API key stays in the service worker; content scripts never receive it.
 
 ## Running it
