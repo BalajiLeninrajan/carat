@@ -8,7 +8,7 @@ import {
   normalizeSettings,
 } from './settings-form';
 
-const base = { enabled: true, provider: 'openai', baseURL: '', apiKey: '', model: '', statusLine: false, sound: true, cfAccountId: '', cfApiToken: '', smartModel: '', screenshots: false, eagerness: 'eager' };
+const base = { enabled: true, provider: 'openai', baseURL: '', apiKey: '', model: '', statusLine: false, sound: true, cfAccountId: '', cfApiToken: '', smartModel: '', screenshots: false, eagerness: 'eager', ghost: true };
 
 describe('normalizeSettings', () => {
   it('fills blank baseURL and model with the defaults', () => {

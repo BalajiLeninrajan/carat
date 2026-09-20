@@ -46,6 +46,7 @@ function sanitize(raw: unknown): Settings {
     screenshots: typeof r.screenshots === 'boolean' ? r.screenshots : DEFAULT_SETTINGS.screenshots,
     smartModel: str(r.smartModel, '').trim() || legacySmartModel(r.visionModel),
     eagerness: isEagerness(r.eagerness) ? r.eagerness : DEFAULT_SETTINGS.eagerness,
+    ghost: typeof r.ghost === 'boolean' ? r.ghost : DEFAULT_SETTINGS.ghost,
   };
 }
 
