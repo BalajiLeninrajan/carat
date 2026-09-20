@@ -401,6 +401,12 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     const shared = {
       label: action.label,
       reason: action.reason,
+      // The chip leaves the way the action goes: a scroll sweeps up with the
+      // page, a tab shrinks toward the tab strip, a fill tints the field.
+      kind: action.kind,
+      // Something here has already been refused since the user last moved, so
+      // this one arrives without the glow: a retry is quieter than a first offer.
+      ...(escapes > 0 ? { retry: true } : {}),
       // Said no this often and the user wants the key, not another answer.
       ...(escapes >= SNAPSHOT_TIMING.snoozeAfterEscapes ? { detail: QUIET_HINT } : {}),
       pending,

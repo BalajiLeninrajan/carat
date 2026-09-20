@@ -42,6 +42,7 @@ function sanitize(raw: unknown): Settings {
     cfApiToken: str(r.cfApiToken, DEFAULT_SETTINGS.cfApiToken).trim(),
     disabledHosts: hosts(r.disabledHosts),
     statusLine: typeof r.statusLine === 'boolean' ? r.statusLine : DEFAULT_SETTINGS.statusLine,
+    sound: typeof r.sound === 'boolean' ? r.sound : DEFAULT_SETTINGS.sound,
     screenshots: typeof r.screenshots === 'boolean' ? r.screenshots : DEFAULT_SETTINGS.screenshots,
     smartModel: str(r.smartModel, '').trim() || legacySmartModel(r.visionModel),
     eagerness: isEagerness(r.eagerness) ? r.eagerness : DEFAULT_SETTINGS.eagerness,

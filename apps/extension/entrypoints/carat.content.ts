@@ -21,10 +21,15 @@ export default defineContentScript({
     }
     // Shared between the two schedulers: once a chip has shown here, no picture of this page.
     const page = createPageState();
-    const status = startStatus(ctx, createStatusLine(document), document);
+    const chip = createChip(document);
+    // The chip's one setting a page is allowed to know about; the status poll
+    // is how it learns, so turning the sound off reaches an open tab.
+    const status = startStatus(ctx, createStatusLine(document), document, {
+      onInfo: (info) => chip.setSound(info.sound),
+    });
     // Alt+Shift+D. Nothing is collected on either side until it has been opened once here.
     const debug = startDebug(ctx, document);
-    const suggestions = startActions(ctx, createChip(document), document, {
+    const suggestions = startActions(ctx, chip, document, {
       page,
       onRequest: () => status.setBusy(true),
       onAnswer: () => {
