@@ -6,6 +6,7 @@ import {
   LIMITS,
   domainLabel,
   fnv1a,
+  isComposer,
   isIntentDestination,
   isIrreversibleLabel,
   normalizeWhitespace,
@@ -406,6 +407,7 @@ export function validate(action: NextAction | null, req: NextActionRequest, sett
 
   switch (action.kind) {
     case 'fill': {
+      if (isComposer(control!)) return refuse(A_COMPOSER);
       if (action.value === '') return refuse('a fill needs a value');
       if (echoes(action.value, control!)) return refuse("that is the field's own name");
       if (fromAnExample(action.value)) return refuse(FROM_AN_EXAMPLE);
@@ -503,6 +505,13 @@ const FIELD_MESSAGE = /\(field message\)\s*$/;
 function prose(outline: string): string[] {
   return outline.split('\n').filter((line) => PROSE_LINE.test(line) && !FIELD_MESSAGE.test(line));
 }
+
+/**
+ * Why a fill into a comment box, a reply box or a post editor was refused.
+ * Carat does not write what someone says in their own name. The ghost
+ * continues a sentence they have started; a prediction does not start one.
+ */
+export const A_COMPOSER = 'carat never writes a comment, reply, message or post for the user';
 
 /** Why a fill was refused when its value is the name of a page, a tab or a site. */
 export const A_LABEL = 'that is a page or site name, not something the user would type';

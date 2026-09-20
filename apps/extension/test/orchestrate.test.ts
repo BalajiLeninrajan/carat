@@ -4,7 +4,7 @@ import { DEFAULT_SETTINGS, EXAMPLE_VALUES } from '@carat/shared';
 import type { NextOptions, Provider } from '@carat/providers';
 import { RefineQueue } from '../src/background/refine';
 import type { SuggestDiag } from '../src/background/diag';
-import { A_LABEL, FROM_AN_EXAMPLE, UNGROUNDED, clearActionCache, nextAction, nudgeLine, pick, validate } from '../src/background/orchestrate';
+import { A_COMPOSER, A_LABEL, FROM_AN_EXAMPLE, UNGROUNDED, clearActionCache, nextAction, nudgeLine, pick, validate } from '../src/background/orchestrate';
 import { LAST_RESORT_CONFIDENCE, lastResort } from '../src/background/last-resort';
 import type { PageSnapshot } from '../src/messaging';
 
@@ -99,6 +99,36 @@ const feedSnapshot = (): PageSnapshot => ({ page: FEED_PAGE, outline: FEED_OUTLI
 
 const redditFeed = (over: Partial<NextActionRequest> = {}): NextActionRequest =>
   request({ page: FEED_PAGE, outline: FEED_OUTLINE, controls: FEED_CONTROLS, focused: undefined, notes: [SLACK_NOTE], tabs: [SLACK_TAB], ...over });
+
+/**
+ * The second screenshot: a Reddit comments page, the composer under the post,
+ * a promoted card with an "Ad" badge and a "Join" button beside it, and the
+ * page's own error message under the empty field. The chip read Fill comment
+ * with "Ad Join".
+ */
+const COMMENTS_OUTLINE = `main:
+  heading(1) Where is the best brunch in town?
+  text: We went on Sunday and the queue was worth it.
+  [1] textbox "Join the conversation" (required)
+  text: The field is required and cannot be empty (field message)
+  [2] link "Read the other 42 comments"
+  group "Promoted":
+    text: Ad
+    [3] button "Join"
+(2.4 more screens below; 18 controls not shown)`;
+
+const COMMENTS_CONTROLS: OutlineControl[] = [
+  { n: 1, role: 'textbox', name: 'Join the conversation', state: 'required', composer: true },
+  { n: 2, role: 'link', name: 'Read the other 42 comments' },
+  { n: 3, role: 'button', name: 'Join' },
+];
+
+const commentsSnapshot = (): PageSnapshot => ({
+  page: { host: 'www.reddit.com', title: 'Where is the best brunch in town? : brunch', path: '/r/brunch/comments/1/best', scroll: { y: 0, pages: 2.4, more: true } },
+  outline: COMMENTS_OUTLINE,
+  controls: COMMENTS_CONTROLS,
+  focused: undefined,
+});
 
 beforeEach(() => {
   clearActionCache();
@@ -242,6 +272,22 @@ describe('validation is safety only', () => {
       expect(validate(action({ kind: 'fill', target: 1, value }), request({ notes: [`Dinner at ${value}.`] }), s, diag)).toBeNull();
       expect(diag.refused).toBe(FROM_AN_EXAMPLE);
     }
+  });
+
+  it('never fills a comment box, a reply box or a post editor, however well grounded the value', () => {
+    const composers: OutlineControl[] = [
+      { n: 1, role: 'textbox', name: 'Join the conversation' },
+      { n: 2, role: 'textbox', name: 'Add a comment' },
+      { n: 3, role: 'textbox', name: '', composer: true },
+      { n: 4, role: 'textbox', name: 'Delivery instructions' },
+    ];
+    const page = request({ controls: composers, focused: undefined, notes: ['2m ago: Leave it at the back door. (read on app.slack.com)'] });
+    const fill = (target: number) => action({ kind: 'fill', target, value: 'Leave it at the back door' });
+    const diag: SuggestDiag = { at: 0, host: 'x', controls: 4, gate: 'ok', eagerness: 'eager' };
+    for (const target of [1, 2, 3]) expect(validate(fill(target), page, s, diag), `[${target}]`).toBeNull();
+    expect(diag.refused).toBe(A_COMPOSER);
+    // A plain field on a form is still a field.
+    expect(validate(fill(4), page, s)?.kind).toBe('fill');
   });
 
   it('grounds a fill in what the page says, never in its buttons and badges', () => {
@@ -500,6 +546,44 @@ describe('never silent at eager', () => {
     // Nothing on the feed asks to be typed into, and there are three screens
     // below: the page's own plainest step is to read on.
     expect(res.action?.kind).toBe('scroll');
+  });
+
+  it('leaves the comment box alone and reads on, whatever the model keeps answering', async () => {
+    const seen: NextActionRequest[] = [];
+    const writesIt: Provider = {
+      id: 'openai',
+      next: async (req) => {
+        seen.push(req);
+        return action({ kind: 'fill', target: 1, value: 'Ad Join', confidence: 0.81, label: 'Fill comment with "Ad Join"' });
+      },
+    };
+    const diags: SuggestDiag[] = [];
+    const res = await nextAction(commentsSnapshot(), { tabId: 1, origin: 'x' }, {
+      settings: async () => settings(),
+      localProvider: nothing,
+      createProvider: () => writesIt,
+      notes: { lines: async () => [SLACK_NOTE] },
+      onDiag: (d) => diags.push(d),
+    });
+    expect(seen).toHaveLength(2);
+    expect(seen[1]?.history.at(-1)).toBe(nudgeLine(A_COMPOSER));
+    expect(diags.at(-1)?.reasked).toBe(A_COMPOSER);
+    expect(res.action?.kind).toBe('scroll');
+  });
+
+  it('presses the post’s own link rather than the comment box when there is nothing below', async () => {
+    const bottom = commentsSnapshot();
+    const res = await nextAction(
+      { ...bottom, page: { ...bottom.page, scroll: { y: 2.4, pages: 2.4, more: false } } },
+      { tabId: 1, origin: 'x' },
+      {
+        settings: async () => settings(),
+        localProvider: nothing,
+        createProvider: () => nothing,
+        notes: { lines: async () => [SLACK_NOTE] },
+      },
+    );
+    expect(res.action).toMatchObject({ kind: 'click', target: 2 });
   });
 
   it('scrolls rather than say nothing when both tries come back empty', async () => {

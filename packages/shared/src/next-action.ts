@@ -19,6 +19,25 @@ export interface OutlineControl {
   fr?: number;
   /** A label that names payment, sending, deleting or the like; a backstop for the model's irreversible flag. */
   risky?: boolean;
+  /** A field for writing a comment, a reply, a message or a post. Carat never fills one. */
+  composer?: boolean;
+}
+
+/** What a field calls itself when its job is to write something in the user's own words. */
+export const COMPOSER_NAME = /\b(comment|reply|replying|message|post|say something|join the conversation|write|compose|body|description)\b/i;
+
+/**
+ * Whether this is a field carat must leave to the user. The outline marks one
+ * from the DOM, which catches an unnamed editor with a toolbar under it; the
+ * name is the backstop, and it is the only signal an old snapshot carries.
+ *
+ * A prediction has no business writing someone's comment. The ghost does that
+ * work, from what they have already typed, and it only ever continues a
+ * sentence they started.
+ */
+export function isComposer(control: Pick<OutlineControl, 'role' | 'name' | 'composer'>): boolean {
+  if (control.composer === true) return true;
+  return control.role === 'textbox' && COMPOSER_NAME.test(control.name);
 }
 
 export interface PageScroll {

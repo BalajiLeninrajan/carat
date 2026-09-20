@@ -1,4 +1,5 @@
 import type { ControlRole } from '@carat/shared';
+import { COMPOSER_NAME } from '@carat/shared';
 import { isDetails, isInput, isSelect, isTextArea } from '../dom/tags';
 import { roleOf, toggleState } from '../interact';
 
@@ -65,6 +66,27 @@ export function controlRoleOf(el: Element): ControlRole | null {
     default:
       return role;
   }
+}
+
+/**
+ * A field the user writes in: a textarea or an editor named for a comment, a
+ * reply, a message or a post, or any contenteditable sitting in a composer's
+ * furniture, a formatting toolbar or a submit button beside it. The name
+ * alone is not enough for the editors that carry no name at all, which is
+ * most of them.
+ */
+export function isComposerField(el: Element, role: ControlRole, name: string): boolean {
+  if (role !== 'textbox') return false;
+  const multiline = isTextArea(el) || isEditable(el) || el.getAttribute('aria-multiline') === 'true';
+  if (!multiline) return false;
+  const said = [name, el.getAttribute('placeholder') ?? '', el.getAttribute('aria-label') ?? ''];
+  if (said.some((text) => COMPOSER_NAME.test(text))) return true;
+  return isEditable(el) && hasComposerFurniture(el);
+}
+
+function hasComposerFurniture(el: Element): boolean {
+  const scope = el.closest('form,[role="form"],[class*="composer" i],[class*="editor" i]') ?? el.parentElement;
+  return scope?.querySelector('[role="toolbar"],button[type="submit"],input[type="submit"]') != null;
 }
 
 export function isEditable(el: Element): boolean {

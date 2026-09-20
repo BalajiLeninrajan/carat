@@ -1,5 +1,5 @@
 import type { NextAction, NextActionRequest, OutlineControl } from '@carat/shared';
-import { scrollLabel } from '@carat/shared';
+import { isComposer, scrollLabel } from '@carat/shared';
 import { localAction } from '@carat/providers';
 
 /**
@@ -38,7 +38,12 @@ export function lastResort(req: NextActionRequest): NextAction | null {
   // The regex pass over the notes, matched to the focused text control or the
   // first empty one: a value the user actually read, not one invented here.
   const fill = req.notes.length > 0 ? localAction(req) : null;
-  if (fill && fill.kind === 'fill') return { ...fill, confidence: LAST_RESORT_CONFIDENCE, reason: `${fill.reason}; nothing else was offered` };
+  // Never into a comment box, a reply box or a post editor, here least of all:
+  // a stand-in is what goes up when nothing else could be found, and writing
+  // in the user's own name is not something to fall back on.
+  if (fill && fill.kind === 'fill' && !intoAComposer(fill, req)) {
+    return { ...fill, confidence: LAST_RESORT_CONFIDENCE, reason: `${fill.reason}; nothing else was offered` };
+  }
 
   const press = primaryControl(req);
   if (!press) return null;
@@ -51,6 +56,11 @@ export function lastResort(req: NextActionRequest): NextAction | null {
     confidence: LAST_RESORT_CONFIDENCE,
     reason: 'nothing else was offered; this is the control nearest the focus',
   };
+}
+
+function intoAComposer(fill: NextAction, req: NextActionRequest): boolean {
+  const control = req.controls.find((c) => c.n === fill.target);
+  return control !== undefined && isComposer(control);
 }
 
 /**

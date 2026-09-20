@@ -8,7 +8,7 @@ import { FRAME_MAX_INDENT, FRAME_MAX_LINES, frameNumber } from '../frames/protoc
 import { accessibleName } from '../interact';
 import { labelOf } from '../snapshot/labels';
 import { documentHeight, inViewport, viewportRect } from '../scroll';
-import { controlRoleOf, isEditable, isRiskyName, stateOf } from './roles';
+import { controlRoleOf, isComposerField, isEditable, isRiskyName, stateOf } from './roles';
 
 export const OUTLINE_LIMITS = {
   /** Characters the outline may take in the request. */
@@ -111,6 +111,7 @@ interface RawControl {
   fr?: number;
   frame?: FrameRef;
   risky?: boolean;
+  composer?: boolean;
 }
 
 /** What a cross-origin child frame reported, spliced in where its frame element sits. */
@@ -298,6 +299,7 @@ export function buildOutline(doc: Document, win: Window | null = doc.defaultView
       ...(host ? { host } : {}),
       ...(ctx.fr !== undefined ? { fr: ctx.fr } : {}),
       ...(isRiskyName(name) ? { risky: true } : {}),
+      ...(isComposerField(el, role, name) ? { composer: true } : {}),
     };
     raw.push(entry);
     const index = push('control', renderControl(entry), ctx, { control: raw.length - 1, focused });
@@ -700,6 +702,7 @@ function render(lines: OutlineLine[], raw: RawControl[], registry: Map<number, O
         ...(entry.host ? { host: entry.host } : {}),
         ...(entry.fr !== undefined ? { fr: entry.fr } : {}),
         ...(entry.risky ? { risky: true } : {}),
+        ...(entry.composer ? { composer: true } : {}),
       });
       registry.set(n, { el: entry.el, ...(entry.fr !== undefined ? { fr: entry.fr } : {}), ...(entry.frame ? { frame: entry.frame } : {}) });
       text = `[${n}] ${text}`;
