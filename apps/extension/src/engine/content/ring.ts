@@ -25,13 +25,21 @@ export const RING = {
   // a light page gets the same hues from Latte, which hold up on white.
   accent: "#cba6f7",
   accentRgb: "203, 166, 247",
+  /** The armed pill and its keycap: a warning, not an alarm. */
   armed: "#f9e2af",
   armedRgb: "249, 226, 175",
+  /** The ring alone goes red when a chip is armed: the control is about to do
+      something that cannot be undone, and the mark on it should say so
+      louder than the pill beside it. */
+  alarm: "#f38ba8",
+  alarmRgb: "243, 139, 168",
   onLight: {
     accent: "#8839ef",
     accentRgb: "136, 57, 239",
     armed: "#df8e1d",
     armedRgb: "223, 142, 29",
+    alarm: "#d20f39",
+    alarmRgb: "210, 15, 57",
   },
   widthPx: 3,
   radiusPx: 7,
@@ -94,8 +102,8 @@ const CSS = `
   }
   .ring.on-light { border-color: ${RING.onLight.accent}; box-shadow: 0 0 0 4px rgba(${RING.onLight.accentRgb}, .16); }
   .ring.pending { border-style: dashed; opacity: .55; box-shadow: none; }
-  .ring.armed { border-color: ${RING.armed}; box-shadow: 0 0 0 4px rgba(${RING.armedRgb}, .25); }
-  .ring.on-light.armed { border-color: ${RING.onLight.armed}; box-shadow: 0 0 0 4px rgba(${RING.onLight.armedRgb}, .22); }
+  .ring.armed { border-color: ${RING.alarm}; box-shadow: 0 0 0 4px rgba(${RING.alarmRgb}, .25); }
+  .ring.on-light.armed { border-color: ${RING.onLight.alarm}; box-shadow: 0 0 0 4px rgba(${RING.onLight.alarmRgb}, .22); }
   .chip {
     position: fixed; display: flex; align-items: center; gap: 6px; white-space: nowrap;
     font: 600 12px/1 system-ui, -apple-system, "Segoe UI", sans-serif; color: #cdd6f4;
