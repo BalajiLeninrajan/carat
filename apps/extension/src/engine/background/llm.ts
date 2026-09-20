@@ -140,6 +140,58 @@ export async function streamResponse(
  * the answer arrives — and kind says whether that number is a page control or
  * one of the browser targets.
  */
+/**
+ * Close a JSON document that was cut off mid-way: finish the open string, then
+ * close whatever objects and arrays are still open. Returns null if it does
+ * not look like JSON at all.
+ */
+function closeTruncated(text: string): string | null {
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+  for (const ch of text) {
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (inString) {
+      if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{" || ch === "[") stack.push(ch === "{" ? "}" : "]");
+    else if (ch === "}" || ch === "]") stack.pop();
+  }
+  if (!stack.length && !inString) return null;
+  let out = text;
+  if (escaped) out = out.slice(0, -1); // half-written escape
+  if (inString) out += '"';
+  // A dangling `"key":` or trailing comma would still not parse: drop it.
+  out = out.replace(/,\s*$/, "").replace(/,?\s*"[^"]*"\s*:\s*$/, "");
+  return out + stack.reverse().join("");
+}
+
+/**
+ * Parse a model's JSON answer, allowing for the two ways they go wrong: fenced
+ * in ```json, or cut off by the output limit. A task's step is asked for in
+ * one shot rather than streamed into a chip, so it is read with this.
+ */
+export function parseLoose<T>(text: string): T | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  const candidates = [trimmed, /```(?:json)?\s*([\s\S]*?)```/.exec(trimmed)?.[1], closeTruncated(trimmed)];
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    try {
+      return JSON.parse(candidate) as T;
+    } catch {
+      // try the next shape
+    }
+  }
+  return null;
+}
+
 export function partialAction(json: string): { kind: string | null; target: number | null } {
   const kind = /"kind"\s*:\s*"(\w+)"/.exec(json);
   const target = /"target"\s*:\s*(-?\d+)\s*[,}]/.exec(json);

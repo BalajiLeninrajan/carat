@@ -31,6 +31,12 @@ export default defineConfig({
         suggested_key: { default: 'Alt+Shift+D' },
         description: 'Show what Carat is thinking on this page',
       },
+      // The content script hears Ctrl+Shift+K itself; this is the way in on a
+      // page that has not loaded one, and the line Chrome's shortcut list shows.
+      'open-palette': {
+        suggested_key: { default: 'Ctrl+Shift+K', mac: 'Command+Shift+K' },
+        description: 'Ask Carat to do something on this page',
+      },
     },
   },
 });
