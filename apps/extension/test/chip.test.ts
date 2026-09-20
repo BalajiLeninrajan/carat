@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { ARM_MS, ATTENTION_AFTER_MS, AUTO_DISMISS_MS, CHIP_SETTLE_MS, CORNER_INSET_PX, PENDING_HINT, createChip, type Chip, type DismissReason } from '../src/chip';
 import { placeAt } from '../src/chip/position';
-import { KEYFRAME_CLASSES, TIMING } from '../src/chip/styles';
+import { CHIP_CSS, KEYCAP, KEYFRAME_CLASSES, TIMING, TYPE } from '../src/chip/styles';
 import { Ring } from '../src/engine/content/ring';
 
 /** jsdom has no Web Audio; this is enough of a context to count how many were built. */
@@ -283,6 +283,27 @@ describe('chip', () => {
     const e = key(document.body, 'Tab');
     expect(e.defaultPrevented).toBe(true);
     expect(onAccept).toHaveBeenCalledTimes(1);
+  });
+
+  describe('the Tab keycap', () => {
+    /** A keycap's outer box: its own line box, plus its padding and border. */
+    const capHeight = (fontPx: number, padY: number): number => fontPx + padY * 2 + KEYCAP.borderPx * 2;
+
+    it("is set in the label's size", () => {
+      expect(KEYCAP.fontPx).toBe(TYPE.fontPx);
+      expect(KEYCAP.bannerFontPx).toBe(TYPE.bannerFontPx);
+      expect(CHIP_CSS).toContain(`font: 600 ${KEYCAP.fontPx}px/1`);
+    });
+
+    it("stands exactly as tall as the label's line box", () => {
+      expect(capHeight(KEYCAP.lineHeightPx, KEYCAP.padYPx)).toBe(TYPE.fontPx * TYPE.lineHeight);
+      expect(capHeight(KEYCAP.bannerLineHeightPx, KEYCAP.bannerPadYPx)).toBe(TYPE.bannerFontPx * TYPE.lineHeight);
+    });
+
+    it('has a radius that fits the smaller box', () => {
+      expect(KEYCAP.radiusPx).toBeLessThan(KEYCAP.bannerRadiusPx);
+      expect(KEYCAP.radiusPx * 2).toBeLessThan(capHeight(KEYCAP.lineHeightPx, KEYCAP.padYPx));
+    });
   });
 
   describe('the user getting on with the page', () => {

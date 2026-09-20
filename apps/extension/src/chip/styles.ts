@@ -34,6 +34,41 @@ export const TIMING = {
 } as const;
 
 /**
+ * The pill's text, and the keycap sized off it. The keycap's outer box is
+ * exactly the label's line box: same font size, and whatever padding is left
+ * once its border is taken off. A key that stands taller than the words next
+ * to it makes the pill look like a toolbar.
+ */
+export const TYPE = {
+  fontPx: 13,
+  lineHeight: 1.25,
+  /** The banner says the same things larger; the keycap follows it up. */
+  bannerFontPx: 16,
+} as const;
+
+const KEYCAP_BORDER_PX = 1;
+
+/** The padding that makes a keycap's box match the line box of `fontPx` text. */
+function keycapPadY(fontPx: number): number {
+  return (fontPx * TYPE.lineHeight - fontPx - KEYCAP_BORDER_PX * 2) / 2;
+}
+
+export const KEYCAP = {
+  fontPx: TYPE.fontPx,
+  /** `font: 600 13px/1`: the cap's own line box is its font size. */
+  lineHeightPx: TYPE.fontPx,
+  borderPx: KEYCAP_BORDER_PX,
+  padYPx: keycapPadY(TYPE.fontPx),
+  padXPx: 5,
+  radiusPx: 4,
+  bannerFontPx: TYPE.bannerFontPx,
+  bannerLineHeightPx: TYPE.bannerFontPx,
+  bannerPadYPx: keycapPadY(TYPE.bannerFontPx),
+  bannerPadXPx: 7,
+  bannerRadiusPx: 5,
+} as const;
+
+/**
  * Classes that only mean anything as an animation. Under
  * `prefers-reduced-motion` none of them is ever put on the pill; the static
  * states (`is-still`, `is-armed`, `is-noticed`, `is-press`) carry the meaning
@@ -81,7 +116,7 @@ export const CHIP_CSS = `
   border-radius: 999px;
   background: #1e1e2e;
   color: #cdd6f4;
-  font: 13px/1.25 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font: ${TYPE.fontPx}px/${TYPE.lineHeight} -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   box-shadow: 0 6px 18px rgba(17, 17, 27, 0.35), 0 0 0 1px rgba(205, 214, 244, 0.08);
   white-space: nowrap;
   cursor: pointer;
@@ -207,22 +242,26 @@ kbd.is-bump { animation: carat-bump var(--carat-bump-ms) ease-out; }
   gap: 14px;
   padding: 12px 14px 12px 20px;
   border-radius: 16px;
-  font-size: 16px;
+  font-size: ${TYPE.bannerFontPx}px;
   box-shadow: 0 10px 30px rgba(17, 17, 27, 0.45), 0 0 0 1px rgba(205, 214, 244, 0.1);
 }
 .chip.is-banner .sub { font-size: 12px; }
 .chip.is-banner .pending { width: 9px; height: 9px; margin-left: -6px; }
-.chip.is-banner kbd { padding: 5px 10px; font-size: 13px; }
+.chip.is-banner kbd {
+  padding: ${KEYCAP.bannerPadYPx}px ${KEYCAP.bannerPadXPx}px;
+  border-radius: ${KEYCAP.bannerRadiusPx}px;
+  font-size: ${KEYCAP.bannerFontPx}px;
+}
+/* Sized off the label, not off itself: see KEYCAP above. */
 kbd {
   all: initial;
   display: inline-block;
-  padding: 3px 7px;
-  border-radius: 6px;
+  padding: ${KEYCAP.padYPx}px ${KEYCAP.padXPx}px;
+  border-radius: ${KEYCAP.radiusPx}px;
   background: #313244;
   color: #cdd6f4;
-  border: 1px solid #45475a;
-  border-bottom-width: 2px;
-  font: 600 11px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  border: ${KEYCAP.borderPx}px solid #45475a;
+  font: 600 ${KEYCAP.fontPx}px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 `;
 
