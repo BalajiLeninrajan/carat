@@ -20,6 +20,8 @@ export interface Clearable {
   history: { clear(): Promise<void> };
   /** The distilled notes from other tabs. */
   notes: { clear(): Promise<void> };
+  /** The one line for what the user is trying to get done across tabs. */
+  goal?: { clear(): Promise<void> };
   /** The 60 s answer cache; defaults to the orchestrator's own. */
   cache?: () => void;
 }
@@ -32,7 +34,13 @@ export interface Clearable {
 export async function clearAll(what: Clearable): Promise<void> {
   // Synchronous and first: no answer should survive the stores it was built from.
   (what.cache ?? clearActionCache)();
-  await Promise.all([what.store.clear(), what.shots.clear(), what.history.clear(), what.notes.clear()]);
+  await Promise.all([
+    what.store.clear(),
+    what.shots.clear(),
+    what.history.clear(),
+    what.notes.clear(),
+    what.goal?.clear() ?? Promise.resolve(),
+  ]);
 }
 
 /** What the clear shortcut needs from the worker. */

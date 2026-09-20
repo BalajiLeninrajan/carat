@@ -1,5 +1,6 @@
 import type { HistoryEntry } from '../history';
-import { HISTORY_LIMITS, asNavHow, navTarget, renderHistory } from '../history';
+import { HISTORY_LIMITS, asNavHow, describeEntry, navTarget, renderHistory } from '../history';
+import { relativeAge } from '../format/age';
 import type { StorageArea } from '../store/storage-area';
 
 /** Session key for the per-tab timeline, beside the context store's own keys. */
@@ -93,6 +94,20 @@ export class HistoryStore {
   async lines(tabId: number, now: number = this.now()): Promise<string[]> {
     const map = await this.read();
     return renderHistory(map[String(tabId)] ?? [], now);
+  }
+
+  /**
+   * The last `max` lines from every tab at once, oldest first, each naming the
+   * tab it happened in. `lines` is what a request carries, one tab at a time;
+   * this is what the goal is derived from, where the flow across tabs is the point.
+   */
+  async allLines(max: number = HISTORY_LIMITS.maxLines, now: number = this.now()): Promise<string[]> {
+    const map = await this.read();
+    return Object.entries(map)
+      .flatMap(([tab, list]) => list.map((e) => ({ tab, e })))
+      .sort((a, b) => a.e.t - b.e.t)
+      .slice(-max)
+      .map(({ tab, e }) => `${relativeAge(e.t, now)}: [tab ${tab}] ${describeEntry(e)}`);
   }
 
   /** Everything still held for one tab, oldest first. */
