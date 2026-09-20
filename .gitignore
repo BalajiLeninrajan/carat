@@ -1,0 +1,9 @@
+node_modules
+.output
+.wxt
+dist
+.env*
+*.local
+
+# Claude Code agent worktrees
+.claude/worktrees/

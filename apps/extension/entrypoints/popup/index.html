@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>Carat</title>
+    <style>
+      :root {
+        --base: #1e1e2e;
+        --mantle: #181825;
+        --surface0: #313244;
+        --surface1: #45475a;
+        --text: #cdd6f4;
+        --subtext0: #a6adc8;
+        --blue: #89b4fa;
+        --teal: #94e2d5;
+        color-scheme: dark;
+      }
+      * { box-sizing: border-box; }
+      body {
+        width: 320px;
+        margin: 0;
+        background: var(--base);
+        color: var(--text);
+        font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--surface0);
+      }
+      header h1 { font-size: 14px; font-weight: 600; margin: 0; }
+      header .spacer { flex: 1; }
+      .toggle { display: flex; align-items: center; gap: 6px; color: var(--subtext0); cursor: pointer; }
+      .toggle input { width: 14px; height: 14px; margin: 0; accent-color: var(--blue); }
+      .site { padding: 6px 12px; border-bottom: 1px solid var(--surface0); font-size: 12px; }
+      .site[hidden] { display: none; }
+      #site-host { color: var(--text); }
+      #clear { width: calc(100% - 24px); margin: 10px 12px 0; padding: 6px 10px; font-size: 12px; }
+      #clear[data-state="working"] { color: var(--subtext0); }
+      #clear[data-state="done"] { border-color: var(--teal); color: var(--teal); }
+      #model {
+        margin: 10px 0 0;
+        padding: 6px 12px;
+        border-top: 1px solid var(--surface0);
+        font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        color: var(--subtext0);
+        overflow-wrap: anywhere;
+      }
+      footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 12px;
+        border-top: 1px solid var(--surface0);
+        color: var(--subtext0);
+      }
+      footer a { color: var(--blue); text-decoration: none; }
+      footer a:hover { text-decoration: underline; }
+      button {
+        padding: 5px 12px;
+        border-radius: 6px;
+        border: 1px solid var(--surface1);
+        background: var(--surface0);
+        color: var(--text);
+        font: inherit;
+        cursor: pointer;
+      }
+      button:disabled { opacity: 0.5; cursor: default; }
+      button:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+      #offline { display: none; padding: 20px 12px; text-align: center; color: var(--subtext0); }
+      #offline p { margin: 0 0 10px; }
+      main[data-state="offline"] #offline { display: block; }
+      main[data-state="offline"] #clear,
+      main[data-state="offline"] #model,
+      main[data-state="offline"] .site,
+      main[data-state="offline"] footer { display: none; }
+    </style>
+  </head>
+  <body>
+    <main id="app" data-state="loading">
+      <header>
+        <h1>Carat</h1>
+        <span class="spacer"></span>
+        <label class="toggle">
+          <input type="checkbox" id="enabled" />
+          <span>Enabled</span>
+        </label>
+      </header>
+
+      <div id="offline">
+        <p>Carat's background worker is not answering.</p>
+        <button type="button" id="retry">Retry</button>
+      </div>
+
+      <label class="toggle site" id="site-row" hidden>
+        <input type="checkbox" id="site-enabled" />
+        <span>On for <span id="site-host"></span></span>
+      </label>
+
+      <button type="button" id="clear" data-state="idle">Clear what carat remembers</button>
+
+      <p id="model"></p>
+
+      <footer>
+        <a href="#" id="options">Settings</a>
+        <span>Tab accepts · Esc dismisses</span>
+      </footer>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
