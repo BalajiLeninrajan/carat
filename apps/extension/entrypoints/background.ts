@@ -67,6 +67,7 @@ export default defineBackground(() => {
       return provider ? provider.distill(text, host, signal) : [];
     },
     pinned: () => store.isPinned(),
+    onDiag: (tabId, d) => void diag.recordNote(tabId, d),
   });
   // --- goal (balaji/trust-goal) ---
   // One line for what the user is getting done across tabs, derived from the

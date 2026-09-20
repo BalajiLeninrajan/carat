@@ -1,6 +1,6 @@
 import type { TabDiag } from '@/src/background/diag';
 import { relativeAge } from '@/src/format/age';
-import { describeCapture, describePerform, describeSuggest, describeVision } from '@/src/format/diag';
+import { describeCapture, describeNote, describePerform, describeSuggest, describeVision } from '@/src/format/diag';
 import { sendMessage, type KnownItem } from '@/src/messaging';
 import { isSiteOff, siteHost, withSite } from '@/src/store/sites';
 
@@ -19,6 +19,7 @@ const goalDrop = document.getElementById('goal-drop') as HTMLButtonElement;
 
 const diagCapture = document.getElementById('diag-capture') as HTMLElement;
 const diagSuggest = document.getElementById('diag-suggest') as HTMLElement;
+const diagNote = document.getElementById('diag-note') as HTMLElement;
 const diagVision = document.getElementById('diag-vision') as HTMLElement;
 const diagPerform = document.getElementById('diag-perform') as HTMLElement;
 
@@ -53,6 +54,9 @@ function renderDiag(diag: TabDiag | null): void {
   const now = Date.now();
   diagCapture.textContent = diag?.capture ? describeCapture(diag.capture, now) : 'no capture from this tab yet';
   diagSuggest.textContent = diag?.suggest ? describeSuggest(diag.suggest, now) : 'no check on this tab yet';
+  // Why the page this tab last left did or did not become notes.
+  diagNote.hidden = !diag?.note;
+  diagNote.textContent = diag?.note ? describeNote(diag.note, now) : '';
   // Only says anything once a screenshot cue has come from this tab; most tabs never send one.
   diagVision.hidden = !diag?.vision;
   diagVision.textContent = diag?.vision ? describeVision(diag.vision, now) : '';

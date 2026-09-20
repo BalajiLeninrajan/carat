@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ContextItem } from '@carat/shared';
+import type { NoteDiag } from '../src/background/diag';
 import { NOTES_LIMITS, createNotes, fallbackFacts } from '../src/background/notes';
 import type { Distill } from '../src/background/notes';
 import { describeTabs } from '../src/background/tabs';
@@ -44,6 +45,13 @@ function setup(distill?: Distill, start = 1_000_000) {
   let clock = start;
   const area = new FakeArea();
   const notes = createNotes({ area, ...(distill ? { distill } : {}), now: () => clock, timeoutMs: 50 });
+  return { area, notes, tick: (ms: number) => (clock += ms) };
+}
+
+function setupWithDiag(distill: Distill, onDiag: (tabId: number, d: NoteDiag) => void, start = 1_000_000) {
+  let clock = start;
+  const area = new FakeArea();
+  const notes = createNotes({ area, distill, onDiag, now: () => clock, timeoutMs: 50 });
   return { area, notes, tick: (ms: number) => (clock += ms) };
 }
 
@@ -94,6 +102,41 @@ describe('notes', () => {
 
     const hanging = setup((_text, _host, signal) => new Promise<string[]>((_, reject) => signal.addEventListener('abort', () => reject(new Error('aborted')))));
     expect((await hanging.notes.distilNow(item())).length).toBeGreaterThan(0);
+  });
+
+  it('remembers nothing from a page the user only passed through', async () => {
+    const distill = vi.fn<Distill>().mockResolvedValue(['A fact worth keeping.']);
+    const seen: NoteDiag[] = [];
+    const { notes } = setupWithDiag(distill, (_tabId, d) => seen.push(d));
+
+    // A tab left inside three seconds was on the way somewhere.
+    expect(await notes.distilNow(item({ hash: 1, capturedAt: 999_000 }))).toEqual([]);
+    // The page that says outright it is on its way somewhere.
+    expect(await notes.distilNow(item({ hash: 2, title: 'Redirecting… | Slack' }))).toEqual([]);
+    // A title that is the site and nothing else.
+    expect(await notes.distilNow(item({ hash: 3, title: 'Slack', origin: 'https://app.slack.com' }))).toEqual([]);
+    // The hops in and out of a login.
+    expect(await notes.distilNow(item({ hash: 4, path: '/oauth2/callback', origin: 'https://auth.example.com' }))).toEqual([]);
+    // And a page with a title and almost no body.
+    expect(await notes.distilNow(item({ hash: 5, origin: 'https://short.example', text: 'Loading your workspace.' }))).toEqual([]);
+
+    expect(distill).not.toHaveBeenCalled();
+    expect(seen.map((d) => d.verdict)).toEqual(['glanced', 'transient', 'transient', 'auth-page', 'short']);
+    expect(await notes.top({ tabId: 9 })).toEqual([]);
+  });
+
+  it('drops a distilled line that says no more than the page title or the host', async () => {
+    const seen: NoteDiag[] = [];
+    const { notes } = setupWithDiag(async () => ['Waterloo plans', 'discord.com'], (_tabId, d) => seen.push(d));
+    expect(await notes.distilNow(item({ title: 'Waterloo plans' }))).toEqual([]);
+    expect(seen.at(-1)?.verdict).toBe('title-only');
+  });
+
+  it('says how many notes a page it did read turned into', async () => {
+    const seen: NoteDiag[] = [];
+    const { notes } = setupWithDiag(async () => ['Dinner at Seven Shores Cafe.', 'Bring the returns slip.'], (_tabId, d) => seen.push(d));
+    await notes.distilNow(item());
+    expect(seen.at(-1)).toMatchObject({ verdict: 'kept', kept: 2, host: 'discord.com' });
   });
 
   it('drops a note once it is an hour old', async () => {

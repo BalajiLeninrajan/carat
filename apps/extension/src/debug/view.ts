@@ -1,6 +1,7 @@
 import type { NextAction } from '@carat/shared';
 import { renderPrefix } from '@carat/shared';
 import type { DebugEvent, DebugSnapshot } from '../background/debug';
+import { describeNote } from '../format/diag';
 import { describeEntry } from '../history';
 
 /** What only the page knows, and the panel adds to what the background sent. */
@@ -124,8 +125,12 @@ function answerView(snap: DebugSnapshot): AnswerView | null {
 }
 
 function timeline(snap: DebugSnapshot, extras: DebugExtras): TimelineRow[] {
+  const note = snap.diag?.note;
   const rows: TimelineRow[] = [
     ...snap.history.map((e) => ({ at: e.t, source: 'tab', text: describeEntry(e) })),
+    // Why the page this tab last left did or did not become notes: the line
+    // that answers "where did that value in the chip come from".
+    ...(note ? [{ at: note.at, source: 'notes', text: describeNote(note, extras.now) }] : []),
     ...(snap.debug?.events ?? []).map(fromEvent),
     ...extras.events.map(fromEvent),
   ].map((r) => ({ ...r, when: since(r.at, extras.now) }));

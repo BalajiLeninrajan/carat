@@ -140,8 +140,36 @@ export interface GhostDiag {
   ms?: number;
 }
 
+/**
+ * What became of the page a tab last left. `kept`: it was distilled into
+ * notes. The rest say why it was not, and the transient ones are the point:
+ * a redirect, a login hop or a page glanced at for two seconds has a title
+ * and almost no text, and a note made of that title is what later turns up
+ * in a search box.
+ */
+export type NoteVerdict =
+  | 'kept'
+  | 'glanced'
+  | 'transient'
+  | 'auth-page'
+  | 'short'
+  | 'unchanged'
+  | 'pinned'
+  | 'title-only'
+  | 'nothing-actionable';
+
+export interface NoteDiag {
+  at: number;
+  host: string;
+  verdict: NoteVerdict;
+  /** Notes kept from this page, when any were. */
+  kept?: number;
+}
+
 export interface TabDiag {
   capture?: CaptureDiag;
+  /** Why the page this tab last left did or did not become notes. */
+  note?: NoteDiag;
   suggest?: SuggestDiag;
   vision?: VisionDiag;
   ghost?: GhostDiag;
@@ -185,6 +213,14 @@ export class DiagLog {
     const current = state[tabId]?.ghost;
     if (current && current.at > ghost.at) return;
     state[tabId] = { ...state[tabId], ghost };
+    this.write(tabId);
+  }
+
+  async recordNote(tabId: number, note: NoteDiag): Promise<void> {
+    const state = await this.load();
+    const current = state[tabId]?.note;
+    if (current && current.at > note.at) return;
+    state[tabId] = { ...state[tabId], note };
     this.write(tabId);
   }
 

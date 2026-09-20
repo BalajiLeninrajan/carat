@@ -1,4 +1,16 @@
-import type { AnswerOrigin, CaptureDiag, CaptureVerdict, GateVerdict, PerformDiag, ProviderAttempt, SuggestDiag, VisionDiag, VisionVerdict } from '../background/diag';
+import type {
+  AnswerOrigin,
+  CaptureDiag,
+  CaptureVerdict,
+  GateVerdict,
+  NoteDiag,
+  NoteVerdict,
+  PerformDiag,
+  ProviderAttempt,
+  SuggestDiag,
+  VisionDiag,
+  VisionVerdict,
+} from '../background/diag';
 import { relativeAge } from './age';
 
 const CAPTURE: Record<CaptureVerdict, string> = {
@@ -37,6 +49,24 @@ const VISION: Record<VisionVerdict, string> = {
   short: 'nothing kept, the model read too little text',
   failed: 'nothing kept, the smart model failed',
 };
+
+const NOTE: Record<NoteVerdict, string> = {
+  kept: 'read into notes',
+  glanced: 'nothing kept, the tab was left inside three seconds',
+  transient: 'nothing kept, the page was still redirecting or loading',
+  'auth-page': 'nothing kept, a login or callback page',
+  short: 'nothing kept, too little text to read',
+  unchanged: 'nothing kept, the page had not changed since it was last read',
+  pinned: 'nothing kept, context is pinned',
+  'title-only': 'nothing kept, the facts said no more than the page title',
+  'nothing-actionable': 'nothing kept, nothing on the page to act on',
+};
+
+/** One line: "discord.com 12s ago: read into notes (3)". */
+export function describeNote(d: NoteDiag, now: number = Date.now()): string {
+  const kept = d.verdict === 'kept' && d.kept !== undefined ? ` (${d.kept})` : '';
+  return `${d.host || 'this tab'} ${relativeAge(d.at, now)}: ${NOTE[d.verdict]}${kept}`;
+}
 
 /** One line: "page from discord.com 12s ago: stored". */
 export function describeCapture(d: CaptureDiag, now: number = Date.now()): string {

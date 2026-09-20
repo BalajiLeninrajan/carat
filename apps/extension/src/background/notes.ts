@@ -1,9 +1,10 @@
 import type { ContextItem } from '@carat/shared';
-import { normalizeWhitespace, truncate } from '@carat/shared';
+import { domainLabel, normalizeWhitespace, registrableDomain, truncate } from '@carat/shared';
 import type { CandidateKind } from '@carat/providers';
 import { candidatesFrom } from '@carat/providers';
 import { relativeAge } from '../format/age';
 import type { StorageArea } from '../store/storage-area';
+import type { NoteDiag, NoteVerdict } from './diag';
 import type { Requester } from './requester';
 
 /** How a regex candidate reads as a fact, when there is no model to write one. */
@@ -33,8 +34,10 @@ export const NOTES_LIMITS = {
   /** How many old notes a request carries. The rest are dropped rather than ranked last. */
   oldMax: 2,
   factChars: 200,
-  /** Text under this is not worth a model call. */
-  minTextChars: 120,
+  /** Text under this is not worth a model call: a page that short is a step, not a read. */
+  minTextChars: 200,
+  /** A page left inside this was passed through on the way somewhere else. */
+  minDwellMs: 3000,
   /** How long the distiller has before the offline path answers instead. */
   timeoutMs: 6000,
 } as const;
@@ -56,6 +59,8 @@ export interface NotesDeps {
   distill?: Distill;
   /** While the store is pinned nothing new is remembered, as with every other capture. */
   pinned?: () => Promise<boolean>;
+  /** Why the page a tab left did or did not become notes; the popup's line and the panel's timeline. */
+  onDiag?: (tabId: number, diag: NoteDiag) => void;
   now?: () => number;
   timeoutMs?: number;
 }
@@ -121,21 +126,27 @@ export function createNotes(deps: NotesDeps): Notes {
   async function distilNow(item: ContextItem): Promise<Note[]> {
     pending.delete(item.tabId);
     if (item.kind === 'selection') return [];
-    if (deps.pinned && (await deps.pinned())) return [];
-    if (done.get(item.origin) === item.hash) return [];
+    const host = hostOf(item.origin);
+    const say = (verdict: NoteVerdict, kept?: number): Note[] => {
+      deps.onDiag?.(item.tabId, { at: now(), host, verdict, ...(kept === undefined ? {} : { kept }) });
+      return [];
+    };
+    if (deps.pinned && (await deps.pinned())) return say('pinned');
+    if (done.get(item.origin) === item.hash) return say('unchanged');
+    const passing = passingThrough(item, now());
+    if (passing) return say(passing);
     const text = normalizeWhitespace(item.text);
-    if (text.length < NOTES_LIMITS.minTextChars) return [];
+    if (text.length < NOTES_LIMITS.minTextChars) return say('short');
     done.set(item.origin, item.hash);
 
-    const host = hostOf(item.origin);
     const facts = (await fromModel(text, host)) ?? fallbackFacts(item);
     const at = now();
-    const notes: Note[] = facts
-      .map((f) => truncate(normalizeWhitespace(f), NOTES_LIMITS.factChars))
-      .filter(Boolean)
+    const written = facts.map((f) => truncate(normalizeWhitespace(f), NOTES_LIMITS.factChars)).filter(Boolean);
+    const said = written.filter((f) => !onlyTheLabel(f, item.title, host));
+    const notes: Note[] = said
       .slice(0, NOTES_LIMITS.perPage)
       .map((f) => ({ at, origin: item.origin, tabId: item.tabId, title: item.title, text: f }));
-    if (notes.length === 0) return [];
+    if (notes.length === 0) return say(written.length > 0 ? 'title-only' : 'nothing-actionable');
     // The newest reading of an origin supersedes what it said before, and an
     // identical fact from anywhere else is not repeated.
     await edit((list) => {
@@ -143,6 +154,7 @@ export function createNotes(deps: NotesDeps): Notes {
       const kept = list.filter((n) => n.origin !== item.origin && !seen.has(key(n.text)));
       return [...kept, ...notes];
     });
+    deps.onDiag?.(item.tabId, { at, host, verdict: 'kept', kept: notes.length });
     return notes;
   }
 
@@ -198,6 +210,46 @@ export function createNotes(deps: NotesDeps): Notes {
     },
     flush: () => chain.then(() => undefined),
   };
+}
+
+/** What a page calls itself while it is on its way somewhere else. */
+const TRANSIENT_TITLE = /^\s*(redirecting|loading|please wait|one moment|just a moment)\b/i;
+
+/** The hops a browser makes in and out of a login, which are never worth remembering. */
+const AUTH_PATH = /(^|\/)(oauth2?|auth|authorize|authenticate|login|log-in|signin|sign-in|signup|sign-up|sso|saml|callback|redirect|logout|log-out)(\/|$)/i;
+
+/**
+ * Whether the user passed through this page rather than read it, and which of
+ * the four ways it was. A redirect, a login hop, a two-second glance and a
+ * page with a title and no body all produce the same thing if they are let
+ * through: a note made of the page's title, which then turns up as a value in
+ * a search box somewhere else entirely. `undefined` means the page was read.
+ */
+export function passingThrough(item: Pick<ContextItem, 'title' | 'path' | 'origin' | 'capturedAt'>, at: number): NoteVerdict | undefined {
+  if (at - item.capturedAt < NOTES_LIMITS.minDwellMs) return 'glanced';
+  if (TRANSIENT_TITLE.test(item.title) || onlyASiteName(item.title, hostOf(item.origin))) return 'transient';
+  if (AUTH_PATH.test(item.path)) return 'auth-page';
+  return undefined;
+}
+
+/** A title that is the site and nothing else: "Reddit", "reddit.com", or nothing at all. */
+function onlyASiteName(title: string, host: string): boolean {
+  const t = key(title);
+  if (t === '') return true;
+  const domain = registrableDomain(host);
+  return t === key(host) || t === key(domain) || t === key(domainLabel(domain));
+}
+
+/**
+ * A "fact" that says no more than the page's own title or host. The distiller
+ * hands one back when there was nothing on the page to distil, and it reads
+ * exactly like a fact until it is offered as a value.
+ */
+function onlyTheLabel(fact: string, title: string, host: string): boolean {
+  const f = key(fact);
+  if (f === '') return true;
+  const t = key(title);
+  return f === t || (t !== '' && t.includes(f)) || f === key(host) || f === key(registrableDomain(host));
 }
 
 /**
