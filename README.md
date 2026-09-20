@@ -146,8 +146,8 @@ the options page, fill in:
 
 With a URL and API key set, the background worker auto-creates four indices:
 
-- `<prefix>-observations`: captured page text, selections and vision text
-- `<prefix>-facts`: distilled actionable facts from pages the user left
+- `<prefix>-observations`: the page as Chrome's accessibility tree, read over the Chrome DevTools Protocol — the same outline the model is given, not a separate DOM scrape
+- `<prefix>-facts`: distilled actionable facts, from pages the user left and from anything the microphone heard when listening is on
 - `<prefix>-actions`: accepted and dismissed Carat suggestions
 - `<prefix>-tasks`: unresolved tasks grouped from facts by action type, likely entity and date bucket, carrying `status: conflict` and a reason when two sources disagree
 
@@ -167,6 +167,11 @@ matching. The extension does not create custom inference endpoints itself;
 create one in Elastic/Kibana first if you do not want to use `default`.
 Existing indices are left alone, so delete the demo indices or use a fresh
 prefix after changing the inference endpoint.
+
+Every write is fed by the CDP path rather than the DOM: `getTree` pulls the
+accessibility tree, `buildOutline` renders it, and that text is what is
+indexed, so what Elasticsearch remembers and what the model reads are the same
+thing. Facts arrive from `recordSeen`, which hands back what it distilled.
 
 Distilled facts also pass through a small messy-context resolver. A fact like
 `Dinner at Seven Shores Cafe on Friday at 6` becomes an unresolved
@@ -193,9 +198,10 @@ task and a fact age differently:
 An ES|QL rollup adds one line counting what is still open, and only runs when
 the page can complete something. The result reaches the model as one `[task]`
 line naming the single thing to finish and a few `[elasticsearch]` lines
-supporting it — the task line goes in front of the user's own notes, the
-supporting lines behind them, so retrieved context can never push out what the
-user actually read. When the task line says `conflict`, the prompt tells the
+supporting it, merged into the `<notes>` block that `predictAction` is given —
+the task line goes in front of the user's own notes, the supporting lines
+behind them, so retrieved context can never push out what the user actually
+read. When the task line says `conflict`, the prompt tells the
 model not to fill the disputed detail. Accepting or dismissing a chip runs a
 delete-by-query that closes the matching task out, so the loop ends where it
 started.

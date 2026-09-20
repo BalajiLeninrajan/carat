@@ -239,6 +239,19 @@ export async function predictAction(opts: {
   }
 }
 
+/**
+ * Ours: what the chip was about, read before accept or dismiss consumes it.
+ * The Elastic task loop needs it to find the task the user just closed out.
+ */
+export function peekAction(
+  tabId: number,
+  reqId: number,
+): { kind: ActionKind; label: string; value: string; url: string } | null {
+  const p = pending.get(tabId);
+  if (!p || p.reqId !== reqId) return null;
+  return { kind: p.kind, label: p.label, value: p.value, url: p.url };
+}
+
 export async function acceptAction(tabId: number, reqId: number): Promise<ActuateResult> {
   const p = pending.get(tabId);
   if (!p || p.reqId !== reqId) return { ok: false, reason: "That suggestion has expired." };

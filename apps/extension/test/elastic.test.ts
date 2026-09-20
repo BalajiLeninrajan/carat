@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { ContextItem, NextActionRequest, Settings } from '@carat/shared';
-import { DEFAULT_SETTINGS } from '@carat/shared';
 import { createElasticMemory } from '../src/background/elastic';
-import type { Note } from '../src/background/notes';
+import type { Observation, PageContext } from '../src/background/elastic';
+import type { Note } from '../src/engine/background/notes';
+import type { Settings } from '../src/engine/shared/settings';
+import { DEFAULT_SETTINGS } from '../src/engine/shared/settings';
 
 const settings = (over: Partial<Settings> = {}): Settings => ({
   ...DEFAULT_SETTINGS,
@@ -12,29 +13,22 @@ const settings = (over: Partial<Settings> = {}): Settings => ({
   ...over,
 });
 
-const req = (): NextActionRequest => ({
-  page: { host: 'calendar.google.com', title: 'Calendar event', path: '/calendar', scroll: { y: 0, pages: 1, more: false } },
-  outline: 'main:\n  >> FOCUSED [1] textbox "Title"\n  [2] textbox "Location"',
-  controls: [{ n: 1, role: 'textbox', name: 'Title' }],
-  focused: 1,
-  history: ['10s ago: opened from tab 2'],
-  notes: [],
-  tabs: [],
-  now: '2026-09-19T12:00:00-04:00',
-  eagerness: 'eager',
+const req = (): PageContext => ({
+  url: 'https://calendar.google.com/calendar',
+  title: 'Calendar event',
+  text: 'main:\n  >> FOCUSED [1] textbox "Title"\n  [2] textbox "Location"',
+  candidates: [{ n: 1, backendNodeId: 11, role: 'textbox', name: 'Title' }],
+  focused: { role: 'textbox', name: 'Title' },
+  history: '10s ago: opened from tab 2',
 });
 
-const item = (): ContextItem => ({
+const item = (): Observation => ({
   id: 'ctx-1',
   tabId: 2,
-  origin: 'https://discord.com',
-  path: '/channels/1',
+  url: 'https://discord.com/channels/1',
   title: 'Discord',
-  kind: 'page',
   text: 'Alex asked about dinner at Seven Shores Cafe on Friday at 6.',
-  hash: 123,
-  capturedAt: Date.parse('2026-09-19T15:00:00Z'),
-  lastSeenAt: Date.parse('2026-09-19T15:00:00Z'),
+  at: Date.parse('2026-09-19T15:00:00Z'),
 });
 
 describe('ElasticMemory', () => {
@@ -94,8 +88,8 @@ describe('ElasticMemory', () => {
     const notes: Note[] = [
       {
         at: Date.parse('2026-09-19T15:01:00Z'),
-        origin: 'https://discord.com',
-        tabId: 2,
+        source: 'read',
+        url: 'https://discord.com',
         title: 'Discord',
         text: 'Alex asked about dinner at Seven Shores Cafe on Friday at 6.',
       },
@@ -182,8 +176,8 @@ describe('ElasticMemory', () => {
     await elastic.indexFacts(item(), [
       {
         at: Date.parse('2026-09-19T15:01:00Z'),
-        origin: 'https://discord.com',
-        tabId: 2,
+        source: 'read',
+        url: 'https://discord.com',
         title: 'Discord',
         text: 'Dinner at Seven Shores Cafe on Friday at 6.',
       },
@@ -213,8 +207,8 @@ describe('ElasticMemory', () => {
     await elastic.indexFacts(item(), [
       {
         at: Date.parse('2026-09-19T15:01:00Z'),
-        origin: 'https://discord.com',
-        tabId: 2,
+        source: 'read',
+        url: 'https://discord.com',
         title: 'Discord',
         text: 'The user wrote down two things they might want to do later.',
       },
@@ -238,8 +232,8 @@ describe('ElasticMemory', () => {
     await elastic.indexFacts(item(), [
       {
         at: Date.parse('2026-09-19T15:01:00Z'),
-        origin: 'https://discord.com',
-        tabId: 2,
+        source: 'read',
+        url: 'https://discord.com',
         title: 'Discord',
         text: 'The user wants side quests near the Toronto Shopify office tomorrow.',
       },
@@ -261,8 +255,8 @@ describe('ElasticMemory', () => {
     await elastic.indexFacts(item(), [
       {
         at: Date.parse('2026-09-19T15:01:00Z'),
-        origin: 'https://discord.com',
-        tabId: 2,
+        source: 'read',
+        url: 'https://discord.com',
         title: 'Discord',
         text: 'Side quests near the Toronto Shopify office tomorrow.',
       },
@@ -295,8 +289,8 @@ describe('ElasticMemory', () => {
     await elastic.indexFacts(item(), [
       {
         at: Date.parse('2026-09-19T15:01:00Z'),
-        origin: 'https://discord.com',
-        tabId: 2,
+        source: 'read',
+        url: 'https://discord.com',
         title: 'Discord',
         text: 'Dinner at Seven Shores Cafe on Friday at 6.',
       },
@@ -332,8 +326,8 @@ describe('ElasticMemory', () => {
     await elastic.indexFacts(item(), [
       {
         at: Date.parse('2026-09-19T15:02:00Z'),
-        origin: 'https://mail.example.com',
-        tabId: 3,
+        source: 'read',
+        url: 'https://mail.example.com',
         title: 'Mail',
         text: 'Dinner at Seven Shores Cafe on Friday at 7.',
       },
@@ -378,8 +372,8 @@ describe('ElasticMemory', () => {
     await elastic.indexFacts(item(), [
       {
         at: Date.parse('2026-09-19T15:03:00Z'),
-        origin: 'https://discord.com',
-        tabId: 2,
+        source: 'read',
+        url: 'https://discord.com',
         title: 'Discord',
         text: 'Dinner with Alex Friday evening at 6.',
       },
@@ -434,17 +428,19 @@ describe('ElasticMemory', () => {
     expect(JSON.parse(String(queryCall?.[1]?.body)).query).toContain('FROM carat-test-tasks');
   });
 
-  it('infers Maps capability from the DOM and searches matching tasks', async () => {
+  it('infers Maps capability from the accessibility tree and searches matching tasks', async () => {
     let searchBody: Record<string, unknown> | undefined;
     const fetchImpl = vi.fn<typeof fetch>(async (url, init) => {
       if (String(url).includes('carat-test-tasks/_search')) searchBody = JSON.parse(String(init?.body));
       return Response.json({ hits: { hits: [] } });
     });
-    const mapsReq: NextActionRequest = {
+    const mapsReq: PageContext = {
       ...req(),
-      page: { host: 'www.google.com', title: 'Google Maps', path: '/maps', scroll: { y: 0, pages: 1, more: false } },
-      outline: 'search:\n  >> FOCUSED [1] searchbox "Search Google Maps"',
-      controls: [{ n: 1, role: 'searchbox', name: 'Search Google Maps' }],
+      url: 'https://www.google.com/maps',
+      title: 'Google Maps',
+      text: 'search:\n  >> FOCUSED [1] searchbox "Search Google Maps"',
+      candidates: [{ n: 1, backendNodeId: 21, role: 'searchbox', name: 'Search Google Maps' }],
+      focused: { role: 'searchbox', name: 'Search Google Maps' },
     };
     const elastic = createElasticMemory({ settings: async () => settings(), fetchImpl });
 
@@ -482,12 +478,13 @@ describe('ElasticMemory', () => {
       if (path.includes('carat-test-tasks')) throw new Error(`source page should not query task indices: ${path}`);
       return Response.json({ hits: { hits: [] } });
     });
-    const discordReq: NextActionRequest = {
+    const discordReq: PageContext = {
       ...req(),
-      page: { host: 'discord.com', title: '(30) Discord | @Crazydodo', path: '/channels/@me/1475607861831929918', scroll: { y: 0, pages: 1, more: false } },
-      outline: 'navigation "Private channels":\n  [1] button "Inbox"\nlist "Direct Messages":\nmain:\n  text: okay im going to write down two things i want to do tmrw, like side quests maybe near the Toronto Shopify office?\n  [2] textbox "Message @Crazydodo"',
-      controls: [{ n: 2, role: 'textbox', name: 'Message @Crazydodo' }],
-      focused: 2,
+      url: 'https://discord.com/channels/@me/1475607861831929918',
+      title: '(30) Discord | @Crazydodo',
+      text: 'navigation "Private channels":\n  [1] button "Inbox"\nlist "Direct Messages":\nmain:\n  text: okay im going to write down two things i want to do tmrw, like side quests maybe near the Toronto Shopify office?\n  [2] textbox "Message @Crazydodo"',
+      candidates: [{ n: 2, backendNodeId: 22, role: 'textbox', name: 'Message @Crazydodo' }],
+      focused: { role: 'textbox', name: 'Message @Crazydodo' },
     };
     const elastic = createElasticMemory({ settings: async () => settings(), fetchImpl });
 
@@ -508,11 +505,13 @@ describe('ElasticMemory', () => {
       paths.push(String(url));
       return Response.json({ hits: { hits: [] } });
     });
-    const articleReq: NextActionRequest = {
+    const articleReq: PageContext = {
       ...req(),
-      page: { host: 'www.cbc.ca', title: 'Festival returns', path: '/news/festival', scroll: { y: 0, pages: 2, more: true } },
-      outline: 'main:\n  heading(1) "Festival returns"\n  text: The event runs at a location downtown; check the date and time before you go.\n  [1] searchbox "Search CBC"',
-      controls: [{ n: 1, role: 'searchbox', name: 'Search CBC' }],
+      url: 'https://www.cbc.ca/news/festival',
+      title: 'Festival returns',
+      text: 'main:\n  heading(1) "Festival returns"\n  text: The event runs at a location downtown; check the date and time before you go.\n  [1] searchbox "Search CBC"',
+      candidates: [{ n: 1, backendNodeId: 31, role: 'searchbox', name: 'Search CBC' }],
+      focused: null,
     };
     const elastic = createElasticMemory({ settings: async () => settings(), fetchImpl });
 

@@ -1,6 +1,57 @@
-import type { ContextItem, NextActionKind, NextActionRequest, OutlineControl, Settings } from '@carat/shared';
-import { hashText, normalizeWhitespace, resolveIntentValue, truncate } from '@carat/shared';
-import type { Note } from './notes';
+import type { Candidate } from '../engine/background/outline';
+import type { Note } from '../engine/background/notes';
+import type { ActionKind } from '../engine/shared/protocol';
+import type { Settings } from '../engine/shared/settings';
+
+/**
+ * The page as the engine now sees it: the accessibility tree read over CDP,
+ * not a DOM scrape. `text` is the rendered outline and `candidates` are the
+ * controls in it, which together are what decides whether this page can
+ * finish an open task.
+ */
+export interface PageContext {
+  url: string;
+  title: string;
+  /** The AX outline, already budgeted by `buildOutline`. */
+  text: string;
+  candidates: Candidate[];
+  /** Role and name of the focused node, when the tree has one. */
+  focused?: { role: string; name: string } | null;
+  history?: string;
+}
+
+/** One reading of a page, taken from the accessibility tree. */
+export interface Observation {
+  /** Stable per url+content, so re-reading the same page overwrites rather than piles up. */
+  id: string;
+  tabId?: number;
+  url: string;
+  title: string;
+  text: string;
+  at: number;
+}
+
+// The old @carat/shared is gone with the engine swap, and these four helpers
+// were all elastic.ts used from it. They are small enough to keep here rather
+// than stand a shared package back up for them.
+
+function normalizeWhitespace(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+function truncate(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, Math.max(0, max - 1))}\u2026`;
+}
+
+/** FNV-1a, for the content key that dedupes a re-read of the same page. */
+function hashText(text: string): number {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash >>> 0;
+}
 
 const MAX_EVIDENCE = 3;
 const EVIDENCE_CHARS = 220;
@@ -25,10 +76,13 @@ export const TASK_LINE_PREFIX = '[task]';
 type ElasticSettings = Pick<Settings, 'elasticUrl' | 'elasticApiKey' | 'elasticIndexPrefix' | 'elasticInferenceId'>;
 
 export interface ElasticMemory {
-  indexObservation(item: ContextItem): Promise<void>;
-  indexFacts(item: ContextItem, notes: Note[]): Promise<void>;
-  retrieve(req: NextActionRequest, tabId?: number): Promise<string[]>;
-  recordAction(action: { tabId?: number; host: string; kind: NextActionKind; name?: string; label: string; value?: string; accepted: boolean }): Promise<void>;
+  /** Index one reading of the accessibility tree. */
+  indexObservation(item: Observation): Promise<void>;
+  /** Index the facts distilled from a page, and group them into tasks. */
+  indexFacts(item: Observation, notes: Note[]): Promise<void>;
+  /** The task line and the context behind it, for the prompt. */
+  retrieve(page: PageContext, tabId?: number): Promise<string[]>;
+  recordAction(action: { tabId?: number; host: string; kind: ActionKind; label: string; value?: string; accepted: boolean }): Promise<void>;
   sweepExpiredTasks(): Promise<void>;
 }
 
@@ -320,9 +374,9 @@ export function createElasticMemory(deps: ElasticDeps): ElasticMemory {
    * can actually complete something, because a count of tasks the page cannot
    * touch is noise in the prompt.
    */
-  async function search(s: ElasticSettings, req: NextActionRequest, tabId?: number): Promise<string[]> {
-    const plan = retrievalPlan(req);
-    const query = searchText(req, plan);
+  async function search(s: ElasticSettings, page: PageContext, tabId?: number): Promise<string[]> {
+    const plan = retrievalPlan(page);
+    const query = searchText(page, plan);
     if (!query) return [];
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
@@ -459,17 +513,17 @@ export function createElasticMemory(deps: ElasticDeps): ElasticMemory {
     return json._source ?? null;
   }
 
-  async function upsertTask(s: ElasticSettings, item: ContextItem, note: Note, ordinal: number): Promise<void> {
+  async function upsertTask(s: ElasticSettings, item: Observation, note: Note, ordinal: number): Promise<void> {
     const parsed = parseTask(note.text);
     if (!isActionableTaskType(parsed.actionType)) return;
     const at = new Date(note.at).toISOString();
     const sourceId = `${item.id}:${ordinal}`;
     const text = normalizeWhitespace(note.text);
     const exact = await getTask(s, parsed.groupKey).catch(() => null);
-    const similar = exact ? null : await findSimilarTask(s, parsed, text, note.tabId).catch(() => null);
+    const similar = exact ? null : await findSimilarTask(s, parsed, text, item.tabId).catch(() => null);
     const existing = exact ?? similar;
     const groupKey = existing?.groupKey ?? parsed.groupKey;
-    const hosts = unique([...(existing?.hosts ?? []), hostOf(note.origin)]);
+    const hosts = unique([...(existing?.hosts ?? []), hostOf(noteUrl(note, item))]);
     const sourceIds = unique([...(existing?.sourceIds ?? []), sourceId]);
     const texts = unique([...(existing?.texts ?? []), text]).slice(-8);
     const timeValues = unique([...(existing?.timeValues ?? []), ...parsed.timeValues]);
@@ -477,7 +531,7 @@ export function createElasticMemory(deps: ElasticDeps): ElasticMemory {
     const conflictReason = conflictFor(existing, parsed, text);
     const doc: TaskDoc = {
       groupKey,
-      tabId: note.tabId,
+      tabId: item.tabId,
       actionType: parsed.actionType,
       status: conflictReason ? 'conflict' : (existing?.status ?? 'unresolved'),
       text: conflictReason ? `Conflict needs review: ${texts.join(' / ')}` : text,
@@ -490,7 +544,7 @@ export function createElasticMemory(deps: ElasticDeps): ElasticMemory {
       lastSeenAt: at,
       ...(conflictReason ? { conflictReason, conflictCount: (existing?.conflictCount ?? 0) + 1 } : {}),
     };
-    await indexDoc(s, 'tasks', groupKey, { ...doc, ...(semanticEnabled(s) ? { text_semantic: doc.text } : {}) }, note.tabId);
+    await indexDoc(s, 'tasks', groupKey, { ...doc, ...(semanticEnabled(s) ? { text_semantic: doc.text } : {}) }, item.tabId);
   }
 
   async function findSimilarTask(s: ElasticSettings, parsed: ParsedTask, text: string, tabId?: number): Promise<TaskDoc | null> {
@@ -656,7 +710,7 @@ export function createElasticMemory(deps: ElasticDeps): ElasticMemory {
     await deleteByQuery(s, indices, request, 'deleted task docs older than 5 minutes');
   }
 
-  async function deleteMatchedTasks(s: ElasticSettings, action: { tabId?: number; kind: NextActionKind; name?: string; label: string; value?: string; accepted: boolean }): Promise<void> {
+  async function deleteMatchedTasks(s: ElasticSettings, action: { tabId?: number; kind: ActionKind; label: string; value?: string; accepted: boolean }): Promise<void> {
     const actionType = actionTypeForCompletedAction(action);
     if (!actionType) return;
     const terms = completedActionTerms(action);
@@ -682,16 +736,16 @@ export function createElasticMemory(deps: ElasticDeps): ElasticMemory {
     await deleteByQuery(s, indices, request, `deleted ${action.accepted ? 'accepted' : 'dismissed'} ${actionType} task(s)`, action.tabId);
   }
 
-  async function duplicateDistilledNote(s: ElasticSettings, note: Note, text: string): Promise<boolean> {
+  async function duplicateDistilledNote(s: ElasticSettings, note: Note, item: Observation, text: string): Promise<boolean> {
     return duplicateExists(
       s,
       'facts',
       text,
       [
         { term: { kind: 'fact' } },
-        { term: { host: hostOf(note.origin) } },
+        { term: { host: hostOf(noteUrl(note, item)) } },
       ],
-      note.tabId,
+      item.tabId,
     );
   }
 
@@ -705,25 +759,26 @@ export function createElasticMemory(deps: ElasticDeps): ElasticMemory {
         s,
         'observations',
         text,
-        [{ term: { host: hostOf(item.origin) } }],
+        [{ term: { host: hostOf(item.url) } }],
         item.tabId,
       ).catch(() => false);
       if (duplicate) return;
+      const at = new Date(item.at).toISOString();
       const doc: Record<string, unknown> = {
         id: item.id,
         tabId: item.tabId,
-        origin: item.origin,
-        host: hostOf(item.origin),
-        path: item.path,
+        origin: item.url,
+        host: hostOf(item.url),
+        path: pathOf(item.url),
         title: item.title,
-        kind: item.kind,
-        observationKind: item.kind,
+        kind: 'page',
+        observationKind: 'accessibility_tree',
         contentKey: keyForContent(text),
         text,
-        capturedAt: new Date(item.capturedAt).toISOString(),
-        lastSeenAt: new Date(item.lastSeenAt).toISOString(),
+        capturedAt: at,
+        lastSeenAt: at,
         indexedAt: new Date(now()).toISOString(),
-        hash: item.hash,
+        hash: hashText(text),
       };
       if (semanticEnabled(s)) doc.text_semantic = text;
       await indexDoc(s, 'observations', item.id, doc, item.tabId).catch(() => undefined);
@@ -738,11 +793,13 @@ export function createElasticMemory(deps: ElasticDeps): ElasticMemory {
           const doc: Record<string, unknown> = {
             id: `${item.id}:${i}`,
             sourceId: item.id,
-            tabId: note.tabId,
-            origin: note.origin,
-            host: hostOf(note.origin),
-            title: note.title,
+            tabId: item.tabId,
+            origin: noteUrl(note, item),
+            host: hostOf(noteUrl(note, item)),
+            title: note.title || item.title,
             kind: 'fact',
+            /** "read" off a page or "heard" through the microphone. */
+            noteSource: note.source,
             contentKey: keyForContent(text),
             text,
             at: new Date(note.at).toISOString(),
@@ -750,19 +807,19 @@ export function createElasticMemory(deps: ElasticDeps): ElasticMemory {
           };
           if (semanticEnabled(s)) doc.text_semantic = text;
           return (async () => {
-            if (await duplicateDistilledNote(s, note, text).catch(() => false)) return;
+            if (await duplicateDistilledNote(s, note, item, text).catch(() => false)) return;
             await Promise.all([
-              indexDoc(s, 'facts', `${item.id}:${i}`, doc, note.tabId),
+              indexDoc(s, 'facts', `${item.id}:${i}`, doc, item.tabId),
               upsertTask(s, item, note, i),
             ]);
           })().catch(() => undefined);
         }),
       );
     },
-    async retrieve(req, tabId) {
+    async retrieve(page, tabId) {
       const s = await cfg();
       if (!s) return [];
-      return search(s, req, tabId);
+      return search(s, page, tabId);
     },
     async recordAction(action) {
       const s = await cfg();
@@ -1002,14 +1059,26 @@ function searchBody(s: ElasticSettings, query: string): Record<string, unknown> 
  * meant a news article with a date in it claimed to be a calendar, and the
  * task filter then pointed at the wrong bucket.
  */
-function retrievalPlan(req: NextActionRequest): RetrievalPlan {
-  const where = `${req.page.host}${req.page.path}`.toLowerCase();
-  const destination = destinationCapability(where);
-  const actionCaps = destination ? [destination] : unique(req.controls.flatMap(controlCapability));
+function retrievalPlan(page: PageContext): RetrievalPlan {
+  const destination = destinationCapability(whereOf(page.url));
+  const actionCaps = destination ? [destination] : unique(page.candidates.flatMap(controlCapability));
   const capabilities = [...actionCaps];
-  if (req.controls.some((c) => ['textbox', 'searchbox', 'combobox', 'select'].includes(c.role))) capabilities.push('follow_up');
+  if (page.candidates.some((c) => ENTRY_ROLES.has(c.role))) capabilities.push('follow_up');
   return { capabilities: unique(capabilities), actionCapabilities: actionCaps };
 }
+
+/** host + path, lowercased, which is all `destinationCapability` matches on. */
+function whereOf(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.host}${parsed.pathname}`.toLowerCase();
+  } catch {
+    return url.toLowerCase();
+  }
+}
+
+/** AX roles that take typing, which is what a `follow_up` needs. */
+const ENTRY_ROLES = new Set(['textbox', 'searchbox', 'combobox', 'select', 'listbox', 'spinbutton']);
 
 /** One of Carat's own destinations, by host and path only. */
 function destinationCapability(where: string): string | null {
@@ -1020,8 +1089,8 @@ function destinationCapability(where: string): string | null {
 }
 
 /** A field named like the thing the capability would fill. Names only, never page text. */
-function controlCapability(control: OutlineControl): string[] {
-  if (!['textbox', 'searchbox', 'combobox', 'select'].includes(control.role)) return [];
+function controlCapability(control: Candidate): string[] {
+  if (!ENTRY_ROLES.has(control.role)) return [];
   const name = normalizeWhitespace(control.name).toLowerCase();
   if (!name) return [];
   if (/^(to|cc|bcc|recipients?|subject)$|\bemail address\b|\brecipients?\b|\bsubject line\b/.test(name)) return ['email'];
@@ -1030,15 +1099,15 @@ function controlCapability(control: OutlineControl): string[] {
   return [];
 }
 
-function searchText(req: NextActionRequest, plan: RetrievalPlan): string {
+function searchText(page: PageContext, plan: RetrievalPlan): string {
   return normalizeWhitespace(
     [
       plan.capabilities.join(' '),
-      req.page.title,
-      req.page.host,
-      req.focused ? req.controls.find((c) => c.n === req.focused)?.name : '',
-      req.history.slice(-4).join(' '),
-      req.outline.slice(0, 1200),
+      page.title,
+      hostOf(page.url),
+      page.focused?.name ?? '',
+      page.history ?? '',
+      page.text.slice(0, 1200),
     ].join(' '),
   );
 }
@@ -1098,37 +1167,55 @@ function latestChatSnippet(text: string): string {
   return normalizeWhitespace(text.slice(index, next?.index ?? text.length));
 }
 
-function actionTypeForCompletedAction(action: { kind: NextActionKind; value?: string; label: string; name?: string }): string | null {
+/**
+ * Which kind of task a finished chip closes out. `open` is free text in this
+ * engine rather than a `maps:`/`calendar:` intent, so a destination is read
+ * off the url or query the same way page prose is classified.
+ */
+function actionTypeForCompletedAction(action: { kind: ActionKind; value?: string; label: string }): string | null {
+  const text = [action.label, action.value].filter(Boolean).join(' ');
   if (action.kind === 'open') {
-    const resolved = resolveIntentValue(action.value ?? '');
-    if (resolved?.intent === 'maps') return 'maps_lookup';
-    if (resolved?.intent === 'calendar') return 'calendar_event';
-    if (resolved?.intent === 'gmail') return 'email';
+    const where = whereOf(action.value ?? '');
+    const destination = destinationCapability(where);
+    if (destination) return destination;
+    return actionTypeFor(text);
   }
-  if (action.kind === 'fill' || action.kind === 'select') {
-    return actionTypeFor([action.name, action.label, action.value].filter(Boolean).join(' '));
+  if (action.kind === 'fill' || action.kind === 'select' || action.kind === 'submit') {
+    return actionTypeFor(text);
   }
   return null;
 }
 
-function completedActionTerms(action: { value?: string; label: string; name?: string }): string[] {
+/** The phrases a finished chip is matched against, to find the task it closed. */
+function completedActionTerms(action: { value?: string; label: string }): string[] {
   const terms = new Set<string>();
-  const value = action.value ?? '';
-  const resolved = resolveIntentValue(value);
-  if (resolved) {
-    for (const part of [resolved.entity.value, resolved.entity.location, resolved.entity.when]) {
-      const text = normalizeWhitespace(part);
-      if (text.length >= 2) terms.add(text);
-    }
-  } else {
-    const text = normalizeWhitespace(value);
-    if (text.length >= 2) terms.add(text);
-  }
-  for (const text of [action.name ?? '', action.label]) {
-    const cleaned = normalizeWhitespace(text.replace(/^Fill .+ with /i, '').replace(/^Open /i, '').replace(/^Click /i, '').replace(/[“”"]/g, ''));
-    if (cleaned.length >= 3 && cleaned.length <= 120) terms.add(cleaned);
-  }
+  const value = normalizeWhitespace(action.value ?? '');
+  if (value.length >= 2) terms.add(value);
+  // A search url carries the interesting part in its query, not its host.
+  const query = searchQueryOf(action.value ?? '');
+  if (query.length >= 2) terms.add(query);
+  const cleaned = normalizeWhitespace(
+    action.label
+      .replace(/^Fill .+ with /i, '')
+      .replace(/^(Open|Click|Set|Go to|Search for) /i, '')
+      .replace(/[\u201c\u201d"]/g, ''),
+  );
+  if (cleaned.length >= 3 && cleaned.length <= 120) terms.add(cleaned);
   return [...terms].slice(0, 6);
+}
+
+/** The human part of a search url: `?q=`, `?query=`, or a /maps/search/ path. */
+function searchQueryOf(value: string): string {
+  try {
+    const url = new URL(value);
+    const q = url.searchParams.get('q') ?? url.searchParams.get('query') ?? '';
+    if (q) return normalizeWhitespace(q);
+    const path = decodeURIComponent(url.pathname);
+    const search = /\/(?:maps\/)?search\/([^/]+)/.exec(path)?.[1];
+    return search ? normalizeWhitespace(search.replace(/\+/g, ' ')) : '';
+  } catch {
+    return '';
+  }
 }
 
 function taskFromHit(source: NonNullable<SearchHit['_source']>): TaskDoc | null {
@@ -1252,6 +1339,22 @@ function slug(text: string): string {
 
 function keyText(text: string): string {
   return normalizeWhitespace(text).toLowerCase().replace(/[.,;:!?'"()]/g, '');
+}
+
+/**
+ * A heard note has no page behind it, so it borrows the page the user was on
+ * when it was taken; a read note carries its own url.
+ */
+function noteUrl(note: Note, item: Observation): string {
+  return note.url || item.url;
+}
+
+function pathOf(url: string): string {
+  try {
+    return new URL(url).pathname;
+  } catch {
+    return '';
+  }
 }
 
 function hostOf(origin: string): string {
