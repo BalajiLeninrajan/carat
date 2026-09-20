@@ -261,14 +261,13 @@ export function createDebugPanel(doc: Document = document, opts: DebugPanelOptio
 function requestBlocks(doc: Document, view: DebugView): Element[] {
   const request = view.request;
   if (!request) return [el(doc, 'p', 'empty', 'no request from this tab yet')];
-  return [rows(doc, request.rows), pre(doc, 'notes, history and tabs', request.blocks), outline(doc, request.outline)];
+  return [rows(doc, request.rows), outline(doc, request.blocks)];
 }
 
 function answerBlocks(doc: Document, view: DebugView): Element[] {
   const answer = view.answer;
   if (!answer) return [el(doc, 'p', 'empty', 'no answer on this tab yet')];
   const out: Element[] = [rows(doc, answer.rows)];
-  if (answer.validations.length) out.push(pre(doc, 'validator', answer.validations.join('\n')));
   if (answer.raw) out.push(pre(doc, 'raw', answer.raw));
   return out;
 }
@@ -306,14 +305,15 @@ function pre(doc: Document, name: string, text: string): Element {
 }
 
 /**
- * The outline as it was sent, with the numbered controls picked out, since
- * `[7]` is the only thing in it the model can name. Built as nodes rather
- * than markup: nothing from the page is ever parsed as HTML here.
+ * The user turn as it was sent — the page outline, the open tabs, the notes
+ * and the history — with the numbered controls picked out, since `[7]` is the
+ * only thing in it the model can name. Built as nodes rather than markup:
+ * nothing from the page is ever parsed as HTML here.
  */
 function outline(doc: Document, text: string): Element {
   const wrap = doc.createElement('div');
   const block = doc.createElement('pre');
-  block.setAttribute('aria-label', 'outline');
+  block.setAttribute('aria-label', 'user turn');
   const pattern = /\[\d+\]/g;
   let last = 0;
   for (let m = pattern.exec(text); m !== null; m = pattern.exec(text)) {
@@ -324,7 +324,7 @@ function outline(doc: Document, text: string): Element {
     last = m.index + m[0].length;
   }
   block.append(doc.createTextNode(text.slice(last)));
-  wrap.append(el(doc, 'span', 'k', 'outline'), block);
+  wrap.append(el(doc, 'span', 'k', 'user turn'), block);
   return wrap;
 }
 

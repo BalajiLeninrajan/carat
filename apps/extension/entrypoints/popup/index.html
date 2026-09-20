@@ -14,15 +14,12 @@
         --text: #cdd6f4;
         --subtext0: #a6adc8;
         --blue: #89b4fa;
-        --mauve: #cba6f7;
         --teal: #94e2d5;
-        --yellow: #f9e2af;
-        --red: #f38ba8;
         color-scheme: dark;
       }
       * { box-sizing: border-box; }
       body {
-        width: 360px;
+        width: 320px;
         margin: 0;
         background: var(--base);
         color: var(--text);
@@ -37,64 +34,29 @@
       }
       header h1 { font-size: 14px; font-weight: 600; margin: 0; }
       header .spacer { flex: 1; }
-      #clear { padding: 4px 10px; font-size: 12px; white-space: nowrap; }
-      #clear[data-state="working"] { color: var(--subtext0); }
-      #clear[data-state="done"] { border-color: var(--teal); color: var(--teal); }
       .toggle { display: flex; align-items: center; gap: 6px; color: var(--subtext0); cursor: pointer; }
       .toggle input { width: 14px; height: 14px; margin: 0; accent-color: var(--blue); }
       .site { padding: 6px 12px; border-bottom: 1px solid var(--surface0); font-size: 12px; }
       .site[hidden] { display: none; }
-      .goal {
-        display: flex;
-        align-items: baseline;
-        gap: 6px;
-        margin: 0;
-        padding: 8px 12px;
-        border-bottom: 1px solid var(--surface0);
-        font-size: 12px;
-      }
-      .goal[hidden] { display: none; }
-      .goal-label { color: var(--subtext0); white-space: nowrap; }
-      #goal-text { flex: 1; min-width: 0; color: var(--mauve); overflow-wrap: anywhere; }
-      #goal-drop {
-        flex: none;
-        padding: 0 6px;
-        border: 0;
-        background: none;
-        color: var(--subtext0);
-        font-size: 14px;
-        line-height: 1;
-        cursor: pointer;
-      }
-      #goal-drop:hover { color: var(--red); }
       #site-host { color: var(--text); }
-      #list { list-style: none; margin: 0; padding: 4px 0; max-height: 420px; overflow-y: auto; }
-      #list li { padding: 8px 12px; border-bottom: 1px solid var(--surface0); }
-      #list li:last-child { border-bottom: 0; }
-      .meta { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--subtext0); }
-      .meta .origin { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .chip {
-        padding: 1px 6px;
-        border-radius: 999px;
-        font-size: 10px;
-        font-weight: 600;
-        letter-spacing: 0.02em;
-        text-transform: uppercase;
-        background: var(--surface0);
-        color: var(--teal);
+      #clear { width: calc(100% - 24px); margin: 10px 12px 0; padding: 6px 10px; font-size: 12px; }
+      #clear[data-state="working"] { color: var(--subtext0); }
+      #clear[data-state="done"] { border-color: var(--teal); color: var(--teal); }
+      #model {
+        margin: 10px 0 0;
+        padding: 6px 12px;
+        border-top: 1px solid var(--surface0);
+        font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        color: var(--subtext0);
+        overflow-wrap: anywhere;
       }
-      .chip[data-kind="selection"] { color: var(--mauve); }
-      .chip[data-kind="vision"] { color: var(--yellow); }
-      .title { margin: 2px 0 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .preview { margin: 2px 0 0; color: var(--subtext0); overflow-wrap: anywhere; }
-      .empty, #offline { padding: 24px 12px; text-align: center; color: var(--subtext0); }
-      #offline p { margin: 0 0 10px; }
       footer {
         display: flex;
         align-items: center;
         justify-content: space-between;
         padding: 8px 12px;
         border-top: 1px solid var(--surface0);
+        color: var(--subtext0);
       }
       footer a { color: var(--blue); text-decoration: none; }
       footer a:hover { text-decoration: underline; }
@@ -108,37 +70,20 @@
         cursor: pointer;
       }
       button:disabled { opacity: 0.5; cursor: default; }
-      button[aria-pressed="true"] { background: var(--mauve); border-color: var(--mauve); color: var(--mantle); font-weight: 600; }
-      .actions { display: flex; gap: 6px; }
-      #pinned-note {
-        margin: 0;
-        padding: 6px 12px;
-        font-size: 11px;
-        color: var(--mauve);
-        background: var(--mantle);
-        border-bottom: 1px solid var(--surface0);
-      }
-      #pinned-note[hidden] { display: none; }
-      #diag {
-        padding: 6px 12px;
-        border-top: 1px solid var(--surface0);
-        font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        color: var(--subtext0);
-      }
-      #diag p { margin: 0; overflow-wrap: anywhere; }
-      main[data-state="offline"] #diag { display: none; }
       button:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
-      #offline, .empty { display: none; }
+      #offline { display: none; padding: 20px 12px; text-align: center; color: var(--subtext0); }
+      #offline p { margin: 0 0 10px; }
       main[data-state="offline"] #offline { display: block; }
-      main[data-state="offline"] #list, main[data-state="offline"] footer { display: none; }
-      main[data-state="empty"] .empty { display: block; }
+      main[data-state="offline"] #clear,
+      main[data-state="offline"] #model,
+      main[data-state="offline"] .site,
+      main[data-state="offline"] footer { display: none; }
     </style>
   </head>
   <body>
     <main id="app" data-state="loading">
       <header>
         <h1>Carat</h1>
-        <button type="button" id="clear" data-state="idle">Clear what carat remembers</button>
         <span class="spacer"></span>
         <label class="toggle">
           <input type="checkbox" id="enabled" />
@@ -156,29 +101,13 @@
         <span>On for <span id="site-host"></span></span>
       </label>
 
-      <p id="pinned-note" hidden>Pinned: nothing new is read and nothing expires until you unpin.</p>
+      <button type="button" id="clear" data-state="idle">Clear what carat remembers</button>
 
-      <p class="goal" id="goal-row" hidden>
-        <span class="goal-label">Working on</span>
-        <span id="goal-text"></span>
-        <button type="button" id="goal-drop" title="Drop this goal" aria-label="Drop this goal">×</button>
-      </p>
-
-      <p class="empty">Carat has not read anything yet</p>
-      <ul id="list"></ul>
-
-      <section id="diag" aria-label="Last activity on this tab">
-        <p id="diag-capture">no capture from this tab yet</p>
-        <p id="diag-suggest">no check on this tab yet</p>
-        <p id="diag-vision" hidden></p>
-        <p id="diag-perform" hidden></p>
-      </section>
+      <p id="model"></p>
 
       <footer>
         <a href="#" id="options">Settings</a>
-        <span class="actions">
-          <button type="button" id="pin" aria-pressed="false">Pin</button>
-        </span>
+        <span>Tab accepts · Esc dismisses</span>
       </footer>
     </main>
     <script type="module" src="./main.ts"></script>

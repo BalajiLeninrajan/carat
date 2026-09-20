@@ -1,23 +1,16 @@
-import type { NextAction } from '@carat/shared';
-import { renderPrefix } from '@carat/shared';
-import type { DebugEvent, DebugSnapshot } from '../background/debug';
-import { describeEntry } from '../history';
+import type { DebugEvent, DebugSnapshot } from './log';
 
 /** What only the page knows, and the panel adds to what the background sent. */
 export interface DebugExtras {
-  /** The scheduler's own events, kept in the page rather than round-tripped. */
+  /** The content script's own events, kept in the page rather than round-tripped. */
   events: DebugEvent[];
   /** The tab is in the background right now, so nothing is being asked. */
   hidden: boolean;
-  /** When a Shift+Tab snooze runs out, or null when carat may speak. */
-  snoozedUntil: number | null;
   now: number;
 }
 
 export interface RequestView {
-  /** The outline exactly as it was sent. */
-  outline: string;
-  /** The `<notes>`, `<history>` and `<tabs>` blocks, byte for byte as the prefix carries them. */
+  /** The `<page>`, `<browser>`, `<notes>` and `<history>` blocks, byte for byte as they went out. */
   blocks: string;
   rows: Array<[string, string]>;
   /** What the copy button puts on the clipboard. */
@@ -28,7 +21,6 @@ export interface AnswerView {
   rows: Array<[string, string]>;
   /** The model's reply exactly as it streamed. */
   raw: string;
-  validations: string[];
 }
 
 export interface TimelineRow {
@@ -55,8 +47,8 @@ export interface DebugView {
 
 /**
  * Everything the panel draws, from the background's snapshot of the tab and
- * the few things only the page can answer. Pure: the panel calls it and
- * paints the result, and a test can read it without a DOM.
+ * the few things only the page can answer. Pure: the panel calls it and paints
+ * the result, and a test can read it without a DOM.
  */
 export function debugView(snap: DebugSnapshot, extras: DebugExtras): DebugView {
   return {
@@ -69,99 +61,73 @@ export function debugView(snap: DebugSnapshot, extras: DebugExtras): DebugView {
 }
 
 function head(snap: DebugSnapshot): string {
-  const host = snap.gate.host || snap.diag?.suggest?.host || 'this tab';
-  return `${host} · tab ${snap.tabId ?? '?'}`;
+  return `${snap.gate.host || 'this tab'} · tab ${snap.tabId ?? '?'}`;
 }
 
 function requestView(snap: DebugSnapshot): RequestView | null {
   const request = snap.debug?.request;
   if (!request) return null;
-  const req = request.req;
   return {
-    outline: req.outline,
-    blocks: renderPrefix(req),
+    blocks: request.userTurn,
     rows: [
-      ['now', req.now],
-      ['eagerness', req.eagerness],
-      ['controls', String(req.controls.length)],
-      ['focused', req.focused === undefined ? 'none' : `[${req.focused}]`],
-      ['scroll', `${req.page.scroll.y} of ${req.page.scroll.pages} screens${req.page.scroll.more ? ', more below' : ', nothing below'}`],
-      ['prompt cache key', request.promptCacheKey],
-      ['answer cache key', request.cacheKey],
+      ['model', request.model],
+      ['numbered controls', String(request.candidates)],
+      ['user turn', `${request.userTurn.length} chars`],
+      ['prompt cache key', request.promptCacheKey || '—'],
     ],
-    json: JSON.stringify({ cacheKey: request.cacheKey, promptCacheKey: request.promptCacheKey, request: req }, null, 2),
+    json: request.json,
   };
 }
 
 function answerView(snap: DebugSnapshot): AnswerView | null {
   const answer = snap.debug?.answer;
-  const suggest = snap.diag?.suggest;
-  if (!answer && !suggest) return null;
-  const action = answer?.action ?? null;
-  const rows: Array<[string, string]> = [];
-  if (answer) rows.push(['placeholder', describeAction(answer.placeholder)]);
-  rows.push(['kind', action?.kind ?? suggest?.kind ?? '—']);
-  rows.push(['target', action ? (action.target === null ? 'none' : `[${action.target}]`) : '—']);
-  rows.push(['label', action?.label ?? suggest?.label ?? '—']);
-  rows.push(['confidence', num(action?.confidence ?? suggest?.confidence)]);
-  rows.push(['irreversible', bool(action?.irreversible ?? suggest?.irreversible)]);
-  rows.push(['reason', action?.reason || suggest?.reason || '—']);
-  if (answer?.winner) rows.push(['won the race', answer.winner]);
-  if (suggest?.source) rows.push(['answered first', suggest.source]);
-  rows.push(['placeholder ms', num(suggest?.placeholderMs)]);
-  rows.push(['first partial ms', num(suggest?.partialMs)]);
-  rows.push(['final ms', num(suggest?.finalMs)]);
-  rows.push(['prefix warmed', bool(suggest?.warmed)]);
-  for (const a of answer?.attempts ?? suggest?.attempts ?? []) {
-    rows.push([a.id, a.error ? `failed after ${a.ms} ms (${a.error})` : `${a.kind} in ${a.ms} ms`]);
-  }
-  if (suggest?.refused) rows.push(['refused', suggest.refused]);
-  if (suggest?.reasked) rows.push(['asked again after', suggest.reasked]);
-  if (suggest?.replaced) rows.push(['replaced the placeholder', 'yes']);
-  // Always said when there is no chip, so "why is nothing showing" has an answer here.
-  rows.push(['no chip because', suggest?.silent ?? (action || suggest?.kind ? '— (a chip went up)' : 'nothing has been asked yet')]);
-  return { rows, raw: answer?.raw ?? '', validations: answer?.validations ?? [] };
+  if (!answer) return null;
+  return {
+    rows: [
+      ['kind', answer.kind ?? '—'],
+      ['target', answer.target === null ? 'none' : `[${answer.target}]`],
+      ['label', answer.label || '—'],
+      ['value', answer.value || '—'],
+      ['irreversible', bool(answer.irreversible)],
+      ['outcome', answer.outcome],
+      ['first token ms', num(answer.ttftMs)],
+      ['ring ms', num(answer.targetMs)],
+      ['total ms', num(answer.totalMs)],
+      ['tokens', answer.usage ? `${answer.usage.input} in (${answer.usage.cached} cached) / ${answer.usage.output} out` : '—'],
+    ],
+    raw: answer.raw,
+  };
 }
 
 function timeline(snap: DebugSnapshot, extras: DebugExtras): TimelineRow[] {
-  const rows: TimelineRow[] = [
-    ...snap.history.map((e) => ({ at: e.t, source: 'tab', text: describeEntry(e) })),
-    ...(snap.debug?.events ?? []).map(fromEvent),
-    ...extras.events.map(fromEvent),
-  ].map((r) => ({ ...r, when: since(r.at, extras.now) }));
+  const rows = [...(snap.debug?.events ?? []), ...extras.events]
+    .map((e) => ({ at: e.at, source: e.source as string, text: e.detail ? `${e.name} — ${e.detail}` : e.name }))
+    .map((r) => ({ ...r, when: since(r.at, extras.now) }));
   return rows.sort((a, b) => a.at - b.at);
-}
-
-function fromEvent(e: DebugEvent): { at: number; source: string; text: string } {
-  return { at: e.at, source: e.source, text: e.detail ? `${e.name} — ${e.detail}` : e.name };
 }
 
 function gate(snap: DebugSnapshot, extras: DebugExtras): GateRow[] {
   const g = snap.gate;
-  const left = extras.snoozedUntil === null ? 0 : Math.max(0, extras.snoozedUntil - extras.now);
   return [
-    { name: 'verdict', value: g.verdict ?? 'nothing asked yet', ok: g.verdict === 'ok' || g.verdict === null },
     { name: 'enabled', value: bool(g.enabled), ok: g.enabled },
-    { name: 'site on', value: `${bool(g.siteOn)} (${g.host || 'unknown host'})`, ok: g.siteOn },
-    { name: 'denylisted', value: bool(g.denylisted), ok: !g.denylisted },
-    { name: 'password field', value: bool(g.password), ok: !g.password },
-    { name: 'snapshot present', value: bool(g.snapshot), ok: g.snapshot },
+    { name: 'site allowed', value: `${bool(!g.blocked)} (${g.host || 'unknown host'})`, ok: !g.blocked },
+    { name: 'api key set', value: bool(g.keySet), ok: g.keySet },
+    { name: 'debugger attached', value: g.paused ? 'no (you dismissed the banner)' : 'yes', ok: !g.paused },
     { name: 'hidden', value: bool(extras.hidden), ok: !extras.hidden },
-    { name: 'snoozed until', value: left > 0 ? `${Math.ceil(left / 1000)}s from now` : 'not snoozed', ok: left === 0 },
   ];
 }
 
-function describeAction(action: NextAction | null): string {
-  if (!action) return 'nothing';
-  return `${action.kind}${action.target === null ? '' : ` [${action.target}]`} "${action.label}" (${action.confidence})`;
+/** The engine's own history lines for this tab, exactly as the prompt carries them. */
+export function historyBlock(snap: DebugSnapshot): string {
+  return snap.history;
 }
 
 function bool(v: boolean | undefined): string {
   return v === undefined ? '—' : v ? 'yes' : 'no';
 }
 
-function num(v: number | undefined): string {
-  return v === undefined ? '—' : String(v);
+function num(v: number | null | undefined): string {
+  return v === undefined || v === null ? '—' : String(v);
 }
 
 /** How long ago, relative to the panel's last paint: `-12.3s`, `-2m04s`. */

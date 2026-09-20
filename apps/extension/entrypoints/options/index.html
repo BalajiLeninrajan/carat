@@ -11,7 +11,6 @@
         --mantle: #181825;
         --surface0: #313244;
         --surface1: #45475a;
-        --overlay0: #6c7086;
         --text: #cdd6f4;
         --subtext0: #a6adc8;
         --blue: #89b4fa;
@@ -36,15 +35,8 @@
       .name { font-weight: 500; }
       h2 { margin: 10px 0 -4px; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--subtext0); }
       .hint { font-size: 12px; color: var(--subtext0); }
-      p.hint { margin: -6px 0 0 24px; }
-      .slider { display: grid; gap: 6px; }
-      .slider > label { font-weight: 500; }
-      .ticks { display: flex; font-size: 12px; color: var(--subtext0); }
-      .ticks span { flex: 1; text-align: center; }
-      .ticks span:first-child { text-align: left; }
-      .ticks span:last-child { text-align: right; }
-      #eagerness-note { margin: 2px 0 0; min-height: 3em; }
-      input:not([type="checkbox"]), select {
+      .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      input:not([type="checkbox"]), select, textarea {
         width: 100%;
         padding: 8px 10px;
         border-radius: 6px;
@@ -53,42 +45,12 @@
         color: var(--text);
         font: inherit;
       }
-      input:focus-visible, select:focus-visible, button:focus-visible {
+      textarea { min-height: 72px; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible {
         outline: 2px solid var(--blue);
         outline-offset: 1px;
       }
       input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--blue); margin: 0; }
-      input[type="range"] {
-        -webkit-appearance: none;
-        appearance: none;
-        width: 100%;
-        height: 16px;
-        margin: 4px 0 2px;
-        padding: 0;
-        border: 0;
-        border-radius: 0;
-        background: transparent;
-        cursor: pointer;
-      }
-      input[type="range"]::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: var(--surface1); }
-      input[type="range"]::-moz-range-track { height: 4px; border-radius: 2px; background: var(--surface1); }
-      input[type="range"]::-webkit-slider-thumb {
-        -webkit-appearance: none;
-        appearance: none;
-        width: 16px;
-        height: 16px;
-        margin-top: -6px;
-        border: 0;
-        border-radius: 50%;
-        background: var(--blue);
-      }
-      input[type="range"]::-moz-range-thumb {
-        width: 16px;
-        height: 16px;
-        border: 0;
-        border-radius: 50%;
-        background: var(--blue);
-      }
       .actions { display: flex; align-items: center; gap: 12px; margin-top: 4px; }
       button {
         padding: 8px 16px;
@@ -113,7 +75,11 @@
   <body>
     <main id="app" data-state="loading">
       <h1>Carat settings</h1>
-      <p class="lede">Fills a field from what you just read. One Tab per field.</p>
+      <p class="lede">
+        Carat reads the page as Chrome's accessibility tree, asks one model what you are most likely to do next, and
+        offers it. <b>Tab</b> accepts, <b>Esc</b> dismisses, <b>Ctrl+→</b> takes one word of ghost text. Something that
+        cannot be undone wants Tab twice.
+      </p>
 
       <div id="offline">
         <p>Carat's background worker is not answering. Reload the extension, then try again.</p>
@@ -126,94 +92,79 @@
           <span class="name">Enabled</span>
         </label>
 
-        <div class="slider">
-          <label for="eagerness">How readily to offer a chip</label>
-          <input
-            type="range"
-            id="eagerness"
-            name="eagerness"
-            min="0"
-            max="2"
-            step="1"
-            value="2"
-            list="eagerness-levels"
-            aria-describedby="eagerness-note"
-          />
-          <datalist id="eagerness-levels">
-            <option value="0" label="Conservative"></option>
-            <option value="1" label="Balanced"></option>
-            <option value="2" label="Eager"></option>
-          </datalist>
-          <div class="ticks" aria-hidden="true">
-            <span>Conservative</span>
-            <span>Balanced</span>
-            <span>Eager</span>
-          </div>
-          <p class="hint" id="eagerness-note"></p>
-        </div>
-
-        <label>
-          <span class="name">Provider</span>
-          <select name="provider">
-            <option value="openai">OpenAI</option>
-            <option value="baseten">Baseten (OpenAI-compatible)</option>
-            <option value="local">Local (regex only, no network)</option>
-          </select>
-          <span class="hint">Local runs when there is no key or the network call fails, whatever you pick here.</span>
-        </label>
-
-        <h2>Chat model (OpenAI-compatible)</h2>
-
-        <label>
-          <span class="name">Base URL</span>
-          <input type="url" name="baseURL" placeholder="https://api.openai.com/v1" autocomplete="off" spellcheck="false" />
-        </label>
+        <h2>Model</h2>
 
         <label>
           <span class="name">API key</span>
-          <input type="password" name="apiKey" autocomplete="off" spellcheck="false" />
+          <input type="password" name="apiKey" autocomplete="off" spellcheck="false" placeholder="sk-…" />
           <span class="hint">Stays in this browser's local extension storage. Only the background worker reads it; pages and content scripts never see it.</span>
         </label>
 
         <label>
-          <span class="name">Model</span>
-          <input type="text" name="model" placeholder="gpt-5.6-luna" autocomplete="off" spellcheck="false" />
-          <span class="hint">The fast model. Every chip comes from this one first, from text only, with no reasoning.</span>
+          <span class="name">Base URL</span>
+          <input type="url" name="baseUrl" placeholder="https://api.openai.com/v1" autocomplete="off" spellcheck="false" />
+          <span class="hint">Any OpenAI Responses API endpoint: the real one, a proxy, or a mock server.</span>
         </label>
+
+        <div class="row2">
+          <label>
+            <span class="name">Ghost-text model</span>
+            <input type="text" name="textModel" autocomplete="off" spellcheck="false" />
+          </label>
+          <label>
+            <span class="name">Action model</span>
+            <input type="text" name="actionModel" autocomplete="off" spellcheck="false" />
+          </label>
+        </div>
 
         <label>
-          <span class="name">Smart model (optional)</span>
-          <input type="text" name="smartModel" placeholder="same as Model" autocomplete="off" spellcheck="false" />
-          <span class="hint">Leave blank to use the same model with low reasoning. It gives a second opinion from text when the fast answer was unsure, and reads screenshots at capture time, so whatever runs here must accept images. Only used when screenshots are on.</span>
+          <span class="name">Service tier</span>
+          <select name="serviceTier">
+            <option value="auto">auto</option>
+            <option value="default">default</option>
+            <option value="priority">priority (faster, costs more)</option>
+          </select>
         </label>
 
-        <h2>Screenshots and display</h2>
+        <h2>What Carat offers</h2>
 
         <label class="row">
-          <input type="checkbox" name="screenshots" />
-          <span class="name">Screenshots of tabs with little text</span>
+          <input type="checkbox" name="actionsEnabled" />
+          <span class="name">Next-action suggestions</span>
         </label>
-        <p class="hint" id="screenshots-help">
-          Off unless you turn it on. When on, and a tab you are reading is mostly an image, a pasted screenshot or a canvas app, Carat takes one picture of that tab while it is in front and keeps it in session memory for at most three minutes, two pictures at most. When you switch away, the picture goes to the smart model, which writes down the text it can see plus a few facts it works out from the picture (dates resolved to the calendar, places, addresses, prices); the picture is deleted and only that text is kept, for 30 minutes like everything else. No picture is ever taken of a page Carat has offered to fill, of a page with a password field, or of a page on the denylist.
-        </p>
+        <span class="hint">A chip beside the control Carat thinks you want next. Tab presses it, fills it, picks the option, or reads on down the page.</span>
+
+        <label class="row">
+          <input type="checkbox" name="textEnabled" />
+          <span class="name">Ghost text while you type</span>
+        </label>
+        <span class="hint">Pause in a field and Carat writes the rest of the line in grey after the caret. Tab takes it, Ctrl+→ takes one word, Esc drops it. Never in a password, card or one-time-code field.</span>
+
+        <label class="row">
+          <input type="checkbox" name="memoryEnabled" />
+          <span class="name">Reading memory</span>
+        </label>
+        <span class="hint">When you leave a page, Carat asks the model to note the facts on it you might act on elsewhere, keeps them for an hour in session memory, and includes them in later prompts. The page's visible text is sent to the API to do this. Off by default. Skipped on blocklisted sites and pages with a password field.</span>
+
+        <h2>Display</h2>
 
         <label class="row">
           <input type="checkbox" name="sound" />
           <span class="name">Sound on Tab</span>
         </label>
-        <span class="hint">A short note when a chip is accepted, a softer one when Esc turns it down, and a rising pair when an action arms for its second Tab. Synthesized in the page at the moment you press the key; nothing is downloaded and nothing plays on its own. On by default.</span>
-
-        <label class="row">
-          <input type="checkbox" name="ghost" />
-          <span class="name">Ghost text while you type</span>
-        </label>
-        <span class="hint">Pause for a moment in a field and Carat writes the rest of the line in grey after the caret. Tab takes it, any other key drops it, Esc drops it and stays out of that field until you change what is in it. Never in a password, card or code field, and never in an empty one: there Tab still belongs to the action chip. On by default.</span>
+        <span class="hint">A short note when a chip is accepted, a softer one on Esc, and a rising pair when an action arms for its second Tab. Synthesized in the page at the moment you press the key.</span>
 
         <label class="row">
           <input type="checkbox" name="statusLine" />
           <span class="name">Show status line</span>
         </label>
-        <span class="hint">A small line in the bottom-left corner of every page: whether Carat is running there and which model answers. Off by default.</span>
+        <span class="hint">A small pill in the bottom-left corner of every page: whether Carat is running there and which model answers. Off by default.</span>
+
+        <label>
+          <span class="name">Blocklist</span>
+          <textarea name="blocklist" spellcheck="false" placeholder="one hostname per line; subdomains included"></textarea>
+          <span class="hint">Banks, identity providers and password managers are always off, whatever is in this list.</span>
+        </label>
 
         <div class="actions">
           <button type="submit" class="primary" id="save">Save</button>
@@ -221,7 +172,12 @@
         </div>
       </form>
 
-      <p class="note">Nothing Carat reads is written to disk. Context lives in session storage and is gone when the browser closes.</p>
+      <p class="note">
+        Carat holds a <code>chrome.debugger</code> session on the tab it is reading, which is why Chrome shows the
+        yellow "being debugged" bar. Dismissing that bar pauses Carat on that tab; the toolbar icon resumes it. Nothing
+        Carat reads is written to disk: the timeline and the notes live in session memory and are gone when the browser
+        closes.
+      </p>
     </main>
     <script type="module" src="./main.ts"></script>
   </body>

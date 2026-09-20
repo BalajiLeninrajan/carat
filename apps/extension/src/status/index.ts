@@ -1,4 +1,4 @@
-import type { StatusInfo } from '../background/status';
+import type { StatusInfo } from './info';
 import { STATUS_CSS } from './styles';
 
 export interface StatusLine {
@@ -15,9 +15,10 @@ const HOST_ATTR = 'data-carat-status';
 
 const REASON_TEXT: Record<NonNullable<StatusInfo['reason']>, string> = {
   disabled: 'off',
-  'site-off': 'off for this site',
-  denylisted: 'off here',
+  blocked: 'off for this site',
+  'no-key': 'no API key',
   'not-http': 'off here',
+  paused: 'paused (debugger banner dismissed)',
 };
 
 /**
@@ -95,8 +96,7 @@ export function statusText(info: StatusInfo, busy = false, quietLeft: number | n
   if (!info.running) return `carat · ${REASON_TEXT[info.reason ?? 'disabled']}`;
   // Nothing is in flight during a snooze, so the countdown is all there is to say.
   if (quietLeft !== null) return `carat · quiet ${clock(quietLeft)}`;
-  const model = info.provider === 'local' ? 'local' : info.model;
-  return busy ? `carat · ${model} · thinking` : `carat · ${model}`;
+  return busy ? `carat · ${info.model} · thinking` : `carat · ${info.model}`;
 }
 
 /** What is left of the minute, as `0:42`. Rounded up, so the last second still reads 0:01. */

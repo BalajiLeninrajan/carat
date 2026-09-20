@@ -2,6 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_SETTINGS } from '@/src/engine/shared/settings';
 
 const sendMessage = vi.fn();
 vi.mock('@/src/messaging', () => ({ sendMessage }));
@@ -11,15 +12,15 @@ const body = html.slice(html.indexOf('<main'), html.indexOf('<script'));
 
 const deferred = <T,>() => {
   let resolve!: (v: T) => void;
-  let reject!: (e: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
+  const promise = new Promise<T>((res) => {
     resolve = res;
-    reject = rej;
   });
-  return { promise, resolve, reject };
+  return { promise, resolve };
 };
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
+
+const settings = { ...DEFAULT_SETTINGS, enabled: true, apiKey: 'sk-x' };
 
 describe('popup', () => {
   beforeEach(() => {
@@ -36,12 +37,9 @@ describe('popup', () => {
     vi.useRealTimers();
   });
 
-  it('locks the toggle until the background answers, then renders items', async () => {
-    const settings = deferred<{ enabled: boolean }>();
-    const known = deferred<{ items: unknown[] }>();
-    sendMessage.mockImplementation((type: string) =>
-      type === 'getSettings' ? settings.promise : known.promise,
-    );
+  it('locks the toggle until the background answers, then shows the models', async () => {
+    const answer = deferred<typeof settings>();
+    sendMessage.mockImplementation(() => answer.promise);
     await import('./main');
 
     const toggle = document.getElementById('enabled') as HTMLInputElement;
@@ -49,299 +47,100 @@ describe('popup', () => {
     expect(toggle.disabled).toBe(true);
     expect(app.dataset.state).toBe('loading');
 
-    settings.resolve({ enabled: false });
-    known.resolve({
-      items: [
-        {
-          id: 'a',
-          origin: 'https://discord.com',
-          title: 'general',
-          kind: 'page',
-          capturedAt: Date.now() - 5000,
-          preview: 'x'.repeat(200),
-        },
-      ],
-    });
+    answer.resolve({ ...settings, enabled: false });
     await flush();
 
     expect(toggle.disabled).toBe(false);
     expect(toggle.checked).toBe(false);
     expect(app.dataset.state).toBe('ready');
-    const li = document.querySelector('#list li') as HTMLLIElement;
-    expect(li.querySelector('.origin')?.textContent).toBe('discord.com');
-    expect(li.querySelector('.chip')?.textContent).toBe('page');
-    expect(li.querySelector('.age')?.textContent).toBe('just now');
-    expect(li.querySelector('.preview')?.textContent).toHaveLength(120);
+    expect(document.getElementById('model')?.textContent).toContain(DEFAULT_SETTINGS.actionModel);
   });
 
-  it('shows the empty state and clears', async () => {
-    sendMessage.mockImplementation(async (type: string) =>
-      type === 'getSettings' ? { enabled: true } : type === 'getKnown' ? { items: [] } : undefined,
-    );
+  it('says so instead of naming a model when there is no key', async () => {
+    sendMessage.mockResolvedValue({ ...settings, apiKey: '' });
     await import('./main');
     await flush();
-    const app = document.getElementById('app') as HTMLElement;
-    expect(app.dataset.state).toBe('empty');
-
-    (document.getElementById('clear') as HTMLButtonElement).click();
-    await flush();
-    expect(sendMessage).toHaveBeenCalledWith('clearKnown', undefined);
-    expect(app.dataset.state).toBe('empty');
+    expect(document.getElementById('model')?.textContent).toBe('no API key yet — open Settings');
   });
 
-  it('clears from the header: the list empties as you click, the button says so, and it never locks', async () => {
-    vi.useFakeTimers();
-    const wiped = deferred<undefined>();
-    sendMessage.mockImplementation((type: string) => {
-      if (type === 'getSettings') return Promise.resolve({ enabled: true });
-      if (type === 'getKnown') {
-        return Promise.resolve({
-          items: [
-            {
-              id: 'a',
-              origin: 'https://discord.com',
-              title: 'general',
-              kind: 'page',
-              capturedAt: Date.now(),
-              preview: 'dinner?',
-            },
-          ],
-          pinned: true,
-        });
-      }
-      if (type === 'clearKnown') return wiped.promise;
-      return Promise.resolve(undefined);
-    });
-    await import('./main');
-    await vi.advanceTimersByTimeAsync(0);
-    const app = document.getElementById('app') as HTMLElement;
-    const clear = document.getElementById('clear') as HTMLButtonElement;
-    // At the top of the popup, beside the on switch, rather than tucked into the footer.
-    expect(clear.closest('header')).not.toBeNull();
-    expect(clear.textContent).toBe('Clear what carat remembers');
-    expect(document.querySelectorAll('#list li')).toHaveLength(1);
-
-    clear.click();
-    // The list goes as the user clicks, not after the round trip.
-    expect(document.querySelectorAll('#list li')).toHaveLength(0);
-    expect(app.dataset.state).toBe('empty');
-    expect((document.getElementById('pinned-note') as HTMLElement).hidden).toBe(true);
-    expect(clear.textContent).toBe('Clearing…');
-    expect(clear.disabled).toBe(false);
-
-    wiped.resolve(undefined);
-    await vi.advanceTimersByTimeAsync(0);
-    expect(sendMessage).toHaveBeenCalledWith('clearKnown', undefined);
-    expect(clear.textContent).toBe('Cleared');
-    expect(clear.disabled).toBe(false);
-
-    await vi.advanceTimersByTimeAsync(2000);
-    expect(clear.textContent).toBe('Clear what carat remembers');
-  });
-
-  it('says the worker is offline when a clear times out, and takes the label back', async () => {
-    vi.useFakeTimers();
-    sendMessage.mockImplementation((type: string) =>
-      type === 'clearKnown'
-        ? new Promise(() => {})
-        : Promise.resolve(type === 'getSettings' ? { enabled: true } : { items: [] }),
-    );
-    await import('./main');
-    await vi.advanceTimersByTimeAsync(0);
-    const clear = document.getElementById('clear') as HTMLButtonElement;
-    clear.click();
-    await vi.advanceTimersByTimeAsync(3001);
-    expect((document.getElementById('app') as HTMLElement).dataset.state).toBe('offline');
-    expect(clear.textContent).toBe('Clear what carat remembers');
-    expect(clear.disabled).toBe(false);
-  });
-
-  it('flips to offline when the background hangs, and retries', async () => {
-    vi.useFakeTimers();
-    sendMessage.mockImplementation(() => new Promise(() => {}));
-    await import('./main');
-    await vi.advanceTimersByTimeAsync(3001);
-    const app = document.getElementById('app') as HTMLElement;
-    expect(app.dataset.state).toBe('offline');
-    expect((document.getElementById('enabled') as HTMLInputElement).disabled).toBe(false);
-
-    sendMessage.mockImplementation(async (type: string) =>
-      type === 'getSettings' ? { enabled: true } : { items: [] },
-    );
-    (document.getElementById('retry') as HTMLButtonElement).click();
-    await vi.advanceTimersByTimeAsync(0);
-    expect(app.dataset.state).toBe('empty');
-  });
-
-  it('reverts the toggle when setSettings fails', async () => {
-    sendMessage.mockImplementation(async (type: string) => {
-      if (type === 'getSettings') return { enabled: true };
-      if (type === 'getKnown') return { items: [] };
-      throw new Error('no receiver');
-    });
+  it('shows the per-site row for the tab it was opened over, and blocks that host', async () => {
+    sendMessage.mockResolvedValue(settings);
     await import('./main');
     await flush();
-    const toggle = document.getElementById('enabled') as HTMLInputElement;
-    toggle.click();
-    expect(toggle.checked).toBe(false);
-    await flush();
-    expect(toggle.checked).toBe(true);
-    expect(sendMessage).toHaveBeenCalledWith('setSettings', { enabled: false });
-  });
 
-  it('switches carat off and on for the active tab host', async () => {
-    let settings = { enabled: true, disabledHosts: ['discord.com'] };
-    sendMessage.mockImplementation(async (type: string, data?: Partial<typeof settings>) => {
-      if (type === 'getSettings') return settings;
-      if (type === 'getKnown') return { items: [], pinned: false };
-      if (type === 'setSettings') {
-        settings = { ...settings, ...data };
-        return settings;
-      }
-      return undefined;
-    });
-    await import('./main');
-    await flush();
     const row = document.getElementById('site-row') as HTMLElement;
-    const box = document.getElementById('site-enabled') as HTMLInputElement;
+    const site = document.getElementById('site-enabled') as HTMLInputElement;
     expect(row.hidden).toBe(false);
     expect(document.getElementById('site-host')?.textContent).toBe('calendar.google.com');
-    expect(box.checked).toBe(true);
+    expect(site.checked).toBe(true);
 
-    box.click();
+    sendMessage.mockClear();
+    sendMessage.mockResolvedValue({ ...settings, blocklist: ['calendar.google.com'] });
+    site.checked = false;
+    site.dispatchEvent(new Event('change'));
     await flush();
-    expect(sendMessage).toHaveBeenCalledWith('setSettings', { disabledHosts: ['discord.com', 'calendar.google.com'] });
-    expect(box.checked).toBe(false);
 
-    box.click();
-    await flush();
-    expect(sendMessage).toHaveBeenLastCalledWith('setSettings', { disabledHosts: ['discord.com'] });
-    expect(box.checked).toBe(true);
+    const save = sendMessage.mock.calls.find(([type]) => type === 'setSettings');
+    expect(save?.[1]).toEqual({ blocklist: ['calendar.google.com'] });
+    expect(site.checked).toBe(false);
   });
 
-  it('shows the last capture and check for the active tab', async () => {
-    const now = Date.now();
-    sendMessage.mockImplementation(async (type: string, data?: { tabId?: number }) => {
-      if (type === 'getSettings') return { enabled: true, disabledHosts: [] };
-      if (type === 'getKnown') return { items: [], pinned: false };
-      if (type === 'getDiag' && data?.tabId === 7) {
-        return {
-          diag: {
-            capture: { at: now - 12_000, host: 'calendar.google.com', kind: 'page', verdict: 'stored' },
-            suggest: { at: now - 15_000, host: 'calendar.google.com', fields: 3, gate: 'no-snapshot' },
-          },
-        };
-      }
-      return undefined;
-    });
+  it('says Cleared and goes back to idle', async () => {
+    vi.useFakeTimers();
+    sendMessage.mockResolvedValue(settings);
     await import('./main');
-    await flush();
-    expect(document.getElementById('diag-capture')?.textContent).toBe('page from calendar.google.com 12s ago: stored');
-    expect(document.getElementById('diag-suggest')?.textContent).toBe(
-      'checked 15s ago: no request, nothing on the page to act on',
-    );
+    await vi.advanceTimersByTimeAsync(0);
+
+    const clear = document.getElementById('clear') as HTMLButtonElement;
+    clear.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sendMessage).toHaveBeenCalledWith('clearKnown', undefined);
+    expect(clear.dataset.state).toBe('done');
+    expect(clear.textContent).toBe('Cleared');
+
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(clear.dataset.state).toBe('idle');
   });
 
-  it('keeps the popup up when the debug line cannot be fetched', async () => {
-    sendMessage.mockImplementation(async (type: string) => {
-      if (type === 'getSettings') return { enabled: true, disabledHosts: [] };
-      if (type === 'getKnown') return { items: [], pinned: false };
-      throw new Error('no diag');
-    });
+  it('goes offline when the worker never answers, and retries on demand', async () => {
+    vi.useFakeTimers();
+    sendMessage.mockImplementation(() => new Promise(() => undefined));
     await import('./main');
-    await flush();
-    expect((document.getElementById('app') as HTMLElement).dataset.state).toBe('empty');
-    expect(document.getElementById('diag-suggest')?.textContent).toBe('no check on this tab yet');
+    await vi.advanceTimersByTimeAsync(3000);
+
+    const app = document.getElementById('app') as HTMLElement;
+    expect(app.dataset.state).toBe('offline');
+
+    sendMessage.mockResolvedValue(settings);
+    (document.getElementById('retry') as HTMLButtonElement).click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(app.dataset.state).toBe('ready');
   });
 
-  it('hides the site switch over a page carat cannot run on', async () => {
-    (chrome.tabs.query as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([{ url: 'chrome://extensions' }]);
-    sendMessage.mockImplementation(async (type: string) =>
-      type === 'getSettings' ? { enabled: true, disabledHosts: [] } : { items: [], pinned: false },
-    );
+  it('puts the toggle back when saving it fails', async () => {
+    vi.useFakeTimers();
+    sendMessage.mockResolvedValue(settings);
     await import('./main');
-    await flush();
-    expect((document.getElementById('site-row') as HTMLElement).hidden).toBe(true);
+    await vi.advanceTimersByTimeAsync(0);
+
+    const toggle = document.getElementById('enabled') as HTMLInputElement;
+    sendMessage.mockRejectedValue(new Error('no worker'));
+    toggle.checked = false;
+    toggle.dispatchEvent(new Event('change'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(toggle.checked).toBe(true);
+    expect((document.getElementById('app') as HTMLElement).dataset.state).toBe('offline');
   });
+});
 
-  it('pins and unpins the store from the footer, and Clear unpins', async () => {
-    let pinned = false;
-    sendMessage.mockImplementation(async (type: string, data?: { pinned?: boolean }) => {
-      if (type === 'getSettings') return { enabled: true };
-      if (type === 'getKnown') return { items: [], pinned };
-      if (type === 'setPinned') {
-        pinned = data!.pinned!;
-        return { pinned };
-      }
-      return undefined;
-    });
-    await import('./main');
-    await flush();
-    const pin = document.getElementById('pin') as HTMLButtonElement;
-    const note = document.getElementById('pinned-note') as HTMLElement;
-    expect(pin.textContent).toBe('Pin');
-    expect(note.hidden).toBe(true);
-
-    pin.click();
-    await flush();
-    expect(sendMessage).toHaveBeenCalledWith('setPinned', { pinned: true });
-    expect(pin.textContent).toBe('Unpin');
-    expect(pin.getAttribute('aria-pressed')).toBe('true');
-    expect(note.hidden).toBe(false);
-
-    (document.getElementById('clear') as HTMLButtonElement).click();
-    await flush();
-    expect(pin.textContent).toBe('Pin');
-    expect(note.hidden).toBe(true);
-  });
-
-  it('shows the goal carat is working against, and drops it from the cross', async () => {
-    const goal = 'book a flight ZRH to LON on Friday, cheapest';
-    sendMessage.mockImplementation(async (type: string) => {
-      if (type === 'getSettings') return { enabled: true };
-      if (type === 'getKnown') return { items: [], pinned: false, goal };
-      return undefined;
-    });
-    await import('./main');
-    await flush();
-    const row = document.getElementById('goal-row') as HTMLElement;
-    expect(row.hidden).toBe(false);
-    expect(document.getElementById('goal-text')?.textContent).toBe(goal);
-
-    (document.getElementById('goal-drop') as HTMLButtonElement).click();
-    // The line goes as the user clicks, not after the round trip.
-    expect(row.hidden).toBe(true);
-    await flush();
-    expect(sendMessage).toHaveBeenCalledWith('clearGoal', undefined);
-  });
-
-  it('shows no goal line at all when carat has not worked one out', async () => {
-    sendMessage.mockImplementation(async (type: string) =>
-      type === 'getSettings' ? { enabled: true } : { items: [], pinned: false },
-    );
-    await import('./main');
-    await flush();
-    expect((document.getElementById('goal-row') as HTMLElement).hidden).toBe(true);
-  });
-
-  it('takes the goal line down with the rest when the header clear runs', async () => {
-    sendMessage.mockImplementation(async (type: string) =>
-      type === 'getSettings' ? { enabled: true } : type === 'getKnown' ? { items: [], pinned: false, goal: 'find brunch' } : undefined,
-    );
-    await import('./main');
-    await flush();
-    expect((document.getElementById('goal-row') as HTMLElement).hidden).toBe(false);
-
-    (document.getElementById('clear') as HTMLButtonElement).click();
-    expect((document.getElementById('goal-row') as HTMLElement).hidden).toBe(true);
-  });
-
-  it('opens the options page from the Settings link', async () => {
-    sendMessage.mockImplementation(async (type: string) =>
-      type === 'getSettings' ? { enabled: true } : { items: [] },
-    );
-    await import('./main');
-    (document.getElementById('options') as HTMLAnchorElement).click();
-    expect(chrome.runtime.openOptionsPage).toHaveBeenCalled();
+describe('withSite', () => {
+  it('drops the www prefix and never lists a host twice', async () => {
+    const { withSite, isSiteOff, siteHost } = await import('./main');
+    expect(withSite({ ...settings, blocklist: [] }, 'www.a.test', false)).toEqual({ blocklist: ['a.test'] });
+    expect(withSite({ ...settings, blocklist: ['a.test'] }, 'www.a.test', false)).toEqual({ blocklist: ['a.test'] });
+    expect(withSite({ ...settings, blocklist: ['a.test'] }, 'www.a.test', true)).toEqual({ blocklist: [] });
+    expect(isSiteOff({ blocklist: ['a.test'] }, 'sub.a.test')).toBe(true);
+    expect(siteHost('chrome://extensions')).toBeUndefined();
+    expect(siteHost('https://a.test/x')).toBe('a.test');
   });
 });
