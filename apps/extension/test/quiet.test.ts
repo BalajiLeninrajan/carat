@@ -3,7 +3,7 @@ import { QUIET_MS, QUIET_TICK_MS, createQuiet, type Quiet } from '../src/quiet';
 import { statusText } from '../src/status';
 import type { StatusInfo } from '../src/status/info';
 
-const RUNNING: StatusInfo = { show: true, running: true, model: 'gpt-5', sound: true };
+const RUNNING: StatusInfo = { show: true, running: true, model: 'gpt-5', sound: true, acceptKey: 'rightShift' };
 
 describe('the quiet minute Shift+Tab buys', () => {
   let quiet: Quiet;

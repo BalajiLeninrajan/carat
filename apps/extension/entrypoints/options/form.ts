@@ -1,3 +1,4 @@
+import { isAcceptKeyName } from '@/src/chip/accept-key';
 import { DEFAULT_SETTINGS, indexPrefix, type Settings } from '@/src/engine/shared/settings';
 
 const TEXT_KEYS = ['apiKey', 'baseUrl', 'textModel', 'actionModel', 'elasticUrl', 'elasticApiKey', 'elasticIndexPrefix', 'elasticInferenceId'] as const;
@@ -15,6 +16,7 @@ export function renderForm(form: HTMLFormElement, s: Settings): void {
   // ask Chrome for the permission, so it saves itself the moment it is ticked.
   input(form, 'clipboardRead').checked = s.clipboardRead;
   (form.elements.namedItem('serviceTier') as HTMLSelectElement).value = s.serviceTier;
+  (form.elements.namedItem('acceptKey') as HTMLSelectElement).value = s.acceptKey;
   (form.elements.namedItem('blocklist') as HTMLTextAreaElement).value = s.blocklist.join('\n');
 }
 
@@ -25,12 +27,14 @@ export function renderForm(form: HTMLFormElement, s: Settings): void {
  */
 export function readForm(form: HTMLFormElement): Partial<Settings> {
   const tier = (form.elements.namedItem('serviceTier') as HTMLSelectElement).value as Settings['serviceTier'];
+  const key = (form.elements.namedItem('acceptKey') as HTMLSelectElement).value;
   const patch: Partial<Settings> = {
     apiKey: input(form, 'apiKey').value.trim(),
     baseUrl: input(form, 'baseUrl').value.trim().replace(/\/+$/, '') || DEFAULT_SETTINGS.baseUrl,
     textModel: input(form, 'textModel').value.trim() || DEFAULT_SETTINGS.textModel,
     actionModel: input(form, 'actionModel').value.trim() || DEFAULT_SETTINGS.actionModel,
     serviceTier: TIERS.has(tier) ? tier : DEFAULT_SETTINGS.serviceTier,
+    acceptKey: isAcceptKeyName(key) ? key : DEFAULT_SETTINGS.acceptKey,
     blocklist: parseBlocklist((form.elements.namedItem('blocklist') as HTMLTextAreaElement).value),
     // loadSettings normalizes these further (trailing slash, index-prefix charset).
     elasticUrl: input(form, 'elasticUrl').value.trim().replace(/\/+$/, ''),

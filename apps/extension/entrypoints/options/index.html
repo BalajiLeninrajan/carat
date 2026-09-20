@@ -78,7 +78,8 @@
       <p class="lede">
         Carat reads the page as Chrome's accessibility tree, asks one model what you are most likely to do next, and
         offers it. A tap of the <b>right Shift</b> accepts, <b>Esc</b> dismisses, <b>Ctrl+→</b> takes one word of ghost
-        text. Something that cannot be undone wants the key twice. Tab stays the browser's.
+        text. Something that cannot be undone wants the key twice. Tab stays the browser's, unless you ask for it
+        below.
       </p>
 
       <div id="offline">
@@ -127,6 +128,15 @@
         </label>
 
         <h2>What Carat offers</h2>
+
+        <label>
+          <span class="name">Accept with</span>
+          <select name="acceptKey">
+            <option value="rightShift">a tap of the right Shift</option>
+            <option value="tab">Tab</option>
+          </select>
+        </label>
+        <span class="hint">The key that takes a chip or a line of ghost text. A tap of the right Shift is the key pressed and let go on its own, so Shift+Tab, Shift+click and capitals all still reach the page. Tab is the editor's key, and while a chip is up the page does not get it.</span>
 
         <label class="row">
           <input type="checkbox" name="actionsEnabled" />

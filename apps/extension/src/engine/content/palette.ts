@@ -12,7 +12,7 @@
  * chip's colours, because it is the same extension talking.
  */
 
-import { ACCEPT_GLYPH, ACCEPT_KEY_NAME } from "../../chip/accept-key";
+import { ACCEPT_KEYS, DEFAULT_ACCEPT_KEY, type AcceptKeyName } from "../../chip/accept-key";
 import { KEYCAP_CSS } from "../../chip/styles";
 import { registerSurface } from "../../dom/surfaces";
 
@@ -80,6 +80,17 @@ export class Palette {
   private ask!: HTMLDivElement;
   private askInput!: HTMLInputElement;
   private unregister: (() => void) | null = null;
+  /** The key the hint names, which the options page can change under an open box. */
+  private acceptKey: AcceptKeyName = DEFAULT_ACCEPT_KEY;
+
+  /** Follow the options page: the hint names whichever key confirms a step. */
+  setAcceptKey(key: AcceptKeyName): void {
+    this.acceptKey = key;
+    const cap = this.host === null ? null : this.scrim.querySelector("kbd");
+    if (!cap) return;
+    cap.textContent = ACCEPT_KEYS[key].glyph;
+    cap.setAttribute("aria-label", ACCEPT_KEYS[key].label);
+  }
 
   /** Called with the instruction the user typed. */
   onSubmit: (goal: string) => void = () => {};
@@ -123,7 +134,7 @@ export class Palette {
       <div class="scrim" hidden>
         <div class="box">
           <div class="row"><span class="mark">Carat</span><input type="text" placeholder="What should Carat do on this page?" /></div>
-          <div class="hint">Enter to run · Esc to close · it stops for anything that sends, pays or deletes, and waits for <kbd aria-label="${ACCEPT_KEY_NAME}">${ACCEPT_GLYPH}</kbd></div>
+          <div class="hint">Enter to run · Esc to close · it stops for anything that sends, pays or deletes, and waits for <kbd aria-label="${ACCEPT_KEYS[DEFAULT_ACCEPT_KEY].label}">${ACCEPT_KEYS[DEFAULT_ACCEPT_KEY].glyph}</kbd></div>
         </div>
       </div>
       <div class="panel" hidden>

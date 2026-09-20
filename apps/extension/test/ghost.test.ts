@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { ACCEPT_GLYPH } from '../src/chip/accept-key';
+import { ACCEPT_KEYS } from '../src/chip/accept-key';
 import { KEYCAP, KEYCAP_CSS } from '../src/chip/styles';
 import { Ghost } from '../src/engine/content/ghost';
 
@@ -23,15 +23,23 @@ describe('the key hint at the end of ghost text', () => {
   it('draws the key after the last glyph of the suggestion', () => {
     ghost.show(field, 'en Shores Cafe');
     const drawn = ghost.drawn;
-    expect(drawn?.hint).toBe(ACCEPT_GLYPH);
+    expect(drawn?.hint).toBe(ACCEPT_KEYS.rightShift.glyph);
     expect(drawn?.ghost).toBe('en Shores Cafe');
     // Every glyph in order: the field's own text, the suggestion, then the key.
-    expect(drawn?.line).toBe(`seven Shores Cafe${ACCEPT_GLYPH}`);
+    expect(drawn?.line).toBe(`seven Shores Cafe${ACCEPT_KEYS.rightShift.glyph}`);
   });
 
   it('keeps the key on the same line as the last word', () => {
     ghost.show(field, 'en Shores Cafe');
-    expect(ghost.drawn?.tail).toBe(`Cafe${ACCEPT_GLYPH}`);
+    expect(ghost.drawn?.tail).toBe(`Cafe${ACCEPT_KEYS.rightShift.glyph}`);
+  });
+
+  it('names whichever key the setting says takes the line', () => {
+    ghost.show(field, 'en Shores Cafe');
+    ghost.setAcceptKey('tab');
+    expect(ghost.drawn?.hint).toBe(ACCEPT_KEYS.tab.glyph);
+    ghost.setAcceptKey('rightShift');
+    expect(ghost.drawn?.hint).toBe(ACCEPT_KEYS.rightShift.glyph);
   });
 
   it('draws the same key the chip does', () => {
@@ -42,7 +50,7 @@ describe('the key hint at the end of ghost text', () => {
 
   it('goes when the ghost does, whether it was taken or refused', () => {
     ghost.show(field, 'en Shores Cafe');
-    expect(ghost.drawn?.hint).toBe(ACCEPT_GLYPH);
+    expect(ghost.drawn?.hint).toBe(ACCEPT_KEYS.rightShift.glyph);
     ghost.hide();
     expect(ghost.drawn).toBeNull();
 

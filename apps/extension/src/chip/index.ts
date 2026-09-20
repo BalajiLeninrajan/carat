@@ -4,7 +4,7 @@ import { createEffects } from './effects';
 import { placeChip } from './position';
 import { PREVIEW_CSS, PREVIEW_DELAY_MS } from './preview';
 import { createSounds } from './sound';
-import { ACCEPT_GLYPH, ACCEPT_KEY_NAME, watchTap } from './accept-key';
+import { watchAccept, type AcceptKeyName } from './accept-key';
 import { CHIP_CSS, TIMING } from './styles';
 
 /**
@@ -116,6 +116,8 @@ export interface Chip {
   readonly keycap: { readonly glyph: string; readonly name: string | null };
   /** The options page's "Sound on accept". Off means no AudioContext is ever built. */
   setSound(on: boolean): void;
+  /** The options page's "Accept with": which key answers a chip, and what the keycap shows. */
+  setAcceptKey(key: AcceptKeyName): void;
   /** What the pill is wearing; the shadow root is closed, so tests read it here. */
   readonly classes: readonly string[];
 }
@@ -163,6 +165,9 @@ type Session = ControlSession | BannerSession;
  * between "carat is working on this" and "here is the offer".
  */
 export function createChip(doc: Document = document, rings: Ring = new Ring()): Chip {
+  // Which key answers the chip, and the latch behind it. The options page can
+  // change it under a live chip, so the keycap is painted from here.
+  const accepts = watchAccept();
   const host = doc.createElement('div');
   host.setAttribute(HOST_ATTR, '');
   host.style.cssText = 'all:initial;position:fixed;top:0;left:0;z-index:2147483647;display:none;';
@@ -184,8 +189,8 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
   peek.hidden = true;
   text.append(label, sub, peek);
   const key = doc.createElement('kbd');
-  key.textContent = ACCEPT_GLYPH;
-  key.setAttribute('aria-label', ACCEPT_KEY_NAME);
+  key.textContent = accepts.glyph;
+  key.setAttribute('aria-label', accepts.label);
   pill.append(text, key);
   const previewStyle = doc.createElement('style');
   previewStyle.textContent = PREVIEW_CSS;
@@ -213,8 +218,6 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
   const fx = createEffects(doc, reducedMotion);
   const sounds = createSounds(win);
 
-  /** The latch behind carat's key: a right Shift pressed and let go on its own. */
-  const tap = watchTap();
 
   const onKeydown = (e: KeyboardEvent): void => {
     if (!session) return;
@@ -222,18 +225,25 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
     // the user working carat, not answering the chip. Esc closes the panel,
     // Tab moves inside it, and neither reaches this.
     if (fromSurface(e)) {
-      tap.cancel();
+      accepts.cancel();
       return;
     }
     // A chip the user cannot see must not eat their keys; neither should one
     // they can see while an IME is still composing.
     if (!session.onScreen || e.isComposing) {
-      tap.cancel();
+      accepts.cancel();
       return;
     }
-    // Carat's key is decided on the way up, and every other key says this
-    // hold is a chord rather than a tap.
-    if (tap.keydown(e)) return;
+    // A right Shift is decided on the way up, and every other key says the
+    // hold was a chord rather than a tap. Tab decides here and now.
+    const verdict = accepts.keydown(e);
+    if (verdict === 'held') return;
+    if (verdict === 'accept') {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      accept();
+      return;
+    }
     if (e.key === 'Escape') {
       e.preventDefault();
       e.stopImmediatePropagation();
@@ -263,7 +273,7 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
    */
   const onKeyup = (e: KeyboardEvent): void => {
     if (!session) return;
-    if (!tap.keyup(e)) return;
+    if (!accepts.keyup(e)) return;
     if (!session.onScreen || fromSurface(e)) return;
     e.preventDefault();
     e.stopImmediatePropagation();
@@ -304,7 +314,7 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
   /** A press, a tap or a click anywhere but the chip itself. */
   const onPointerDown = (e: Event): void => {
     // Shift-clicking is not a tap either.
-    tap.cancel();
+    accepts.cancel();
     if (!session || onTheChip(e)) return;
     dismiss('acted');
   };
@@ -514,7 +524,7 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
     previewText = opts.preview ?? '';
     reason = opts.reason ?? '';
     setPending(opts.pending === true);
-    key.textContent = ACCEPT_GLYPH;
+    key.textContent = accepts.glyph;
     label.classList.remove('is-fresh');
     if (!host.isConnected) doc.documentElement.appendChild(host);
     // Capture phase so the page's own handlers never see an accepted tap.
@@ -809,6 +819,12 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
     },
     setSound(on) {
       sounds.setEnabled(on);
+    },
+    setAcceptKey(next) {
+      if (next === accepts.key) return;
+      accepts.use(next);
+      key.textContent = accepts.glyph;
+      key.setAttribute('aria-label', accepts.label);
     },
   };
 }

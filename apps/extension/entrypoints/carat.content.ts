@@ -1,6 +1,6 @@
 import { defineContentScript } from 'wxt/utils/define-content-script';
 import { createChip, type ChipKind } from '../src/chip';
-import { watchTap } from '../src/chip/accept-key';
+import { watchAccept } from '../src/chip/accept-key';
 import { startDebug } from '../src/debug';
 import { Ghost } from '../src/engine/content/ghost';
 import { Palette } from '../src/engine/content/palette';
@@ -490,17 +490,26 @@ export default defineContentScript({
       true,
     );
 
-    const ghostTap = watchTap();
+    const ghostAccept = watchAccept();
     window.addEventListener(
       'keydown',
       (e) => {
         if (!e.isTrusted) return;
         // The latch is kept whether or not there is grey text to take: what
         // matters on the way down is only that nothing else was pressed.
-        if (ghostTap.keydown(e)) return;
+        const verdict = ghostAccept.keydown(e);
+        if (verdict === 'held') return;
         if (e.isComposing) return;
         const g = ghostVisible();
+        // With no grey text to take, the key is not ghost text's to swallow:
+        // it carries on to the chip, or to the page.
         if (!g) return;
+        if (verdict === 'accept') {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          acceptGhost(g, false);
+          return;
+        }
         const bare = !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey;
         if (e.key === 'ArrowRight' && e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) {
           e.preventDefault();
@@ -519,7 +528,7 @@ export default defineContentScript({
     window.addEventListener(
       'keyup',
       (e) => {
-        if (!e.isTrusted || !ghostTap.keyup(e)) return;
+        if (!e.isTrusted || !ghostAccept.keyup(e)) return;
         const g = ghostVisible();
         if (!g) return;
         e.preventDefault();
@@ -528,7 +537,7 @@ export default defineContentScript({
       },
       true,
     );
-    window.addEventListener('pointerdown', () => ghostTap.cancel(), true);
+    window.addEventListener('pointerdown', () => ghostAccept.cancel(), true);
 
     // -----------------------------------------------------------------------
     // Filling in the page
@@ -986,6 +995,12 @@ export default defineContentScript({
       if (!info || !ctx.isValid) return;
       status.update(info);
       chip.setSound(info.sound);
+      // The key can change under a live chip, so every surface that names it
+      // or listens for it follows the same poll.
+      chip.setAcceptKey(info.acceptKey);
+      ghostAccept.use(info.acceptKey);
+      palette.setAcceptKey(info.acceptKey);
+      ghost.setAcceptKey(info.acceptKey);
       // With the pill off, a pause looks exactly like carat having nothing to
       // say. Break that silence once, then leave the page alone.
       if (info.reason !== 'paused') pauseNoted = false;

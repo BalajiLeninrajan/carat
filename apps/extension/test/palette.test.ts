@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ACCEPT_GLYPH } from '../src/chip/accept-key';
+import { ACCEPT_KEYS } from '../src/chip/accept-key';
 import { clearSurfaces, fromSurface } from '../src/dom/surfaces';
 import { Palette } from '../src/engine/content/palette';
 
@@ -86,7 +86,16 @@ describe('the instruction box', () => {
   it('names the key the confirmation will wait for', () => {
     palette.open();
     const host = document.querySelector('carat-palette') as Element & { __root?: ShadowRoot };
-    expect(host.__root!.querySelector('kbd')!.textContent).toBe(ACCEPT_GLYPH);
+    expect(host.__root!.querySelector('kbd')!.textContent).toBe(ACCEPT_KEYS.rightShift.glyph);
+  });
+
+  it('names the other key once the setting says so', () => {
+    palette.open();
+    palette.setAcceptKey('tab');
+    const host = document.querySelector('carat-palette') as Element & { __root?: ShadowRoot };
+    const cap = host.__root!.querySelector('kbd')!;
+    expect(cap.textContent).toBe(ACCEPT_KEYS.tab.glyph);
+    expect(cap.getAttribute('aria-label')).toBe(ACCEPT_KEYS.tab.label);
   });
 
   it('is one of carat’s own surfaces, so working it is not getting on with the page', () => {

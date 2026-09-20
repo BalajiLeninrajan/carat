@@ -1,3 +1,4 @@
+import { DEFAULT_ACCEPT_KEY, type AcceptKeyName } from "../../chip/accept-key";
 import { isDenylisted } from "../../denylist";
 
 /** User settings, persisted in chrome.storage.local. */
@@ -40,6 +41,12 @@ export interface Settings {
   /** Ours: the chip's short note on accept. Off means no AudioContext is ever built. */
   sound: boolean;
   /**
+   * Ours: which key answers a chip and takes ghost text. A tap of the right
+   * Shift by default, which leaves Tab to the browser; Tab for anyone who
+   * wants the editor's key and does not mind a chip swallowing it.
+   */
+  acceptKey: AcceptKeyName;
+  /**
    * Ours: optional Elasticsearch context layer. With a URL and an API key,
    * the accessibility tree of every page read, the facts distilled from it and
    * the chips accepted or dismissed are indexed under `elasticIndexPrefix`,
@@ -78,6 +85,7 @@ export const DEFAULT_SETTINGS: Settings = {
   blocklist: [],
   statusLine: false,
   sound: true,
+  acceptKey: DEFAULT_ACCEPT_KEY,
   elasticUrl: "",
   elasticApiKey: "",
   elasticIndexPrefix: "carat",

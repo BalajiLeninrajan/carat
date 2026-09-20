@@ -12,6 +12,7 @@ describe('describeStatus', () => {
       show: true,
       running: true,
       sound: true,
+      acceptKey: DEFAULT_SETTINGS.acceptKey,
       model: DEFAULT_SETTINGS.actionModel,
     });
   });
@@ -40,7 +41,7 @@ describe('describeStatus', () => {
 });
 
 describe('statusText', () => {
-  const running = { show: true, running: true, sound: true, model: 'gpt-5.6-luna' };
+  const running = { show: true, running: true, sound: true, acceptKey: 'rightShift' as const, model: 'gpt-5.6-luna' };
 
   it('names the model while running and the reason while not', () => {
     expect(statusText(running)).toBe('carat · gpt-5.6-luna');
@@ -60,7 +61,7 @@ describe('status line element', () => {
   it('stays out of the document until shown, and hides again when the setting is off', () => {
     const line = createStatusLine(document);
     expect(document.querySelector('[data-carat-status]')).toBeNull();
-    line.update({ show: true, running: true, sound: true, model: 'm' });
+    line.update({ show: true, running: true, sound: true, acceptKey: 'rightShift', model: 'm' });
     const host = document.querySelector<HTMLElement>('[data-carat-status]');
     expect(host).not.toBeNull();
     expect(host!.style.display).toBe('block');
@@ -69,7 +70,7 @@ describe('status line element', () => {
     expect(host!.style.left).toBe('12px');
     expect(host!.style.bottom).toBe('12px');
     expect(line.visible).toBe(true);
-    line.update({ show: false, running: true, sound: true, model: 'm' });
+    line.update({ show: false, running: true, sound: true, acceptKey: 'rightShift', model: 'm' });
     expect(host!.style.display).toBe('none');
     expect(line.visible).toBe(false);
   });
@@ -88,7 +89,7 @@ describe('status line element', () => {
     const line = createStatusLine(document);
     spy.mockRestore();
 
-    line.update({ show: false, running: false, reason: 'paused', sound: true, model: 'm' });
+    line.update({ show: false, running: false, reason: 'paused', sound: true, acceptKey: 'rightShift', model: 'm' });
     expect(line.visible).toBe(false);
 
     line.notice(PAUSED_NOTICE, 4000);
@@ -107,7 +108,7 @@ describe('status line element', () => {
 
   it('removes itself on destroy', () => {
     const line = createStatusLine(document);
-    line.update({ show: true, running: true, sound: true, model: 'm' });
+    line.update({ show: true, running: true, sound: true, acceptKey: 'rightShift', model: 'm' });
     line.destroy();
     expect(document.querySelector('[data-carat-status]')).toBeNull();
   });
