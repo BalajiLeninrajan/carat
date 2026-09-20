@@ -73,6 +73,13 @@ const DEBUG_PREVIEW_CHARS = 3200;
 /** What the one line naming the thing this page can finish starts with. */
 export const TASK_LINE_PREFIX = '[task]';
 
+/**
+ * Details are reference data, not errands: a name does not expire in five
+ * minutes and is not used up by the form that asks for it, so they live in
+ * their own index with no sweep and are never consumed by a finished chip.
+ */
+const MAX_DETAILS = 6;
+
 type ElasticSettings = Pick<Settings, 'elasticUrl' | 'elasticApiKey' | 'elasticIndexPrefix' | 'elasticInferenceId'>;
 
 export interface ElasticMemory {
@@ -131,6 +138,11 @@ interface SearchHit {
     timeValues?: string[];
     placeValues?: string[];
     fields?: TaskField[];
+    subject?: string;
+    subjectKey?: string;
+    detailField?: string;
+    detailValue?: string;
+    values?: string[];
     firstSeenAt?: string;
     capturedAt?: string;
     at?: string;
@@ -171,6 +183,33 @@ interface TaskDoc {
   conflictCount?: number;
   resolvedAt?: string;
   resolutionLabel?: string;
+}
+
+/** The kinds of personal detail a form asks for and a conversation gives away. */
+export type DetailField =
+  | 'full_name'
+  | 'given_name'
+  | 'family_name'
+  | 'email'
+  | 'phone'
+  | 'address'
+  | 'postal_code';
+
+export interface DetailDoc {
+  /** Whose detail it is: "user" for the person driving, else the name said. */
+  subject: string;
+  /** The identity the subject resolves to, so one person is one document. */
+  subjectKey: string;
+  field: DetailField;
+  value: string;
+  /** Every value seen for this subject and field; more than one means a conflict. */
+  values: string[];
+  status: 'known' | 'conflict';
+  hosts: string[];
+  texts: string[];
+  firstSeenAt: string;
+  lastSeenAt: string;
+  conflictReason?: string;
 }
 
 interface RetrievalPlan {
@@ -397,13 +436,17 @@ export function createElasticMemory(deps: ElasticDeps): ElasticMemory {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
     try {
-      const [task, evidence, summary] = await Promise.all([
+      // Details only when the page has somewhere to put them; a page with no
+      // name field should never be handed somebody's name.
+      const wanted = detailFieldsWanted(page);
+      const [task, details, evidence, summary] = await Promise.all([
         plan.actionCapabilities.length ? topTask(s, plan, query, tabId, controller.signal) : Promise.resolve([]),
+        wanted.length ? topDetails(s, wanted, tabId, controller.signal) : Promise.resolve([]),
         evidenceHits(s, query, tabId, controller.signal),
         plan.actionCapabilities.length ? taskSummary(s, plan, tabId, controller.signal) : Promise.resolve([]),
       ]);
-      const taskText = new Set(task.map((line) => keyText(line)));
-      return [...task, ...summary, ...evidence.filter((line) => !taskText.has(keyText(line)))];
+      const taskText = new Set([...task, ...details].map((line) => keyText(line)));
+      return [...task, ...details, ...summary, ...evidence.filter((line) => !taskText.has(keyText(line)))];
     } finally {
       clearTimeout(timer);
     }
@@ -481,6 +524,37 @@ export function createElasticMemory(deps: ElasticDeps): ElasticMemory {
         request,
         response: errorMessage(err),
       });
+      return [];
+    }
+  }
+
+  /** Who this page could be filled for, and with what. */
+  async function topDetails(s: ElasticSettings, wanted: DetailField[], tabId: number | undefined, signal: AbortSignal): Promise<string[]> {
+    const index = await ensure(s, 'details');
+    const request = {
+      size: MAX_DETAILS,
+      _source: ['subject', 'detailField', 'detailValue', 'values', 'status', 'conflictReason', 'hosts', 'lastSeenAt'],
+      query: { bool: { filter: [{ terms: { detailField: wanted } }] } },
+      sort: [{ lastSeenAt: { order: 'desc', unmapped_type: 'date' } }],
+    };
+    const path = `/${encodeURIComponent(index)}/_search?ignore_unavailable=true`;
+    try {
+      const res = await send(s, path, { method: 'POST', body: JSON.stringify(request), signal });
+      const json = (await responsePreview(res)) as { hits?: { hits?: SearchHit[] } };
+      const lines = res.ok ? renderDetails(json.hits?.hits ?? [], wanted) : [];
+      debug({
+        kind: 'search',
+        tabId,
+        path,
+        ok: res.ok,
+        status: res.status,
+        summary: `page asks for ${wanted.join(', ')}; ${lines.length} detail line(s)`,
+        request,
+        response: json,
+      });
+      return lines;
+    } catch (err) {
+      debug({ kind: 'search', tabId, path, ok: false, summary: 'detail search failed', request, response: errorMessage(err) });
       return [];
     }
   }
@@ -840,6 +914,72 @@ export function createElasticMemory(deps: ElasticDeps): ElasticMemory {
     }
   }
 
+  /**
+   * Remember a personal detail. Unlike a task this is not consumed and does
+   * not expire: the next form that asks for a surname wants the same answer.
+   * Two different values for the same subject and field is a conflict, kept on
+   * the one document so the disagreement travels with it.
+   */
+  async function upsertDetail(
+    s: ElasticSettings,
+    detail: { subject: string; field: DetailField; value: string },
+    item: Observation,
+    note: Note,
+  ): Promise<void> {
+    // Resolved on the given name, not the full one: "Pez Guan" and "Pez Kwan"
+    // are one person whose surname is in dispute, not two people. Two real
+    // people sharing a first name would merge here, which is the price of
+    // catching the misheard-surname case that actually happens.
+    const key = subjectKey(detail.subject);
+    const id = slug(`${key}:${detail.field}`);
+    const at = new Date(note.at).toISOString();
+    const host = hostOf(noteUrl(note, item));
+    const existing = await getDetail(s, id).catch(() => null);
+    const values = unique([...(existing?.values ?? []), detail.value]);
+    const conflict = values.length > 1;
+    const doc: DetailDoc = {
+      // The newest spelling is what gets shown; every one stays in `values`.
+      subject: detail.subject,
+      subjectKey: key,
+      field: detail.field,
+      // The newest statement wins the headline; every value stays in `values`.
+      value: detail.value,
+      values,
+      status: conflict ? 'conflict' : 'known',
+      hosts: unique([...(existing?.hosts ?? []), host]),
+      texts: unique([...(existing?.texts ?? []), normalizeWhitespace(note.text)]).slice(-4),
+      firstSeenAt: existing?.firstSeenAt ?? at,
+      lastSeenAt: at,
+      ...(conflict ? { conflictReason: `${values.length} different values seen` } : {}),
+    };
+    await indexDoc(
+      s,
+      'details',
+      id,
+      {
+        ...doc,
+        id,
+        subjectKey: key,
+        detailField: detail.field,
+        detailValue: detail.value,
+        // `text` is what the lexical and semantic queries see.
+        text: `${detail.subject} ${detail.field.replace(/_/g, ' ')}: ${detail.value}`,
+        indexedAt: new Date(now()).toISOString(),
+        ...(semanticEnabled(s) ? { text_semantic: detail.value } : {}),
+      },
+      item.tabId,
+    );
+  }
+
+  async function getDetail(s: ElasticSettings, id: string): Promise<DetailDoc | null> {
+    const index = await ensure(s, 'details');
+    const res = await send(s, `/${encodeURIComponent(index)}/_doc/${encodeURIComponent(id)}`, { method: 'GET' });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`elastic get detail ${id} failed`);
+    const json = (await res.json()) as { _source?: DetailDoc };
+    return json._source ?? null;
+  }
+
   async function duplicateDistilledNote(s: ElasticSettings, note: Note, item: Observation, text: string): Promise<boolean> {
     return duplicateExists(
       s,
@@ -915,6 +1055,8 @@ export function createElasticMemory(deps: ElasticDeps): ElasticMemory {
             await Promise.all([
               indexDoc(s, 'facts', `${item.id}:${i}`, doc, item.tabId),
               upsertTask(s, item, note, i),
+              // A note can carry a detail and an errand at once; both are kept.
+              ...extractDetails(note.text).map((d) => upsertDetail(s, d, item, note).catch(() => undefined)),
             ]);
           })().catch(() => undefined);
         }),
@@ -981,7 +1123,7 @@ function errorMessage(err: unknown): Record<string, string> {
   return { error: err instanceof Error ? err.message : String(err) };
 }
 
-type IndexKind = 'observations' | 'facts' | 'actions' | 'tasks';
+type IndexKind = 'observations' | 'facts' | 'actions' | 'tasks' | 'details';
 
 function indexName(s: ElasticSettings, kind: IndexKind): string {
   return `${indexPrefix(s.elasticIndexPrefix)}-${kind}`;
@@ -1042,6 +1184,11 @@ function indexDefinition(_kind: IndexKind, inferenceId: string): Record<string, 
         sourceIds: { type: 'keyword' },
         timeValues: { type: 'keyword' },
         placeValues: { type: 'keyword' },
+        subject: { type: 'keyword' },
+        subjectKey: { type: 'keyword' },
+        detailField: { type: 'keyword' },
+        detailValue: { type: 'keyword' },
+        values: { type: 'keyword' },
         label: { type: 'text' },
         value: { type: 'text' },
         accepted: { type: 'boolean' },
@@ -1182,6 +1329,38 @@ function whereOf(url: string): string {
   }
 }
 
+/**
+ * What a control is asking a person for. Checked most specific first: "First
+ * name" is a given name, not a full one.
+ */
+const DETAIL_FIELD_NAMES: Array<[DetailField, RegExp]> = [
+  ['given_name', /\b(first name|given name|forename|first)\b/],
+  ['family_name', /\b(last name|surname|family name|last)\b/],
+  ['email', /\be-?mail\b/],
+  ['phone', /\b(phone|mobile|telephone|cell)\b/],
+  ['postal_code', /\b(post ?code|postal code|zip)\b/],
+  ['address', /\b(address|street)\b/],
+  ['full_name', /\b(full name|passenger name|traveller name|traveler name|contact name|your name|name)\b/],
+];
+
+/** The personal details this page has somewhere to put. */
+function detailFieldsWanted(page: PageContext): DetailField[] {
+  const out = new Set<DetailField>();
+  for (const control of page.candidates) {
+    if (!ENTRY_ROLES.has(control.role)) continue;
+    const name = normalizeWhitespace(control.name).toLowerCase();
+    if (!name) continue;
+    for (const [field, pattern] of DETAIL_FIELD_NAMES) {
+      if (pattern.test(name)) {
+        out.add(field);
+        // One control asks for one thing: "First name" must not also count as a full name.
+        break;
+      }
+    }
+  }
+  return [...out];
+}
+
 /** AX roles that take typing, which is what a `follow_up` needs. */
 const ENTRY_ROLES = new Set(['textbox', 'searchbox', 'combobox', 'select', 'listbox', 'spinbutton']);
 
@@ -1219,6 +1398,54 @@ function searchText(page: PageContext, plan: RetrievalPlan): string {
 
 function esqlString(value: string): string {
   return `"${value.replace(/"/g, '\\"')}"`;
+}
+
+/**
+ * The people this page could be filled for. Every subject is named, because
+ * the whole question on a booking form is *whose* name goes in the box: the
+ * person driving, or the friend they are booking for. Carat does not guess
+ * that from a conversation — it lays out what it knows and lets the page's own
+ * labels decide.
+ */
+function renderDetails(hits: SearchHit[], wanted: DetailField[]): string[] {
+  const bySubject = new Map<string, Array<{ field: DetailField; value: string; conflict?: string }>>();
+  /** Identity to the name as most recently written, which is what is shown. */
+  const label = new Map<string, string>();
+  for (const hit of hits) {
+    const src = hit._source;
+    const field = src?.detailField as DetailField | undefined;
+    if (!src || !field || !src.detailValue || !wanted.includes(field)) continue;
+    const identity = src.subjectKey ?? src.subject ?? 'user';
+    const list = bySubject.get(identity) ?? [];
+    list.push({
+      field,
+      value: src.detailValue,
+      ...(src.status === 'conflict' ? { conflict: (src.values ?? []).join(' / ') } : {}),
+    });
+    label.set(identity, src.subject ?? identity);
+    bySubject.set(identity, list);
+  }
+  if (bySubject.size === 0) return [];
+
+  const lines: string[] = [];
+  for (const [subject, list] of bySubject) {
+    const who = subject === 'user' ? 'you' : label.get(subject) ?? subject;
+    const pairs = list.map((d) => `${d.field}="${truncate(d.value, 60)}"`).join(', ');
+    const disputed = list.filter((d) => d.conflict);
+    const note = disputed.length
+      ? ` — conflict: ${disputed.map((d) => `${d.field} has been given as ${d.conflict}`).join('; ')}, so do not fill it`
+      : '';
+    lines.push(`${TASK_LINE_PREFIX} personal_detail for ${who} — still to enter: ${pairs}${note}`);
+  }
+  // Two people who could both fill this form is the thing worth flagging.
+  if (bySubject.size > 1) {
+    lines.push(
+      `${TASK_LINE_PREFIX} personal_detail: ${bySubject.size} people could fill this form (${[...bySubject.keys()]
+        .map((k) => (k === 'user' ? 'you' : label.get(k) ?? k))
+        .join(', ')}). Use the form's own label — passenger, main contact, account holder — to decide whose detail each field takes.`,
+    );
+  }
+  return lines;
 }
 
 /** Supporting context. One shape, so the model reads them as one class of line. */
@@ -1438,6 +1665,114 @@ function parseTask(text: string): ParsedTask {
     timeValues: extractTimes(cleaned),
     placeValues: place ? [place] : [],
   };
+}
+
+/** A capitalised person-like name of one to three words. */
+const NAME = "([A-Z][\\w'\u2010-]+(?:\\s+[A-Z][\\w'\u2010-]+){0,2})";
+
+/**
+ * Personal details stated in a note. "is your name Pez Guan" is about the
+ * person driving; "Dana's email is d@x.com" is about Dana. Only what the note
+ * actually says is taken — nothing here guesses a detail.
+ */
+export function extractDetails(text: string): Array<{ subject: string; field: DetailField; value: string }> {
+  const clean = normalizeWhitespace(text);
+  const out: Array<{ subject: string; field: DetailField; value: string }> = [];
+  const add = (subject: string, field: DetailField, value: string): void => {
+    const raw = normalizeWhitespace(value).replace(/[.,;]$/, '');
+    // The lead-ins are matched case-insensitively, which makes [A-Z] in the
+    // name pattern match lowercase too, so "Pez Guan and my phone" comes back
+    // whole. A name ends at the first word that is not capitalised.
+    const v = field.endsWith('name') ? capitalisedRun(raw) : raw;
+    if (v.length >= 2 && !out.some((d) => d.subject === subject && d.field === field)) out.push({ subject, field, value: v });
+  };
+
+  // Whose detail is this? "your"/"my"/"I am" is the user; "Dana's" is Dana.
+  const owned = new RegExp(`\\b${NAME}(?:'s|\u2019s)\\s+(name|email|phone|number|address)\\s+is\\s+`, 'gi');
+  for (const m of clean.matchAll(owned)) {
+    const subject = m[1] ?? 'user';
+    const rest = clean.slice((m.index ?? 0) + m[0].length);
+    const label = (m[2] ?? '').toLowerCase();
+    if (label === 'name') add(subject, 'full_name', new RegExp(`^${NAME}`).exec(rest)?.[1] ?? '');
+    if (label === 'email') add(subject, 'email', emailIn(rest));
+    if (label === 'phone' || label === 'number') add(subject, 'phone', phoneIn(rest));
+  }
+
+  // A name the note states. Only "my name is X" is certainly the person
+  // driving; "is your name X" in someone else's message, or a third-person
+  // "his name is X", names a person who may well be who the user is filling
+  // the form *for*. Those are filed under the name itself, so a passenger
+  // field and an account field can be told apart later.
+  const mine = new RegExp(`\\b(?:my\\s+name\\s+is|I am|I'm)\\s+${NAME}`, 'i').exec(clean);
+  const theirs =
+    new RegExp(`\\b(?:your|their|his|her)\\s+name\\s+is\\s+${NAME}`, 'i').exec(clean) ??
+    new RegExp(`\\bis\\s+your\\s+name\\s+${NAME}`, 'i').exec(clean) ??
+    new RegExp(`\\bname\\s+is\\s+${NAME}`, 'i').exec(clean);
+  const named = mine ?? theirs;
+  if (named?.[1]) {
+    const full = capitalisedRun(named[1]);
+    const subject = mine ? 'user' : full || 'user';
+    add(subject, 'full_name', full);
+    const parts = full.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) {
+      add(subject, 'given_name', parts[0] ?? '');
+      add(subject, 'family_name', parts.slice(1).join(' '));
+    }
+  }
+
+  // Who the user is acting for: "booking the ticket for Pez", "my friend Pez".
+  const behalf =
+    new RegExp(`\\b(?:book(?:ing)?|ticket|reservation|seat|flight|trip)\\s+(?:\\w+\\s+){0,3}for\\s+${NAME}`, 'i').exec(clean) ??
+    new RegExp(`\\bmy\\s+friend\\s+${NAME}`, 'i').exec(clean) ??
+    new RegExp(`\\bon\\s+behalf\\s+of\\s+${NAME}`, 'i').exec(clean);
+  if (behalf?.[1]) {
+    const who = capitalisedRun(behalf[1]);
+    if (who) {
+      add(who, 'full_name', who);
+      const parts = who.split(/\s+/).filter(Boolean);
+      if (parts.length >= 2) {
+        add(who, 'given_name', parts[0] ?? '');
+        add(who, 'family_name', parts.slice(1).join(' '));
+      }
+    }
+  }
+
+  if (!out.some((d) => d.field === 'email')) add('user', 'email', emailIn(clean));
+  if (!out.some((d) => d.field === 'phone')) add('user', 'phone', phoneIn(clean));
+  const postal = /\b([A-Z]\d[A-Z]\s?\d[A-Z]\d|\d{5}(?:-\d{4})?)\b/.exec(clean)?.[1] ?? '';
+  add('user', 'postal_code', postal);
+  return out;
+}
+
+/**
+ * The identity a subject resolves to. Everything about one person has to land
+ * on one document or a disagreement looks like two people instead of a
+ * conflict, so the given name is the key and the surname is free to be wrong.
+ */
+function subjectKey(subject: string): string {
+  if (subject === 'user') return 'user';
+  const first = normalizeWhitespace(subject).split(/\s+/)[0] ?? subject;
+  return slug(first) || 'user';
+}
+
+/** The leading run of capitalised words: "Pez Guan and my" -> "Pez Guan". */
+function capitalisedRun(text: string): string {
+  const kept: string[] = [];
+  for (const word of normalizeWhitespace(text).split(/\s+/)) {
+    if (!/^[A-Z]/.test(word)) break;
+    kept.push(word);
+  }
+  return kept.join(' ');
+}
+
+function emailIn(text: string): string {
+  return /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.exec(text)?.[0] ?? '';
+}
+
+function phoneIn(text: string): string {
+  const m = /(?:\+?\d{1,2}[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}\b/.exec(text)?.[0] ?? '';
+  // Four-digit years and times are not phone numbers.
+  return m.replace(/\D/g, '').length >= 10 ? normalizeWhitespace(m) : '';
 }
 
 /**

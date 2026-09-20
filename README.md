@@ -144,11 +144,12 @@ the options page, fill in:
 - Index prefix, default `carat`
 - Optional inference endpoint id, or `default`
 
-With a URL and API key set, the background worker auto-creates four indices:
+With a URL and API key set, the background worker auto-creates five indices:
 
 - `<prefix>-observations`: the page as Chrome's accessibility tree, read over the Chrome DevTools Protocol — the same outline the model is given, not a separate DOM scrape
 - `<prefix>-facts`: distilled actionable facts, from pages the user left and from anything the microphone heard when listening is on
 - `<prefix>-actions`: accepted and dismissed Carat suggestions
+- `<prefix>-details`: what Carat knows about a person — name parts, email, phone, postal code — keyed by who it is about
 - `<prefix>-tasks`: unresolved tasks grouped from facts by action type, likely entity and date bucket, carrying `status: conflict` and a reason when two sources disagree
 
 It also auto-creates an ingest pipeline named `<prefix>-carat-ingest` and sends
@@ -172,6 +173,32 @@ Every write is fed by the CDP path rather than the DOM: `getTree` pulls the
 accessibility tree, `buildOutline` renders it, and that text is what is
 indexed, so what Elasticsearch remembers and what the model reads are the same
 thing. Facts arrive from `recordSeen`, which hands back what it distilled.
+
+Not everything worth remembering is an errand. A conversation gives away who
+people are, and a form asks for exactly that, so personal details live in
+`<prefix>-details` rather than in the task index: they are reference data, they
+never expire, and filling a form with one does not use it up.
+
+Each document is one person's one detail, and **who it is about is the point**.
+"My name is X" is the person at the keyboard; "is your name X" said to them by
+somebody else, or "booking the ticket for X", is a different person — the one
+they are filling the form *for*. Carat files those separately and never assumes
+a form is about the user. When a page has fields for personal details, every
+person it knows is offered, each labelled, and if more than one could fill the
+form it says so and leaves the choice to the form's own labels: passenger,
+main contact, account holder.
+
+Identity is resolved on the given name, so a surname heard two ways is one
+person in dispute rather than two people:
+
+```
+[task] personal_detail for Pez Kwan — still to enter: given_name="Pez",
+  family_name="Kwan" — conflict: family_name has been given as Guan / Kwan,
+  so do not fill it
+```
+
+Two real people sharing a first name would merge, which is the price of
+catching the misheard surname that actually happens.
 
 A task is not one step but the fields the destination will ask for. The plan
 above becomes a `calendar_event` carrying `title`, `when` and `location`, and
