@@ -18,8 +18,12 @@ import { isDenylisted } from '@carat/shared';
 
 export const PROTOCOL_VERSION = '1.3';
 
-/** Detach after this long without a command, so the banner goes away when carat is idle. */
-export const IDLE_DETACH_MS = 60_000;
+/**
+ * Detach after this long without a command. Five minutes, as the prototype had it:
+ * every re-attach shows Chrome's debugging banner again, so a short idle timeout
+ * means the banner keeps coming back while the user is reading.
+ */
+export const IDLE_DETACH_MS = 5 * 60_000;
 
 /** Hosts whose pages are Chrome's own shop front: attaching there is refused outright. */
 const STORE_HOSTS = new Set(['chrome.google.com', 'chromewebstore.google.com']);
