@@ -28,6 +28,7 @@ const smartModel = field<HTMLInputElement>('smartModel');
 const screenshots = field<HTMLInputElement>('screenshots');
 const eagerness = field<HTMLInputElement>('eagerness');
 const ghost = field<HTMLInputElement>('ghost');
+const evidence = field<HTMLSelectElement>('evidence');
 const eagernessNoteEl = document.getElementById('eagerness-note') as HTMLElement;
 
 // The thumb carries a position; everything a reader needs — the level's name
@@ -58,6 +59,7 @@ function render(s: Settings): void {
   smartModel.value = s.smartModel;
   screenshots.checked = s.screenshots;
   ghost.checked = s.ghost;
+  evidence.value = s.evidence;
   eagerness.value = String(eagernessPosition(s.eagerness));
   showEagerness();
 }
@@ -75,6 +77,7 @@ function read(): Partial<Settings> {
     screenshots: screenshots.checked,
     eagerness: eagernessAt(eagerness.value),
     ghost: ghost.checked,
+    evidence: evidence.value,
   });
 }
 

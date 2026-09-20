@@ -74,7 +74,8 @@ export function startFrameAgent(ctx: ScriptContext, doc: Document, opts: FrameAg
       ...(host ? { host } : {}),
       rects: {},
     };
-    for (const [n, target] of outline) body.rects[String(n)] = box(target.el);
+    // A frame agent builds its own DOM outline, so every target it holds has an element.
+    for (const [n, target] of outline) if (target.el) body.rects[String(n)] = box(target.el);
     const key = JSON.stringify([body.controls, body.lines, body.summary]);
     // An unasked-for report only when something changed; a reply always, so the top stops waiting.
     if (!reply && key === lastKey) return;

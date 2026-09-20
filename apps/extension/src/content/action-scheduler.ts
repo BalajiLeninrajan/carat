@@ -2,14 +2,15 @@ import type { NextAction, OutlineControl } from '@carat/shared';
 import type { Chip } from '../chip';
 import { QUIET_HINT } from '../chip';
 import { previewLine } from '../chip/preview';
-import { fromSurface } from '../dom/surfaces';
+import { fromSurface, inSurface } from '../dom/surfaces';
 import { performFill } from '../fill';
 import type { GhostHandle } from '../ghost';
 import type { FrameHub, KnownFrame } from '../frames';
 import { createFrameHub } from '../frames';
 import { performInteraction, roleOf, stillFits } from '../interact';
 import type { OutlineTarget } from '../outline';
-import { assembleEvidence } from '../outline';
+import type { CdpTargets } from './evidence';
+import { readEvidence, startCdpTargets } from './evidence';
 import { caratScrollEnd, caratScrolling, inViewport, scrollPageDown, scrollToTarget, viewportsOf } from '../scroll';
 import type { ScriptContext } from './context';
 import type { PageState } from './page-state';
@@ -106,6 +107,13 @@ interface Carried {
 }
 
 export interface ActionOptions extends RequestObserver {
+  /**
+   * Read the page through the debugger's accessibility tree, with the DOM
+   * outline behind it. On by default; the worker refuses per tab and says why.
+   */
+  debugger?: boolean;
+  /** The bridge back from a debugger-numbered control to an element in this page. */
+  targets?: CdpTargets;
   /** Shared with the capture scheduler: the first chip here marks this the page being acted on. */
   page?: PageState;
   /** The top frame's hub for cross-origin child frames; built here when not given. */
@@ -140,6 +148,9 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
   let registry = new Map<number, OutlineTarget>();
   /** What the outline said about each numbered control, for the chip's preview line. */
   let controls: OutlineControl[] = [];
+  /** Which of the two readers produced the outline last time, and why when it was the fallback. */
+  let evidenceSource: 'cdp' | 'dom' = 'dom';
+  let evidenceReason: string | undefined;
   /** What carat has already done here, so the same chip is not offered twice on one page load. */
   const done = new Set<string>();
   /** Esc on an action keeps it quiet for the rest of this page load. */
@@ -149,6 +160,8 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
   /** When carat last scrolled the page on a Tab; a Tab soon after jumps instead of gliding. */
   let lastScrollAt = -Infinity;
   let pending = false;
+  /** Counts the requests that asked the worker to point at a numbered control, for their tokens. */
+  let resolves = 0;
 
   // The memo: the same outline with nothing new behind it is not asked about twice.
   let lastHash = '';
@@ -179,6 +192,8 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
   /** Shift+Tab: when carat may speak on this tab again, or 0 when it may now. */
   let quietUntil = 0;
   let quietTimer: number | null = null;
+
+  const targets: CdpTargets = opts.targets ?? startCdpTargets(ctx, doc);
 
   const hub: FrameHub =
     opts.hub ??
@@ -308,11 +323,19 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
       await hub.refresh();
       if (g !== gen || !ctx.isValid) return;
 
-      const { request, registry: targets, hash } = assembleEvidence(doc, win, {
+      const read = await readEvidence(doc, win, {
+        ...(opts.debugger === false ? { debugger: false } : {}),
         frames: hub.outlines(),
         // The first look is a cheaper one, so the chip is up while the page is still arriving.
         ...(asked ? {} : { budget: SNAPSHOT_TIMING.firstBudget }),
       });
+      if (g !== gen || !ctx.isValid) return;
+      const { request, registry: numbered, hash } = read;
+      if (read.source !== evidenceSource || read.reason !== evidenceReason) {
+        observer.onEvent?.({ name: 'evidence', detail: read.reason ? `${read.source} (${read.reason})` : read.source });
+      }
+      evidenceSource = read.source;
+      evidenceReason = read.reason;
       if (request.controls.length === 0 && request.outline.trim() === '') {
         chip.hide();
         return;
@@ -344,12 +367,17 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
       lastEvents = events;
       lastSentAt = now;
       asked = true;
-      registry = targets;
+      registry = numbered;
       controls = request.controls;
 
       const mine = ++seq;
       observer.onRequest?.();
-      const res = await send('nextAction', { ...request, ...(force ? { force: true } : {}) });
+      const res = await send('nextAction', {
+        ...request,
+        evidence: evidenceSource,
+        ...(evidenceReason ? { evidenceReason } : {}),
+        ...(force ? { force: true } : {}),
+      });
       if (mine !== seq || !ctx.isValid) return;
       pending = res?.ticket !== undefined;
       if (!pending) observer.onAnswer?.();
@@ -391,7 +419,7 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
       }
       // The number lands long before the words do; the ring goes up on it now.
       if (update.target !== undefined) {
-        const target = registry.get(update.target)?.el;
+        const target = standIn(registry.get(update.target));
         if (target?.isConnected) chip.ring(target);
       }
       if (update.action !== undefined) present(update.action);
@@ -417,12 +445,12 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     const key = actionKey(action, win, doc);
     if (done.has(key) || dismissed.has(key)) return;
     const target = action.target === null ? undefined : registry.get(action.target);
-    if (['fill', 'click', 'select'].includes(action.kind) && !target?.el.isConnected) return;
+    if (['fill', 'click', 'select'].includes(action.kind) && !live(target)) return;
     // Something is going up; whatever silence came before it is over.
     silentAsks = 0;
     if (opts.page) opts.page.filling = true;
 
-    const el = target?.el;
+    const el = standIn(target);
     const control = action.target === null ? undefined : controls.find((c) => c.n === action.target);
     const preview = previewLine({
       action,
@@ -449,9 +477,11 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
       onDismiss: (why: string) => onDismiss(why, action, target, key),
     };
     // A control the user can see gets the chip on it; everything else is the banner.
-    if (el && inViewport(el, win)) {
+    const box = target?.cdp?.rect;
+    if (el && (box ? onScreen(box) : inViewport(el, win))) {
       const frame = knownFrame(target);
-      chip.show({ ...shared, target: el, ...(frame ? { anchor: () => hub.anchor(frame, String(target!.frame!.remoteId)) } : {}) });
+      const anchor = frame ? () => hub.anchor(frame, String(target!.frame!.remoteId)) : box ? () => box : undefined;
+      chip.show({ ...shared, target: el, ...(anchor ? { anchor } : {}) });
     } else {
       chip.showBanner({ ...shared, ...(el ? { target: el } : {}) });
     }
@@ -562,7 +592,7 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
 
   async function accept(action: NextAction, target: OutlineTarget | undefined, key: string): Promise<void> {
     done.add(key);
-    lastActed = target?.el ?? null;
+    lastActed = standIn(target) ?? null;
     performing = true;
     let carried: Carried = { outcome: 'failed' };
     try {
@@ -588,6 +618,7 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
     afterPerform.soon();
   }
 
+  /**
   /**
    * The fast lane. The page has what carat just did by the next frame, so the
    * question goes out then, with the short guard behind it for the paint. A
@@ -654,28 +685,82 @@ export function startActions(ctx: ScriptContext, chip: Chip, doc: Document = doc
       const res = await send('navigate', { kind: action.kind, value: action.value });
       return { outcome: res?.ok ? 'done' : 'failed' };
     }
-    if (!target?.el.isConnected) return { outcome: 'failed' };
+    if (!live(target)) return { outcome: 'failed' };
     const frame = knownFrame(target);
-    if (frame && target.frame) {
+    if (frame && target!.frame) {
       const reply = await hub.perform(frame, {
         kind: 'outline',
-        n: Number(target.frame.remoteId),
+        n: Number(target!.frame.remoteId),
         action: action.kind === 'fill' ? 'fill' : action.kind === 'select' ? 'select' : 'click',
         value: action.value,
         host: doc.location.host,
       });
       return { outcome: reply.ok ? (reply.outcome ?? 'done') : 'failed' };
     }
+    if (target!.cdp) return performNumbered(action, target!.cdp);
+    return performOn(target!.el!, action);
+  }
+
+  /**
+   * A control Chrome's accessibility tree numbered. The worker holds the node,
+   * so it is asked to point at it: it dispatches an event on the element and
+   * the page's own listener picks it up, after which the fill and the click go
+   * through the page's paths exactly as they do for a control carat found
+   * itself — a real click, and a fill through the native value setter so
+   * frameworks see the input events. A node in a cross-origin frame, or one
+   * the page never hears about, is performed by the debugger instead.
+   */
+  async function performNumbered(action: NextAction, ref: NonNullable<OutlineTarget['cdp']>): Promise<Carried> {
+    if (!ref.remote) {
+      const token = `${Date.now().toString(36)}-${(++resolves).toString(36)}`;
+      const pointed = await send('cdpResolve', { n: ref.n, token });
+      const el = pointed?.ok ? targets.take(token) : null;
+      if (el) return performOn(el, action);
+    }
+    const kind = action.kind === 'fill' ? 'fill' : action.kind === 'select' ? 'select' : 'click';
+    const reply = await send('cdpPerform', { n: ref.n, action: kind, value: action.value });
+    return { outcome: reply?.ok ? 'done' : 'failed' };
+  }
+
+  /** One action on one element of this page: the path both readers end up in. */
+  async function performOn(el: Element, action: NextAction): Promise<Carried> {
     // A control the chip sat on as a banner may be off screen; bring it into view before acting.
-    if (!inViewport(target.el, win)) await scrollToTarget(target.el, win, { instant: repeating() });
+    if (!inViewport(el, win)) await scrollToTarget(el, win, { instant: repeating() });
     if (action.kind === 'fill') {
-      const outcome = await performFill(target.el, action.value, doc.location.host, locale() ? { locale: locale()! } : {});
+      const outcome = await performFill(el, action.value, doc.location.host, locale() ? { locale: locale()! } : {});
       return outcome === null ? { outcome: 'failed' } : { outcome };
     }
-    const role = roleOf(target.el) ?? 'button';
+    const role = roleOf(el) ?? 'button';
     const verb = action.kind === 'select' ? 'choose' : 'click';
-    if (!stillFits(target.el, verb, role)) return { outcome: 'failed' };
-    return { outcome: performInteraction(target.el, verb, action.value, role) ? 'done' : 'failed' };
+    if (!stillFits(el, verb, role)) return { outcome: 'failed' };
+    return { outcome: performInteraction(el, verb, action.value, role) ? 'done' : 'failed' };
+  }
+
+  /** Whether there is still something to act on: an element on the page, or a number the worker holds. */
+  function live(target: OutlineTarget | undefined): boolean {
+    if (!target) return false;
+    return target.cdp ? true : target.el?.isConnected === true;
+  }
+
+  /**
+   * Something for the chip to sit on and ring. A control carat found itself is
+   * its own element; one the debugger numbered has only a box, so the topmost
+   * element in the middle of that box stands in. It is cosmetic: the action
+   * itself never goes through it, so a box that lands on a wrapper costs a few
+   * pixels of ring, not a wrong click.
+   */
+  function standIn(target: OutlineTarget | undefined): Element | undefined {
+    if (target?.el) return target.el;
+    const rect = target?.cdp?.rect;
+    if (!rect || rect.width <= 0 || rect.height <= 0 || !onScreen(rect)) return undefined;
+    const x = Math.min(Math.max(rect.left + rect.width / 2, 1), win.innerWidth - 1);
+    const y = Math.min(Math.max(rect.top + rect.height / 2, 1), win.innerHeight - 1);
+    const hit = typeof doc.elementFromPoint === 'function' ? doc.elementFromPoint(x, y) : null;
+    return hit && !inSurface(hit) ? hit : undefined;
+  }
+
+  function onScreen(rect: DOMRect): boolean {
+    return rect.bottom > 0 && rect.top < win.innerHeight && rect.right > 0 && rect.left < win.innerWidth;
   }
 
   function knownFrame(target: OutlineTarget | undefined): KnownFrame | undefined {
@@ -800,5 +885,5 @@ function actionKey(action: NextAction, win: Window, doc: Document): string {
 
 function nameOf(action: NextAction, target: OutlineTarget | undefined): string {
   if (action.kind === 'open' || action.kind === 'switch') return action.value;
-  return target?.el.getAttribute('aria-label') ?? action.label;
+  return target?.el?.getAttribute('aria-label') ?? action.label;
 }

@@ -87,6 +87,8 @@ export async function nextAction(input: PageSnapshot, requester: Requester, deps
     controls: input.controls.length,
     gate: explainGate(input, settings),
     eagerness: settings.eagerness,
+    ...(input.evidence ? { evidence: input.evidence } : {}),
+    ...(input.evidenceReason ? { evidenceReason: input.evidenceReason } : {}),
   };
   if (diag.gate !== 'ok') {
     diag.silent = SILENT_GATE[diag.gate];

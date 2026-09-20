@@ -5,7 +5,9 @@ export default defineConfig({
     name: 'Carat',
     description: 'Fills a field, presses a control or opens the next tab from what you just read. One Tab each.',
     // webNavigation needs no host permission of its own; <all_urls> below already covers the URLs its events carry.
-    permissions: ['storage', 'alarms', 'tabs', 'webNavigation'],
+    // `debugger` is what reads the page through Chrome's own accessibility tree. It is the
+    // permission behind the "Chrome is being debugged by software" banner; see the README.
+    permissions: ['storage', 'alarms', 'tabs', 'webNavigation', 'debugger'],
     host_permissions: ['<all_urls>', 'https://api.openai.com/*'],
     commands: {
       'carat-suggest': {

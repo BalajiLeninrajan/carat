@@ -138,10 +138,29 @@ export interface OutlineOptions {
 
 /** Where a numbered control lives, for performing it after a Tab. */
 export interface OutlineTarget {
-  /** The control itself, or the frame element when a child frame performs. */
-  el: Element;
+  /**
+   * The control itself, or the frame element when a child frame performs.
+   * Absent for a control numbered from the debugger's accessibility tree:
+   * that one is named by number and performed through the worker.
+   */
+  el?: Element;
   fr?: number;
   frame?: FrameRef;
+  /** A control the debugger numbered. See `src/content/evidence.ts`. */
+  cdp?: CdpTarget;
+}
+
+/**
+ * A control carat only knows by the number Chrome's accessibility tree gave
+ * it. The box is what the worker measured, in this viewport's coordinates, and
+ * is all the chip needs to sit on the control; the node itself never leaves
+ * the worker.
+ */
+export interface CdpTarget {
+  n: number;
+  rect?: DOMRect;
+  /** The control is in a child frame, so the debugger performs on it rather than the page. */
+  remote?: boolean;
 }
 
 export interface PageOutline {

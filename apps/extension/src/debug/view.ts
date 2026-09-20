@@ -82,6 +82,7 @@ function requestView(snap: DebugSnapshot): RequestView | null {
     blocks: renderPrefix(req),
     rows: [
       ['now', req.now],
+      ['evidence', evidenceLine(snap)],
       ['eagerness', req.eagerness],
       ['controls', String(req.controls.length)],
       ['focused', req.focused === undefined ? 'none' : `[${req.focused}]`],
@@ -91,6 +92,13 @@ function requestView(snap: DebugSnapshot): RequestView | null {
     ],
     json: JSON.stringify({ cacheKey: request.cacheKey, promptCacheKey: request.promptCacheKey, request: req }, null, 2),
   };
+}
+
+/** Which reader produced the outline, and why the fallback stood in when it did. */
+function evidenceLine(snap: DebugSnapshot): string {
+  const d = snap.diag?.suggest;
+  if (!d?.evidence) return '—';
+  return d.evidenceReason ? `${d.evidence} (${d.evidenceReason})` : d.evidence;
 }
 
 function answerView(snap: DebugSnapshot): AnswerView | null {

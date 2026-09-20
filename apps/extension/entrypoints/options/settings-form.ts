@@ -3,6 +3,7 @@ import {
   EAGERNESS_HELP,
   EAGERNESS_LEVELS,
   isEagerness,
+  isEvidenceSource,
   type Eagerness,
   type Settings,
 } from '@carat/shared';
@@ -19,6 +20,7 @@ export interface SettingsFormValues {
   screenshots: boolean;
   eagerness: string;
   ghost: boolean;
+  evidence: string;
 }
 
 const PROVIDERS: ReadonlySet<Settings['provider']> = new Set(['openai', 'baseten', 'local']);
@@ -44,6 +46,7 @@ export function normalizeSettings(v: SettingsFormValues): Partial<Settings> {
     screenshots: v.screenshots,
     eagerness: isEagerness(v.eagerness) ? v.eagerness : DEFAULT_SETTINGS.eagerness,
     ghost: v.ghost,
+    evidence: isEvidenceSource(v.evidence) ? v.evidence : DEFAULT_SETTINGS.evidence,
   };
 }
 

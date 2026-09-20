@@ -1,3 +1,20 @@
+export {
+  CdpPausedError,
+  IDLE_DETACH_MS,
+  PROTOCOL_VERSION,
+  activated as cdpActivated,
+  attachable,
+  closed as cdpClosed,
+  hasDebugger,
+  isPaused,
+  navigated as cdpNavigated,
+  pauseReason,
+  sender as cdpSender,
+  useDebuggerApi,
+} from './cdp';
+export type { DebuggerApi } from './cdp';
+export { EVIDENCE_TTL_MS, createPageEvidence } from './page-evidence';
+export type { CdpAction, CdpPerformReply, EvidenceControlBox, EvidenceReply, PageEvidenceDeps, PageEvidenceService } from './page-evidence';
 export { gate, explainGate, hasWork } from './gate';
 export type { GateInput } from './gate';
 export { DEBUG_COMMAND, DEBUG_KEY, DEBUG_LIMITS, DebugLog, debugSnapshot, handleDebugCommand } from './debug';

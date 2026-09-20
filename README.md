@@ -34,7 +34,11 @@ What the model is given, in this order, so that everything but the last part is 
 4. **`<notes>`** — at most eight facts distilled from pages read recently in other tabs, newest first.
 5. **`<history>`** — at most twelve lines of what happened in this tab, oldest first: `40s ago: clicked button "Add to cart"`.
 6. **`<tabs>`** — the open tabs, so `switch` has something to name.
-7. **The page**, last: an accessibility-style outline read from the DOM, landmarks indented, text inline, every control the user could operate numbered `[n]` with its role, name, value and state, the focused one marked. At most 9000 characters, or 4000 when the caller wants a first fast ask, trimmed by distance from the focus.
+7. **The page**, last: the outline Chrome's own accessibility tree gives, landmarks indented, text inline, every control the user could operate numbered `[n]` with its role, name, value and state, the focused one marked `>> FOCUSED`, a link's domain after it, and a button that opens a dialog said to. At most 9000 characters, or 4000 when the caller wants a first fast ask, trimmed by distance from the focus.
+
+Carat reads that tree over `chrome.debugger`, so it sees what a screen reader hears: the roles, names and states Chrome computed, including inside closed web components and cross-origin frames, which a DOM walk cannot reach. The cost is visible. Chrome puts a yellow "Chrome is being debugged by software" bar across the top of the window for as long as carat holds the debugger, and carat lets go after a minute without reading the tab, when the tab closes, and when it navigates to a page carat may not read. It never attaches to `chrome://`, `chrome-extension://`, the Web Store or a denylisted host. Dismissing the bar, or opening DevTools, takes the debugger away; that tab reads its own DOM until you next switch to it.
+
+The DOM outline is still there, and it is what answers whenever the debugger cannot. It is the same contract line for line, built by the content script from the page itself: it walks open shadow roots and same-origin frames directly, and a cross-origin frame reports through the frame protocol. Which of the two answered is in the popup's debug line and the panel, as `evidence: cdp` or `evidence: dom (you dismissed the debugging banner)`. "How Carat reads the page" on the options page picks between them; the debugger is the default, and `The page's DOM` means never seeing the bar.
 
 Only what is on screen goes into that outline. A block or a control whose box sits entirely above the fold, or more than a quarter of a viewport below it, is left out whole, and the controls inside it are neither numbered nor sent, so the model cannot offer a link the user would have to scroll twice to find. The focused control's own region is an exception: it is described to the end even where it runs past the fold, because the button that submits the field you are typing in is part of the same step. What is missing is said rather than hidden. The outline opens with `(1.5 screens above)` when the page is scrolled and closes with `(3.2 more screens below; 14 controls not shown)`, which is how the model knows that `scroll` is an answer. Scrolling changes the visible set, so it changes the outline's hash, and the page is asked about again.
 
@@ -118,7 +122,7 @@ pnpm install
 pnpm build
 ```
 
-Then in Chrome open `chrome://extensions`, turn on developer mode, choose "Load unpacked", and pick `apps/extension/.output/chrome-mv3`. Chrome lists a "Read your browsing history" warning for the `webNavigation` permission, which is what the timeline's navigation lines come from. Open the extension's options page and paste an OpenAI key (or pick the `local` provider to run with no key and no network, which means the placeholder alone).
+Then in Chrome open `chrome://extensions`, turn on developer mode, choose "Load unpacked", and pick `apps/extension/.output/chrome-mv3`. Chrome lists a "Read your browsing history" warning for the `webNavigation` permission, which is what the timeline's navigation lines come from, and an "Access page debugger backend" warning for `debugger`, which is what reads the accessibility tree. The first page carat reads raises the yellow debugging bar; it goes when carat lets the tab go. Open the extension's options page and paste an OpenAI key (or pick the `local` provider to run with no key and no network, which means the placeholder alone).
 
 The popup shows what Carat currently knows and a few controls:
 
@@ -139,7 +143,7 @@ Three keys, all of them changeable at `chrome://extensions/shortcuts`:
 
 Four sections:
 
-- **Request.** The outline exactly as it was sent, with the numbered controls picked out, the `<notes>`, `<history>` and `<tabs>` blocks as the prefix carries them, `now`, the eagerness level, the answer cache key and the `prompt_cache_key`. "copy request" puts the whole request on the clipboard as JSON.
+- **Request.** The outline exactly as it was sent, which reader produced it and why the fallback stood in when it did, with the numbered controls picked out, the `<notes>`, `<history>` and `<tabs>` blocks as the prefix carries them, `now`, the eagerness level, the answer cache key and the `prompt_cache_key`. "copy request" puts the whole request on the clipboard as JSON.
 - **Answer.** What the placeholder had, and what the model replaced it with: kind, target, label, confidence, irreversible, reason. Under that, the reply exactly as it streamed, which provider won the race, the placeholder, first-partial and final timings, whether the prefix was warm, the validator's line for each pass, and the reason there is no chip when there is none.
 - **Timeline.** The tab's history entries and the scheduler's own events in one scrolling log: which trigger asked and what refused it, memo hits, snoozes and lost tickets, each with a relative timestamp.
 - **Gate.** The last verdict and every precondition behind it: the global switch, the per-site switch, the denylist, a password field, whether there was a snapshot at all, whether the tab is hidden, and how much of a Shift+Tab minute is left.

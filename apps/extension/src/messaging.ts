@@ -2,6 +2,7 @@ import { defineExtensionMessaging } from '@webext-core/messaging';
 import type { GetDataType, GetReturnType } from '@webext-core/messaging';
 import type { ContextItem, NextAction, NextActionRequest, Settings } from '@carat/shared';
 import type { DebugSnapshot } from './background/debug';
+import type { CdpAction, CdpPerformReply, EvidenceReply } from './background/page-evidence';
 import type { TabDiag } from './background/diag';
 import type { HistoryEntry } from './history';
 import type { NavigationResult } from './background/navigation';
@@ -21,6 +22,10 @@ export type KnownItem = Pick<ContextItem, 'id' | 'origin' | 'title' | 'kind' | '
  * provider.
  */
 export type PageSnapshot = Pick<NextActionRequest, 'page' | 'outline' | 'controls' | 'focused'> & {
+  /** Which reader produced the outline: Chrome's accessibility tree, or the DOM walk. */
+  evidence?: 'cdp' | 'dom';
+  /** Why the DOM walk stood in, when it did. */
+  evidenceReason?: string;
   /** The page has a visible password field: never read, never acted on. */
   password?: boolean;
   /** The user asked with the shortcut: past the cache and past what they dismissed. */
@@ -65,6 +70,20 @@ export interface Protocol {
   capture(data: { url: string; title: string; text: string; kind: 'page' | 'selection'; leaving?: boolean }): void;
   /** What the user just did on the page: clicks and typing, for the per-tab timeline. */
   history(data: { entries: HistoryEntry[] }): void;
+  /**
+   * Read this tab through the debugger's accessibility tree. The reply either
+   * carries the outline, the numbered controls and a box per control, or says
+   * why the page should build the outline itself this time.
+   */
+  cdpEvidence(data: { budget?: number }): EvidenceReply;
+  /**
+   * Point at a debugger-numbered control: the worker dispatches an event on
+   * the node so this page's own listener can take the element and perform on
+   * it with the page's fill and click paths.
+   */
+  cdpResolve(data: { n: number; token: string }): CdpPerformReply;
+  /** Carry the action out through the debugger, for a control this page cannot reach. */
+  cdpPerform(data: { n: number; action: CdpAction; value: string }): CdpPerformReply;
   /** One page in, one action out. */
   nextAction(data: PageSnapshot): NextActionResponse;
   /** Long-poll for the next word on a reply's `ticket`; polled again while the answer says `more`. */

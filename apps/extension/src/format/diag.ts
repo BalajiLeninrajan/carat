@@ -58,6 +58,7 @@ const ORIGIN: Record<AnswerOrigin, string> = {
 export function describeSuggest(d: SuggestDiag, now: number = Date.now()): string {
   const when = `checked ${relativeAge(d.at, now)}`;
   if (d.gate !== 'ok') return `${when}: no request, ${d.silent ?? GATE[d.gate]}`;
+  const read = d.evidence ? `, evidence: ${d.evidence}${d.evidenceReason ? ` (${d.evidenceReason})` : ''}` : '';
   const first = d.source ? `${ORIGIN[d.source]} in ${d.ms ?? 0} ms` : 'nothing answered';
   const attempts = (d.attempts ?? []).map(describeAttempt).join('; ');
   const action = d.kind
@@ -69,7 +70,7 @@ export function describeSuggest(d: SuggestDiag, now: number = Date.now()): strin
   const reasked = d.reasked ? `, asked again after "${d.reasked}"` : '';
   const replaced = d.replaced ? ', the model replaced it' : d.refine ? ', more may follow' : '';
   const silent = d.silent ? `, no chip: ${d.silent}` : '';
-  return [when, ': ', [first, attempts].filter(Boolean).join('; '), action, why, arm, refused, reasked, replaced, silent, timings(d)].join('');
+  return [when, ': ', [first, attempts].filter(Boolean).join('; '), read, action, why, arm, refused, reasked, replaced, silent, timings(d)].join('');
 }
 
 /**

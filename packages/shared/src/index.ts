@@ -1,5 +1,5 @@
-export type { ContextItem, ContextKind, ImageCue, ImageInput, PageMeta, Settings } from './types';
-export { DEFAULT_SETTINGS, LIMITS } from './types';
+export type { ContextItem, ContextKind, EvidenceSource, ImageCue, ImageInput, PageMeta, Settings } from './types';
+export { DEFAULT_SETTINGS, EVIDENCE_SOURCES, LIMITS, isEvidenceSource } from './types';
 export {
   IRREVERSIBLE_LABEL,
   NEXT_ACTION_JSON_SCHEMA,

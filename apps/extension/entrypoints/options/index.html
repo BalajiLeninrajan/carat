@@ -209,6 +209,15 @@
         </label>
         <span class="hint">Pause for a moment in a field and Carat writes the rest of the line in grey after the caret. Tab takes it, any other key drops it, Esc drops it and stays out of that field until you change what is in it. Never in a password, card or code field, and never in an empty one: there Tab still belongs to the action chip. On by default.</span>
 
+        <label>
+          <span class="name">How Carat reads the page</span>
+          <select name="evidence">
+            <option value="debugger">Chrome's accessibility tree (recommended)</option>
+            <option value="dom">The page's DOM</option>
+          </select>
+        </label>
+        <span class="hint">The accessibility tree is what a screen reader hears: the roles, names, values and states Chrome itself computed, frames included. Reading it means attaching Chrome's debugger to the tab, so Chrome puts a yellow "Chrome is being debugged by software" bar across the top of that window until Carat lets go, which it does after a minute of not reading the tab, and whenever you close it or navigate somewhere Carat may not read. Dismissing the bar, or opening DevTools, takes the debugger away; Carat then reads that tab's DOM instead until you next switch to it, and says so in the debug line. Choose "The page's DOM" to never see the bar; Carat then builds the outline itself, which reads closed components and cross-origin frames less well.</span>
+
         <label class="row">
           <input type="checkbox" name="statusLine" />
           <span class="name">Show status line</span>

@@ -60,6 +60,10 @@ export interface SuggestDiag {
   /** Numbered controls in the outline the request carried. */
   controls: number;
   gate: GateVerdict;
+  /** Which reader produced the outline: `cdp` is Chrome's accessibility tree, `dom` the content script's walk. */
+  evidence?: 'cdp' | 'dom';
+  /** Why the DOM walk stood in, when it did. */
+  evidenceReason?: string;
   /** What produced the first action, and how long the content script waited for it. */
   source?: AnswerOrigin;
   ms?: number;

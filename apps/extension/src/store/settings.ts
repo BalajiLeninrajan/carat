@@ -1,5 +1,5 @@
 import type { Settings } from '@carat/shared';
-import { DEFAULT_SETTINGS, isEagerness } from '@carat/shared';
+import { DEFAULT_SETTINGS, isEagerness, isEvidenceSource } from '@carat/shared';
 import type { StorageArea } from './storage-area';
 
 const KEY = 'settings';
@@ -45,6 +45,7 @@ function sanitize(raw: unknown): Settings {
     smartModel: str(r.smartModel, '').trim() || legacySmartModel(r.visionModel),
     eagerness: isEagerness(r.eagerness) ? r.eagerness : DEFAULT_SETTINGS.eagerness,
     ghost: typeof r.ghost === 'boolean' ? r.ghost : DEFAULT_SETTINGS.ghost,
+    evidence: isEvidenceSource(r.evidence) ? r.evidence : DEFAULT_SETTINGS.evidence,
   };
 }
 

@@ -19,6 +19,7 @@ import {
   createKeepWarm,
   createGhostRunner,
   createNotes,
+  createPageEvidence,
   createVisionPipeline,
   createWarmer,
   debugSnapshot,
@@ -106,6 +107,22 @@ export default defineBackground(() => {
     notes: (tabId) => notes.top({ tabId }),
     onDiag: (tabId, d) => void diag.recordGhost(tabId, d),
   });
+
+  // Chrome's own accessibility tree, read over the debugger, is where the page
+  // outline comes from; a tab carat cannot attach to reads its DOM instead and
+  // the diag line says which one answered.
+  const evidence = createPageEvidence({ settings: () => settings.get() });
+  chrome.tabs.onActivated.addListener(({ tabId }) => evidence.activated(tabId));
+  chrome.tabs.onRemoved.addListener((tabId) => evidence.forget(tabId));
+  chrome.webNavigation.onCommitted.addListener((d) => {
+    if (d.frameId === 0) evidence.navigated(d.tabId, d.url);
+  });
+
+  onMessage('cdpEvidence', ({ data, sender }) =>
+    evidence.read(sender.tab?.id, sender.tab?.url, data.budget === undefined ? {} : { budget: data.budget }),
+  );
+  onMessage('cdpResolve', ({ data, sender }) => evidence.resolve(sender.tab?.id, data.n, data.token));
+  onMessage('cdpPerform', ({ data, sender }) => evidence.perform(sender.tab?.id, data.n, data.action, data.value));
 
   const vision = createVisionPipeline({
     store,

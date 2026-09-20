@@ -259,6 +259,7 @@ describe('settings store', () => {
       smartModel: '',
       eagerness: 'eager',
       ghost: true,
+      evidence: 'debugger',
     });
   });
 

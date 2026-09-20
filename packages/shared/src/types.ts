@@ -55,6 +55,22 @@ export interface Settings {
    * On by default; off leaves Tab to the action chip everywhere.
    */
   ghost: boolean;
+  /**
+   * Where the page outline comes from. `debugger` reads Chrome's own
+   * accessibility tree over CDP, which costs the "Chrome is being debugged by
+   * software" banner; `dom` builds it in the content script and shows no
+   * banner. The debugger source falls back to the DOM one per tab whenever
+   * Chrome will not let carat attach.
+   */
+  evidence: EvidenceSource;
+}
+
+/** The two ways carat can read a page. See `Settings.evidence`. */
+export const EVIDENCE_SOURCES = ['debugger', 'dom'] as const;
+export type EvidenceSource = (typeof EVIDENCE_SOURCES)[number];
+
+export function isEvidenceSource(v: unknown): v is EvidenceSource {
+  return typeof v === 'string' && (EVIDENCE_SOURCES as readonly string[]).includes(v);
 }
 
 /**
@@ -88,6 +104,7 @@ export const DEFAULT_SETTINGS: Settings = {
   smartModel: '',
   eagerness: DEFAULT_EAGERNESS,
   ghost: true,
+  evidence: 'debugger',
 };
 
 export const LIMITS = {
