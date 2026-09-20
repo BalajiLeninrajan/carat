@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { ARM_MS, ATTENTION_AFTER_MS, AUTO_DISMISS_MS, CHIP_SETTLE_MS, CORNER_INSET_PX, PENDING_HINT, createChip, type Chip, type DismissReason } from '../src/chip';
+import { placeAt } from '../src/chip/position';
 import { KEYFRAME_CLASSES, TIMING } from '../src/chip/styles';
 import { Ring } from '../src/engine/content/ring';
 
@@ -51,10 +52,13 @@ function ringHosts(): NodeListOf<Element> {
 }
 
 // jsdom reports zero-size rects; give the target a viewport position.
-function onScreen(el: Element): void {
+function onScreen(el: Element, top = 100, left = 20): void {
   el.getBoundingClientRect = () =>
-    ({ top: 100, left: 20, bottom: 130, right: 220, width: 200, height: 30 }) as DOMRect;
+    ({ top, left, bottom: top + 30, right: left + 200, width: 200, height: 30 }) as DOMRect;
 }
+
+/** One animation frame, which is how often the pill re-reads its control's box. */
+const FRAME_MS = 20;
 
 describe('chip', () => {
   let chip: Chip;
@@ -190,6 +194,70 @@ describe('chip', () => {
     expect(ring.visible).toBe(true);
     key(target, 'Tab');
     expect(ring.visible).toBe(false);
+  });
+
+  describe('where the pill sits', () => {
+    const box = (left: number, width: number): DOMRect =>
+      ({ top: 100, left, bottom: 130, right: left + width, width, height: 30 }) as DOMRect;
+
+    it('centres the pill on the control', () => {
+      // A 200px control at x=300 is centred on 400; a 300px pill starts at 250.
+      expect(placeAt(box(300, 200), 300, 40, 1000, 800).left).toBe(250);
+    });
+
+    it('clamps to the viewport at either edge, so the pill is never half off screen', () => {
+      expect(placeAt(box(0, 40), 300, 40, 1000, 800).left).toBe(8);
+      expect(placeAt(box(960, 40), 300, 40, 1000, 800).left).toBe(1000 - 300 - 8);
+    });
+
+    it('sits under the control, and above it when there is no room below', () => {
+      expect(placeAt(box(300, 200), 300, 40, 1000, 800).top).toBe(136);
+      const tight = { ...box(300, 200), top: 700, bottom: 730 } as DOMRect;
+      expect(placeAt(tight, 300, 40, 1000, 760).top).toBe(700 - 6 - 40);
+    });
+
+    it('is nowhere when the control has scrolled off any edge', () => {
+      expect(placeAt(box(-400, 200), 300, 40, 1000, 800).visible).toBe(false);
+      expect(placeAt(box(1200, 200), 300, 40, 1000, 800).visible).toBe(false);
+    });
+
+    it('puts the pill on the control it is about', () => {
+      show();
+      const host = hosts()[0] as HTMLElement;
+      // jsdom lays nothing out, so the pill measures zero wide: its left edge
+      // is its centre, and that is the control's centre.
+      expect(host.style.left).toBe('120px');
+      expect(host.style.top).toBe('136px');
+    });
+
+    it('follows its control when a container scrolls under it, within one frame', () => {
+      const scroller = document.createElement('div');
+      document.body.append(scroller);
+      scroller.append(target);
+      show();
+      expect((hosts()[0] as HTMLElement).style.top).toBe('136px');
+
+      // The container scrolls: the event reaches the window in the capture phase.
+      onScreen(target, 40, 20);
+      scroller.dispatchEvent(new Event('scroll', { bubbles: false }));
+      expect((hosts()[0] as HTMLElement).style.top).toBe('76px');
+
+      // And a shift that fires no event at all is picked up on the next frame.
+      onScreen(target, 40, 300);
+      vi.advanceTimersByTime(FRAME_MS);
+      expect((hosts()[0] as HTMLElement).style.left).toBe('400px');
+    });
+
+    it('goes when its control leaves the viewport and comes back when it returns', () => {
+      show();
+      onScreen(target, -400);
+      vi.advanceTimersByTime(FRAME_MS);
+      expect((hosts()[0] as HTMLElement).style.display).toBe('none');
+      onScreen(target, 100);
+      vi.advanceTimersByTime(FRAME_MS);
+      expect((hosts()[0] as HTMLElement).style.display).toBe('block');
+      expect((hosts()[0] as HTMLElement).style.top).toBe('136px');
+    });
   });
 
   it('sits at the bottom centre as a banner, and takes Tab from anywhere', () => {

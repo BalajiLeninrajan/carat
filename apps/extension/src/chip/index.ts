@@ -232,6 +232,9 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
   let attentionTimer: ReturnType<typeof setTimeout> | undefined;
   let keyTimer: ReturnType<typeof setTimeout> | undefined;
   let exitTimer: ReturnType<typeof setTimeout> | undefined;
+  // The frame loop that keeps the pill on its control, and the last box it saw.
+  let frame: number | undefined;
+  let lastBox = '';
   // The marks on the page's own controls, and the three notes Tab makes.
   const fx = createEffects(doc, reducedMotion);
   const sounds = createSounds(win);
@@ -399,6 +402,34 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
     host.style.top = `${Math.round(top)}px`;
     host.style.left = `${Math.round(left)}px`;
   };
+
+  /**
+   * The pill sticks to its control. Scroll, resize and a ResizeObserver each
+   * cover part of that; a layout shift in a container that fires none of them
+   * covers the rest. So the box is read once a frame while a chip is up, and
+   * written only when it actually moved.
+   */
+  function track(): void {
+    frame = win.requestAnimationFrame(track);
+    if (!session || session.mode !== 'control') return;
+    const r = session.target.getBoundingClientRect();
+    const box = `${r.left},${r.top},${r.width},${r.height}`;
+    if (box === lastBox) return;
+    lastBox = box;
+    reposition();
+  }
+
+  function startTracking(): void {
+    if (frame !== undefined || typeof win.requestAnimationFrame !== 'function') return;
+    lastBox = '';
+    frame = win.requestAnimationFrame(track);
+  }
+
+  function stopTracking(): void {
+    if (frame !== undefined) win.cancelAnimationFrame(frame);
+    frame = undefined;
+    lastBox = '';
+  }
 
   /**
    * The user asked for less motion. Nothing keyed off a keyframe is put on the
@@ -614,8 +645,11 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
     host.style.right = '';
     host.style.bottom = '';
     host.style.transform = '';
+    // Capture, so a scroll in any container on the page reaches this and not
+    // only a scroll of the window itself.
     win.addEventListener('scroll', reposition, { capture: true, passive: true });
     win.addEventListener('resize', reposition, { passive: true });
+    startTracking();
     // A target in a same-origin child frame: its keys and scrolls stay in that window.
     session.targetWin?.addEventListener('keydown', onKeydown, true);
     session.targetWin?.addEventListener('scroll', reposition, { capture: true, passive: true });
@@ -716,6 +750,7 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
     win.removeEventListener('focusin', onFocusIn, true);
     pill.removeEventListener('click', onClick);
     pill.removeEventListener('mousedown', onMousedown);
+    stopTracking();
     if (s.mode === 'control') {
       s.observer?.disconnect();
       win.removeEventListener('scroll', reposition, true);

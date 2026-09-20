@@ -226,7 +226,8 @@ export class Ring {
     const chipW = this.chip.offsetWidth || 120;
     let top = r.top - pad - chipH - 6;
     if (top < 4) top = r.bottom + pad + 6;
-    let left = Math.min(Math.max(4, r.left - pad), innerWidth - chipW - 4);
+    // Centred on the control, like the chip, so ring, control and hint line up.
+    let left = Math.max(4, Math.min(r.left + r.width / 2 - chipW / 2, innerWidth - chipW - 4));
     let arrow = "";
     if (r.bottom < 0) {
       top = 8;
