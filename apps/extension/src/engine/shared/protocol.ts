@@ -1,6 +1,6 @@
 /** Messages between the content script and the service worker (one port per tab). */
 
-export const PORT_NAME = "carat";
+export const PORT_NAME = "caret";
 
 /** The text field the user is in, as the content script sees it. */
 export interface FieldInfo {
@@ -54,7 +54,7 @@ export interface LogMessage {
   url: string;
 }
 
-/** Carat's key tapped on a ready action suggestion (after arming, if irreversible). */
+/** Caret's key tapped on a ready action suggestion (after arming, if irreversible). */
 export interface AcceptMessage {
   type: "accept";
   reqId: number;
@@ -138,7 +138,7 @@ export const TASK_REQ = -1;
  * prediction targets, immediately before sending TargetMessage. The content
  * script's capture listener takes the element from it.
  */
-export const TARGET_EVENT = "carat-target";
+export const TARGET_EVENT = "caret-target";
 
 export type ActionKind = "click" | "fill" | "select" | "submit" | "switch" | "open" | "scroll";
 

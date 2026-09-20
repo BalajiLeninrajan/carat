@@ -1,5 +1,5 @@
 /**
- * Shift+Tab asks carat for a minute without offers. Nothing is sent to the
+ * Shift+Tab asks caret for a minute without offers. Nothing is sent to the
  * worker while the minute runs, the status line counts it down, and
  * Alt+Shift+C ends it early: asking for a suggestion is the plainest way of
  * saying you want one again.
@@ -15,9 +15,9 @@ export interface Quiet {
   start(): void;
   /** End it now, because the user asked for something. */
   end(): void;
-  /** Milliseconds left, or null when carat is not in a quiet period. */
+  /** Milliseconds left, or null when caret is not in a quiet period. */
   left(): number | null;
-  /** Whether carat should keep out of the way. */
+  /** Whether caret should keep out of the way. */
   readonly active: boolean;
   /** The page is going: drop the ticker without touching the status line. */
   destroy(): void;

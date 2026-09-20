@@ -1,5 +1,5 @@
 /**
- * Carat's key, and the choice of which key it is.
+ * Caret's key, and the choice of which key it is.
  *
  * The right Shift is the default, and it is taken as a tap: the key pressed
  * and let go with nothing pressed in between and no other modifier held. A
@@ -22,7 +22,7 @@
  *
  * What callers see is the same either way: one watch, one verdict, no
  * knowledge of which key is current. The chip and ghost text cannot disagree
- * about carat's key because neither of them knows what it is.
+ * about caret's key because neither of them knows what it is.
  */
 
 export type AcceptKeyName = 'rightShift' | 'tab';
@@ -46,14 +46,14 @@ export function isAcceptKeyName(v: unknown): v is AcceptKeyName {
 }
 
 /**
- * What a keydown meant. `accept` is act on it now; `held` is carat's own key
+ * What a keydown meant. `accept` is act on it now; `held` is caret's own key
  * on its way down, which nothing else should read and which decides nothing
  * until it comes back up.
  */
 export type AcceptVerdict = 'accept' | 'held' | null;
 
 export interface AcceptWatch {
-  /** Which key is carat's. Switching drops whatever was half-held. */
+  /** Which key is caret's. Switching drops whatever was half-held. */
   use(key: AcceptKeyName): void;
   readonly key: AcceptKeyName;
   readonly glyph: string;

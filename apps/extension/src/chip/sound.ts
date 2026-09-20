@@ -4,7 +4,7 @@
  * arms. No files, so nothing has to be web-accessible.
  *
  * The AudioContext is built on the first sound and never before. Every sound
- * carat makes follows a key the user pressed, which is the gesture Chrome
+ * caret makes follows a key the user pressed, which is the gesture Chrome
  * wants before audio may start; building one at page load would be both a
  * suspended context on every tab and an autoplay warning in the console.
  */

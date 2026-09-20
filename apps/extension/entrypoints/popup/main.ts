@@ -73,7 +73,7 @@ function renderSite(settings: Settings): void {
 }
 
 /**
- * Pressing Cancel on Chrome's debugging bar stops carat on that tab, and
+ * Pressing Cancel on Chrome's debugging bar stops caret on that tab, and
  * nothing on the page says so. The popup is where the user finds out and
  * where they undo it.
  */
@@ -86,7 +86,7 @@ async function renderPaused(): Promise<void> {
   }
 }
 
-/** The footer names carat's key, so it has to follow the setting. */
+/** The footer names caret's key, so it has to follow the setting. */
 export function keysText(settings: Settings): string {
   return `${ACCEPT_KEYS[settings.acceptKey].label} accepts · Esc dismisses`;
 }
@@ -205,7 +205,7 @@ enabled.addEventListener('change', async () => {
 
 /** The three things the button can say. It is never disabled: a slow worker must not make clearing look broken. */
 type ClearState = 'idle' | 'working' | 'done';
-const CLEAR_LABEL = 'Clear what carat remembers';
+const CLEAR_LABEL = 'Clear what caret remembers';
 const CLEARED_MS = 2000;
 let clearedTimer: number | undefined;
 let clearing = false;

@@ -1,6 +1,6 @@
 /** CDP accessibility types, and helpers with no chrome.* dependency. */
 
-/** The subset of CDP's Accessibility.AXNode that Carat reads. */
+/** The subset of CDP's Accessibility.AXNode that Caret reads. */
 export interface AXValue {
   type: string;
   value?: unknown;

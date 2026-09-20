@@ -50,7 +50,7 @@ export async function flush(): Promise<void> {
     batch.map((l) => l.text),
     context,
     s,
-  ).catch((e) => console.error("[carat] noting speech failed:", e));
+  ).catch((e) => console.error("[caret] noting speech failed:", e));
   if (added?.length) {
     const observation: Observation = {
       id: `heard:${batch[0]?.at ?? Date.now()}:${batch.length}`,
@@ -59,7 +59,7 @@ export async function flush(): Promise<void> {
       text: batch.map((l) => l.text).join("\n"),
       at: batch[0]?.at ?? Date.now(),
     };
-    await elastic.indexFacts(observation, added).catch((e) => console.warn("[carat] elastic heard indexing failed:", e));
+    await elastic.indexFacts(observation, added).catch((e) => console.warn("[caret] elastic heard indexing failed:", e));
   }
 }
 
@@ -86,7 +86,7 @@ function tell(type: string): void {
 function setBadge(on: boolean): void {
   chrome.action.setBadgeBackgroundColor({ color: "#dc2626" }).catch(() => {});
   chrome.action.setBadgeText({ text: on ? "●" : "" }).catch(() => {});
-  chrome.action.setTitle({ title: on ? "Carat is listening" : "Carat" }).catch(() => {});
+  chrome.action.setTitle({ title: on ? "Caret is listening" : "Caret" }).catch(() => {});
 }
 
 /** Start or stop listening to match settings and window focus. */
@@ -98,16 +98,16 @@ export function reconcile(): Promise<void> {
     holding = want;
     if (want) {
       await openOffscreen("listen");
-      tell("carat-listen-start");
+      tell("caret-listen-start");
       setBadge(true);
-      console.log("[carat] listening: on");
+      console.log("[caret] listening: on");
     } else {
       // The microphone goes first: the document may stay up for the clipboard.
-      tell("carat-listen-stop");
+      tell("caret-listen-stop");
       await closeOffscreen("listen");
       void flush(); // what was said before listening stopped still counts
       setBadge(false);
-      console.log(`[carat] listening: off (${!chromeFocused ? "Chrome not focused" : "disabled"})`);
+      console.log(`[caret] listening: off (${!chromeFocused ? "Chrome not focused" : "disabled"})`);
     }
   });
 }
@@ -173,17 +173,17 @@ async function transcribe(wavBase64: string, seconds: number): Promise<void> {
     try {
       message = (await res.json()).error?.message ?? message;
     } catch {}
-    console.error(`[carat] transcription failed (${res.status}): ${message}`);
+    console.error(`[caret] transcription failed (${res.status}): ${message}`);
     return;
   }
   const text = maskSensitive(String((await res.json()).text ?? "").trim());
   if (!text || (seconds < 3 && HALLUCINATIONS.test(text))) {
-    console.log(`[carat] heard ${seconds.toFixed(1)}s · ${ms}ms · (nothing intelligible)`);
+    console.log(`[caret] heard ${seconds.toFixed(1)}s · ${ms}ms · (nothing intelligible)`);
     return;
   }
 
   pending.push({ at: Date.now(), seconds, text });
-  console.log(`[carat] heard ${seconds.toFixed(1)}s · ${ms}ms: "${text}"`);
+  console.log(`[caret] heard ${seconds.toFixed(1)}s · ${ms}ms: "${text}"`);
   clearTimeout(pauseTimer);
   if (pending.reduce((sum, l) => sum + l.seconds, 0) >= NOTE_AFTER_SPEECH_S) void flush();
   else pauseTimer = setTimeout(() => void flush(), NOTE_AFTER_PAUSE_MS);
@@ -191,24 +191,24 @@ async function transcribe(wavBase64: string, seconds: number): Promise<void> {
 
 chrome.runtime.onMessage.addListener((msg) => {
   switch (msg?.type) {
-    case "carat-utterance":
-      transcribe(msg.wav, msg.seconds).catch((e) => console.error("[carat] transcription failed:", e));
+    case "caret-utterance":
+      transcribe(msg.wav, msg.seconds).catch((e) => console.error("[caret] transcription failed:", e));
       break;
-    case "carat-listen-status":
-      console.log(`[carat] microphone open: ${msg.device || "default device"} · ${msg.sampleRate} Hz · audio ${msg.state}`);
+    case "caret-listen-status":
+      console.log(`[caret] microphone open: ${msg.device || "default device"} · ${msg.sampleRate} Hz · audio ${msg.state}`);
       break;
-    case "carat-listen-heartbeat":
+    case "caret-listen-heartbeat":
       // Only here to keep the service worker (and the pause timer) alive.
       break;
-    case "carat-forget":
+    case "caret-forget":
       clearTimeout(pauseTimer);
       pending = [];
       noted = [];
-      console.log("[carat] forgot pending speech");
+      console.log("[caret] forgot pending speech");
       break;
-    case "carat-listen-error":
+    case "caret-listen-error":
       console.error(
-        `[carat] could not open the microphone: ${msg.message}. ` +
+        `[caret] could not open the microphone: ${msg.message}. ` +
           `Grant access with "Enable microphone" on the options page.`,
       );
       break;

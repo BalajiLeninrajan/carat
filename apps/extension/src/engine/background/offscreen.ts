@@ -1,5 +1,5 @@
 /**
- * Ours: a service worker has no DOM, and two things Carat does need one. The
+ * Ours: a service worker has no DOM, and two things Caret does need one. The
  * clipboard is read through a page, and the microphone is held by one. Chrome
  * allows exactly one offscreen document per extension, so both live in the
  * same page and this module owns it: it goes up when either wants it, is
@@ -13,7 +13,7 @@ import type { ClipboardDocument } from "./clipboard";
 export const OFFSCREEN_PATH = "offscreen.html";
 
 export const OFFSCREEN_JUSTIFICATION =
-  "Read the text the user last copied, and hold the microphone while they have listening switched on, so Carat can offer what it finds on the page they are on.";
+  "Read the text the user last copied, and hold the microphone while they have listening switched on, so Caret can offer what it finds on the page they are on.";
 
 /** The two things that want the document. Neither knows about the other. */
 export type Tenant = "clipboard" | "listen";

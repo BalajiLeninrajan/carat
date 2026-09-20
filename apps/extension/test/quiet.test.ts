@@ -26,7 +26,7 @@ describe('the quiet minute Shift+Tab buys', () => {
     expect(report).not.toHaveBeenCalled();
   });
 
-  it('runs for a minute and then lets carat speak again', () => {
+  it('runs for a minute and then lets caret speak again', () => {
     quiet.start();
     expect(quiet.active).toBe(true);
     expect(report).toHaveBeenLastCalledWith(QUIET_MS);
@@ -43,7 +43,7 @@ describe('the quiet minute Shift+Tab buys', () => {
     quiet.start();
     vi.advanceTimersByTime(QUIET_TICK_MS);
     const left = report.mock.lastCall?.[0] ?? null;
-    expect(statusText(RUNNING, false, left)).toBe('carat · quiet 0:59');
+    expect(statusText(RUNNING, false, left)).toBe('caret · quiet 0:59');
   });
 
   it('ends early when the user asks for a suggestion', () => {

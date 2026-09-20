@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { INSTANT_SCROLL_CAP_MS, SCROLL_MAX_MS, SCROLL_SETTLE_MS, caratScrolling, inViewport, scrollPageDown, scrollToTarget } from '../src/scroll';
+import { INSTANT_SCROLL_CAP_MS, SCROLL_MAX_MS, SCROLL_SETTLE_MS, caretScrolling, inViewport, scrollPageDown, scrollToTarget } from '../src/scroll';
 
 function lay(el: Element, top: number, left = 0, width = 100, height = 30): void {
   el.getBoundingClientRect = () => new DOMRect(left, top, width, height);
@@ -87,11 +87,11 @@ describe('an instant scroll', () => {
     const done = vi.fn();
     void scrollPageDown(window, { instant: true }).then(done);
     expect(scrollBy).toHaveBeenCalledWith({ top: window.innerHeight, left: 0, behavior: 'instant' });
-    expect(caratScrolling()).toBe(true);
+    expect(caretScrolling()).toBe(true);
     window.dispatchEvent(new Event('scroll'));
     await vi.advanceTimersByTimeAsync(1);
     expect(done).toHaveBeenCalledTimes(1);
-    expect(caratScrolling()).toBe(false);
+    expect(caretScrolling()).toBe(false);
   });
 
   it('gives up on the event after a short cap when the page had nowhere to go', async () => {
@@ -102,7 +102,7 @@ describe('an instant scroll', () => {
     expect(done).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
     expect(done).toHaveBeenCalledTimes(1);
-    expect(caratScrolling()).toBe(false);
+    expect(caretScrolling()).toBe(false);
   });
 });
 

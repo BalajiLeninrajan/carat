@@ -104,11 +104,11 @@ export const CHIP_CSS = `
   pointer-events: auto;
 
   /* The whole feel, in one place. */
-  --carat-accent: ${RING.accent};
-  --carat-alarm: ${RING.alarm};
-  --carat-enter-ms: ${TIMING.enterMs}ms;
-  --carat-fresh-ms: ${TIMING.freshMs}ms;
-  --carat-exit-ms: ${TIMING.exitMs}ms;
+  --caret-accent: ${RING.accent};
+  --caret-alarm: ${RING.alarm};
+  --caret-enter-ms: ${TIMING.enterMs}ms;
+  --caret-fresh-ms: ${TIMING.freshMs}ms;
+  --caret-exit-ms: ${TIMING.exitMs}ms;
 }
 .chip {
   all: initial;
@@ -144,18 +144,18 @@ export const CHIP_CSS = `
 .sub[hidden] { display: none; }
 .value { font-weight: 600; color: #f5e0dc; }
 /* A replaced value arrives on the spot the old one held, so only the word changes. */
-.value.is-fresh, .label.is-fresh { animation: carat-fade var(--carat-fresh-ms) ease-out; }
-@keyframes carat-fade {
+.value.is-fresh, .label.is-fresh { animation: caret-fade var(--caret-fresh-ms) ease-out; }
+@keyframes caret-fade {
   from { opacity: 0; }
   to { opacity: 1; }
 }
 
 /* --- arrival --- */
 /* A fade and a 2px rise. No spring, no overshoot, no ring off the edge. */
-.chip.is-entering { animation: carat-enter var(--carat-enter-ms) ease-out both; }
+.chip.is-entering { animation: caret-enter var(--caret-enter-ms) ease-out both; }
 /* The banner has no control to rise toward, so it fades where it stands. */
-.chip.is-banner.is-entering { animation: carat-fade var(--carat-enter-ms) ease-out both; }
-@keyframes carat-enter {
+.chip.is-banner.is-entering { animation: caret-fade var(--caret-enter-ms) ease-out both; }
+@keyframes caret-enter {
   from { opacity: 0; transform: translateY(2px); }
   to { opacity: 1; transform: none; }
 }
@@ -166,8 +166,8 @@ kbd.is-press { background: #232334; color: #9399b2; }
 
 /* --- leaving --- */
 /* One exit for every way an offer can end: the pill fades where it stands. */
-.chip.is-leaving { animation: carat-out var(--carat-exit-ms) ease-out forwards; }
-@keyframes carat-out {
+.chip.is-leaving { animation: caret-out var(--caret-exit-ms) ease-out forwards; }
+@keyframes caret-out {
   to { opacity: 0; }
 }
 
@@ -190,9 +190,9 @@ kbd {
 `;
 
 /**
- * The one mark carat leaves on a page's own control: a hairline accent
+ * The one mark caret leaves on a page's own control: a hairline accent
  * outline over its box, fading out over `flashMs`, when an offer has just
- * acted on it. It is carat's own overlay box, never a style on the page's
+ * acted on it. It is caret's own overlay box, never a style on the page's
  * element, so nothing the page laid out can move.
  */
 export const FX_CSS = `
@@ -202,8 +202,8 @@ export const FX_CSS = `
   inset: 0;
   pointer-events: none;
   z-index: 2147483645;
-  --carat-accent: ${RING.accentRgb};
-  --carat-flash-ms: ${TIMING.flashMs}ms;
+  --caret-accent: ${RING.accentRgb};
+  --caret-flash-ms: ${TIMING.flashMs}ms;
 }
 .fx {
   position: absolute;
@@ -211,14 +211,14 @@ export const FX_CSS = `
   pointer-events: none;
   border-radius: ${RING.radiusPx}px;
 }
-.fx.is-alarm { --carat-accent: ${RING.alarmRgb}; }
+.fx.is-alarm { --caret-accent: ${RING.alarmRgb}; }
 /* Accept: one hairline round the control, and then it is gone. */
 .fx.flash {
-  border: 1px solid rgba(var(--carat-accent), 0.9);
-  animation: carat-fx-flash var(--carat-flash-ms) ease-out forwards;
+  border: 1px solid rgba(var(--caret-accent), 0.9);
+  animation: caret-fx-flash var(--caret-flash-ms) ease-out forwards;
 }
-.fx.flash.is-static { border-color: rgba(var(--carat-accent), 0.8); }
-@keyframes carat-fx-flash {
+.fx.flash.is-static { border-color: rgba(var(--caret-accent), 0.8); }
+@keyframes caret-fx-flash {
   from { opacity: 1; }
   to { opacity: 0; }
 }

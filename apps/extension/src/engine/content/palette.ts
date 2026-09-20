@@ -3,10 +3,10 @@
  * doing, both in one closed shadow root.
  *
  * Keys typed in the box are stopped from reaching the page, so a site's own
- * shortcuts (and carat's own suggestion handling) never see them. The one
- * exception is carat's key: a step can be confirmed while the question box has
+ * shortcuts (and caret's own suggestion handling) never see them. The one
+ * exception is caret's key: a step can be confirmed while the question box has
  * focus. The host is aria-hidden so none of this lands in the accessibility
- * tree carat reads.
+ * tree caret reads.
  *
  * The prototype drew this in white with its own purple. Here it wears the
  * chip's colours, because it is the same extension talking.
@@ -126,14 +126,14 @@ export class Palette {
 
   private mount(): void {
     if (this.host?.isConnected) return;
-    this.host = document.createElement("carat-palette");
+    this.host = document.createElement("caret-palette");
     this.host.setAttribute("aria-hidden", "true");
     this.host.style.cssText = "position:fixed;inset:0 auto auto 0;width:0;height:0;z-index:2147483647;";
     const root = this.host.attachShadow({ mode: "closed" });
     root.innerHTML = `<style>${CSS}</style>
       <div class="scrim" hidden>
         <div class="box">
-          <div class="row"><span class="mark">Carat</span><input type="text" placeholder="What should Carat do on this page?" /></div>
+          <div class="row"><span class="mark">Caret</span><input type="text" placeholder="What should Caret do on this page?" /></div>
           <div class="hint">Enter to run · Esc to close · it stops for anything that sends, pays or deletes, and waits for <kbd aria-label="${ACCEPT_KEYS[DEFAULT_ACCEPT_KEY].label}">${ACCEPT_KEYS[DEFAULT_ACCEPT_KEY].glyph}</kbd></div>
         </div>
       </div>
@@ -186,7 +186,7 @@ export class Palette {
     this.scrim.addEventListener("pointerdown", (e) => e.target === this.scrim && this.close());
     root.querySelector(".stop")!.addEventListener("click", () => this.onStop());
     document.documentElement.appendChild(this.host);
-    // Carat's own surface: clicking in it is not the user getting on with the page.
+    // Caret's own surface: clicking in it is not the user getting on with the page.
     this.unregister ??= registerSurface(this.host);
   }
 

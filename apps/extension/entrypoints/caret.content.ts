@@ -17,10 +17,10 @@ import {
 import { isSensitiveField, looksSecret, maskSensitive } from '../src/engine/shared/redact';
 import { onMessage, safeSendMessage } from '../src/messaging';
 import { createQuiet } from '../src/quiet';
-import { caratScrolling, hasMoreBelow, scrollPageDown } from '../src/scroll';
+import { caretScrolling, hasMoreBelow, scrollPageDown } from '../src/scroll';
 import { createStatusLine, PAUSED_NOTICE } from '../src/status';
 
-/** How long the user must be still, after interacting, before Carat looks at the page. */
+/** How long the user must be still, after interacting, before Caret looks at the page. */
 const IDLE_MS = 500;
 /** Shorter pause while typing: ghost text has to feel instant, and it uses the cached tree. */
 const TYPING_IDLE_MS = 250;
@@ -30,12 +30,12 @@ const STATUS_POLL_MS = 5000;
 const PAUSE_NOTICE_MS = 4000;
 /** A highlight settles before it counts as one: dragging a selection fires all the way. */
 const SELECTION_MS = 300;
-/** How still the page has to be, after the user scrolls it, before Carat asks about what is now on screen. */
+/** How still the page has to be, after the user scrolls it, before Caret asks about what is now on screen. */
 const SCROLL_SETTLE_MS = 600;
 /** What the model is told the user highlighted, at most. */
 const MAX_SELECTION = 300;
 /** The chip, the ring, the status pill and the debug panel each hang off an attribute of their own. */
-const CARAT_SURFACES = '[data-carat-chip], [data-carat-ring], [data-carat-status], [data-carat-debug], carat-ring, carat-ghost';
+const CARET_SURFACES = '[data-caret-chip], [data-caret-ring], [data-caret-status], [data-caret-debug], caret-ring, caret-ghost';
 
 export default defineContentScript({
   matches: ['<all_urls>'],
@@ -256,7 +256,7 @@ export default defineContentScript({
     const chip = createChip(document, ring);
     const status = createStatusLine(document);
     const debug = startDebug(ctx, document);
-    // Shift+Tab on any chip: a chord, never carat's own tap, and a minute
+    // Shift+Tab on any chip: a chord, never caret's own tap, and a minute
     // with nothing asked and nothing offered.
     const quiet = createQuiet((left) => status.setQuiet(left));
 
@@ -436,7 +436,7 @@ export default defineContentScript({
     }
 
     /**
-     * Ghost text has first claim on carat's key. These listeners are bound
+     * Ghost text has first claim on caret's key. These listeners are bound
      * before any chip exists, and window capture runs in the order listeners
      * were added, so a field with grey text in it answers the tap itself and
      * the chip never sees it.
@@ -782,15 +782,15 @@ export default defineContentScript({
 
     /**
      * What the user has highlighted: evidence in its own right, and often the
-     * whole of what the next step is about. Never read out of a field carat is
-     * not allowed to read, and never out of carat's own surfaces.
+     * whole of what the next step is about. Never read out of a field caret is
+     * not allowed to read, and never out of caret's own surfaces.
      */
     function selectedText(): string {
       const sel = getSelection();
       if (!sel || sel.isCollapsed || sel.rangeCount === 0) return '';
       const anchor = sel.anchorNode;
       const host = anchor instanceof Element ? anchor : (anchor?.parentElement ?? null);
-      if (host?.closest(CARAT_SURFACES)) return '';
+      if (host?.closest(CARET_SURFACES)) return '';
       const field = asTextField(host?.closest('input, textarea') ?? null);
       if (field && isSensitiveField(field)) return '';
       const text = sel.toString().replace(/\s+/g, ' ').trim();
@@ -846,14 +846,14 @@ export default defineContentScript({
      * the question goes out again and whatever lands replaces what is up.
      *
      * On its own timer rather than the activity one: a page that scrolls
-     * itself must not be able to hold the idle timer open forever. Carat's
+     * itself must not be able to hold the idle timer open forever. Caret's
      * own scrolling is excluded, because it asks on its own when it lands.
      */
     let scrollSettle: ReturnType<typeof setTimeout> | undefined;
     document.addEventListener(
       'scroll',
       () => {
-        if (caratScrolling()) return;
+        if (caretScrolling()) return;
         clearTimeout(scrollSettle);
         scrollSettle = setTimeout(() => schedule('scroll'), SCROLL_SETTLE_MS);
       },
@@ -862,7 +862,7 @@ export default defineContentScript({
 
     /**
      * React and friends rewrite the focused input's value attribute on every
-     * keystroke; that is typing, not a page change. Carat's own surfaces are
+     * keystroke; that is typing, not a page change. Caret's own surfaces are
      * not either. This is the signal the worker's tree cache invalidates on.
      */
     new MutationObserver((records) => {
@@ -871,13 +871,13 @@ export default defineContentScript({
       const ours = [ring.element, ghost.element, palette.element].filter((el): el is HTMLElement => !!el);
       const isOurs = (r: MutationRecord): boolean =>
         ours.some((el) => r.target === el || [...r.addedNodes].includes(el)) ||
-        (r.target instanceof Element && caratSurface(r.target)) ||
-        [...r.addedNodes].some((n) => n instanceof Element && caratSurface(n));
+        (r.target instanceof Element && caretSurface(r.target)) ||
+        [...r.addedNodes].some((n) => n instanceof Element && caretSurface(n));
       if (records.some((r) => r.target !== focused && !isOurs(r))) pageChanged = true;
     }).observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
 
-    function caratSurface(el: Element): boolean {
-      return el.matches(CARAT_SURFACES);
+    function caretSurface(el: Element): boolean {
+      return el.matches(CARET_SURFACES);
     }
 
     // -----------------------------------------------------------------------
@@ -1001,7 +1001,7 @@ export default defineContentScript({
       ghostAccept.use(info.acceptKey);
       palette.setAcceptKey(info.acceptKey);
       ghost.setAcceptKey(info.acceptKey);
-      // With the pill off, a pause looks exactly like carat having nothing to
+      // With the pill off, a pause looks exactly like caret having nothing to
       // say. Break that silence once, then leave the page alone.
       if (info.reason !== 'paused') pauseNoted = false;
       else if (!info.show && !pauseNoted) {

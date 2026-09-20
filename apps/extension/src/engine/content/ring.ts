@@ -15,12 +15,12 @@ import type { ActionKind } from "../shared/protocol";
  * there is a single accent in the extension and the ring, the control and the
  * pill read as one mark rather than three.
  *
- * The geometry is the prototype's. The colours are carat's own, which is why
+ * The geometry is the prototype's. The colours are caret's own, which is why
  * the rgb triples are here too: CSS cannot take a hex colour apart, and the
  * marks on a control need the accent at several opacities.
  */
 export const RING = {
-  // Mauve, the design system's accent, so the ring reads as part of carat
+  // Mauve, the design system's accent, so the ring reads as part of caret
   // rather than a browser focus ring. These are the dark-page values (Mocha);
   // a light page gets the same hues from Latte, which hold up on white.
   accent: "#cba6f7",
@@ -149,7 +149,7 @@ export class Ring {
 
   private mount(): void {
     if (this.host?.isConnected) return;
-    this.host = document.createElement("carat-ring");
+    this.host = document.createElement("caret-ring");
     this.host.setAttribute("aria-hidden", "true");
     this.host.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:2147483647;";
     const root = this.host.attachShadow({ mode: "closed" });

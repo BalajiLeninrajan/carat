@@ -8,7 +8,7 @@ let palette: Palette;
 
 /** The overlay's own input, reached the way the page cannot: through the host. */
 function boxInput(): HTMLInputElement {
-  const host = document.querySelector('carat-palette')!;
+  const host = document.querySelector('caret-palette')!;
   // The root is closed, so the test goes in the same way the class does.
   return (host as HTMLElement & { __root?: ShadowRoot }).__root!.querySelector('.box input')!;
 }
@@ -37,7 +37,7 @@ describe('the instruction box', () => {
     expect(palette.isOpen).toBe(false);
     palette.open();
     expect(palette.isOpen).toBe(true);
-    expect(document.querySelector('carat-palette')).not.toBeNull();
+    expect(document.querySelector('caret-palette')).not.toBeNull();
   });
 
   it('hands the instruction over on Enter and closes itself', () => {
@@ -70,7 +70,7 @@ describe('the instruction box', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it('keeps what is typed in it away from the page, but lets carat’s key through', () => {
+  it('keeps what is typed in it away from the page, but lets caret’s key through', () => {
     const heard: string[] = [];
     // Bubble phase, which is where a page's own shortcut handler listens: the
     // overlay stops what it hears before it gets this far.
@@ -85,22 +85,22 @@ describe('the instruction box', () => {
 
   it('names the key the confirmation will wait for', () => {
     palette.open();
-    const host = document.querySelector('carat-palette') as Element & { __root?: ShadowRoot };
+    const host = document.querySelector('caret-palette') as Element & { __root?: ShadowRoot };
     expect(host.__root!.querySelector('kbd')!.textContent).toBe(ACCEPT_KEYS.rightShift.glyph);
   });
 
   it('names the other key once the setting says so', () => {
     palette.open();
     palette.setAcceptKey('tab');
-    const host = document.querySelector('carat-palette') as Element & { __root?: ShadowRoot };
+    const host = document.querySelector('caret-palette') as Element & { __root?: ShadowRoot };
     const cap = host.__root!.querySelector('kbd')!;
     expect(cap.textContent).toBe(ACCEPT_KEYS.tab.glyph);
     expect(cap.getAttribute('aria-label')).toBe(ACCEPT_KEYS.tab.label);
   });
 
-  it('is one of carat’s own surfaces, so working it is not getting on with the page', () => {
+  it('is one of caret’s own surfaces, so working it is not getting on with the page', () => {
     palette.open();
-    const host = document.querySelector('carat-palette')!;
+    const host = document.querySelector('caret-palette')!;
     expect(fromSurface(new Event('pointerdown', { composed: true, bubbles: true }))).toBe(false);
     const inside = new Event('pointerdown', { bubbles: true });
     Object.defineProperty(inside, 'target', { value: host });
@@ -140,7 +140,7 @@ describe('the task panel', () => {
     palette.startTask('book the 9am train');
     palette.showQuestion('Which station?');
     expect(palette.question).toBe('Which station?');
-    const host = document.querySelector('carat-palette') as Element & { __root?: ShadowRoot };
+    const host = document.querySelector('caret-palette') as Element & { __root?: ShadowRoot };
     const ask = host.__root!.querySelector('.ask input') as HTMLInputElement;
     ask.value = 'Waterloo';
     ask.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
@@ -155,7 +155,7 @@ describe('the task panel', () => {
     palette.onStop = onStop;
     palette.startTask('book the 9am train');
     palette.showQuestion('Place the order?');
-    const host = document.querySelector('carat-palette') as Element & { __root?: ShadowRoot };
+    const host = document.querySelector('caret-palette') as Element & { __root?: ShadowRoot };
     const ask = host.__root!.querySelector('.ask input') as HTMLInputElement;
     ask.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
     expect(onQuestionEscape).toHaveBeenCalledTimes(1);
@@ -167,7 +167,7 @@ describe('the task panel', () => {
     const onStop = vi.fn();
     palette.onStop = onStop;
     palette.startTask('book the 9am train');
-    const host = document.querySelector('carat-palette') as Element & { __root?: ShadowRoot };
+    const host = document.querySelector('caret-palette') as Element & { __root?: ShadowRoot };
     (host.__root!.querySelector('.stop') as HTMLButtonElement).click();
     expect(onStop).toHaveBeenCalledTimes(1);
     palette.finish('Stopped.');

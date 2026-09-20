@@ -44,25 +44,25 @@ describe('statusText', () => {
   const running = { show: true, running: true, sound: true, acceptKey: 'rightShift' as const, model: 'gpt-5.6-luna' };
 
   it('names the model while running and the reason while not', () => {
-    expect(statusText(running)).toBe('carat · gpt-5.6-luna');
-    expect(statusText(running, true)).toBe('carat · gpt-5.6-luna · thinking');
-    expect(statusText({ ...running, running: false, reason: 'blocked' })).toBe('carat · off for this site');
+    expect(statusText(running)).toBe('caret · gpt-5.6-luna');
+    expect(statusText(running, true)).toBe('caret · gpt-5.6-luna · thinking');
+    expect(statusText({ ...running, running: false, reason: 'blocked' })).toBe('caret · off for this site');
     expect(statusText({ ...running, running: false, reason: 'paused' })).toBe(
-      'carat · paused (debugger banner dismissed)',
+      'caret · paused (debugger banner dismissed)',
     );
   });
 });
 
 describe('status line element', () => {
   afterEach(() => {
-    document.querySelectorAll('[data-carat-status]').forEach((el) => el.remove());
+    document.querySelectorAll('[data-caret-status]').forEach((el) => el.remove());
   });
 
   it('stays out of the document until shown, and hides again when the setting is off', () => {
     const line = createStatusLine(document);
-    expect(document.querySelector('[data-carat-status]')).toBeNull();
+    expect(document.querySelector('[data-caret-status]')).toBeNull();
     line.update({ show: true, running: true, sound: true, acceptKey: 'rightShift', model: 'm' });
-    const host = document.querySelector<HTMLElement>('[data-carat-status]');
+    const host = document.querySelector<HTMLElement>('[data-caret-status]');
     expect(host).not.toBeNull();
     expect(host!.style.display).toBe('block');
     expect(host!.style.pointerEvents).toBe('none');
@@ -93,10 +93,10 @@ describe('status line element', () => {
     expect(line.visible).toBe(false);
 
     line.notice(PAUSED_NOTICE, 4000);
-    const host = document.querySelector<HTMLElement>('[data-carat-status]');
+    const host = document.querySelector<HTMLElement>('[data-caret-status]');
     expect(host!.style.display).toBe('block');
     expect(line.visible).toBe(true);
-    expect(root!.querySelector('.text')?.textContent).toBe('carat · paused, click the icon to resume');
+    expect(root!.querySelector('.text')?.textContent).toBe('caret · paused, click the icon to resume');
 
     vi.advanceTimersByTime(3999);
     expect(line.visible).toBe(true);
@@ -110,6 +110,6 @@ describe('status line element', () => {
     const line = createStatusLine(document);
     line.update({ show: true, running: true, sound: true, acceptKey: 'rightShift', model: 'm' });
     line.destroy();
-    expect(document.querySelector('[data-carat-status]')).toBeNull();
+    expect(document.querySelector('[data-caret-status]')).toBeNull();
   });
 });

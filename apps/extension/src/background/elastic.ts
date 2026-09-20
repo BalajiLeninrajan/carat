@@ -31,7 +31,7 @@ export interface Observation {
   at: number;
 }
 
-// The old @carat/shared is gone with the engine swap, and these four helpers
+// The old @caret/shared is gone with the engine swap, and these four helpers
 // were all elastic.ts used from it. They are small enough to keep here rather
 // than stand a shared package back up for them.
 
@@ -1293,7 +1293,7 @@ function trendFacts(
   byKind: ActionAnalyticsBucket[],
   byHost: ActionAnalyticsBucket[],
 ): string[] {
-  if (rows.length === 0) return ['No action data yet. Use Carat for a bit and this tab will start telling stories.'];
+  if (rows.length === 0) return ['No action data yet. Use Caret for a bit and this tab will start telling stories.'];
   const facts: string[] = [];
   const shopping = shoppingProfile(rows);
   if (shopping) facts.push(shopping);
@@ -1302,13 +1302,13 @@ function trendFacts(
   const best = byKind.find((kind) => kind.suggested >= 2 && kind.acceptanceRate >= 70);
   if (best) facts.push(`${best.key} suggestions are landing well: ${best.acceptanceRate}% accepted.`);
   const alternative = byKind.find((kind) => kind.alternative >= 2);
-  if (alternative) facts.push(`When Carat suggests ${alternative.key}, the user often has their own move ready (${alternative.alternative} alternatives).`);
+  if (alternative) facts.push(`When Caret suggests ${alternative.key}, the user often has their own move ready (${alternative.alternative} alternatives).`);
   const recentBackouts = rows.filter((row) => /back|previous|return/i.test(row.actual ?? '')).length;
   if (recentBackouts >= 2) facts.push(`Backtracking showed up ${recentBackouts} times after suggestions, a classic comparison-shopping signal.`);
-  const trains = rows.length >= 5 ? `The actions index now has ${rows.length} fresh preference examples Carat can use as context today, and later as training/eval data.` : '';
+  const trains = rows.length >= 5 ? `The actions index now has ${rows.length} fresh preference examples Caret can use as context today, and later as training/eval data.` : '';
   if (trains) facts.push(trains);
   if (facts.length === 0) {
-    facts.push(`Carat suggested ${totals.suggested} actions in the last day and ${totals.accepted} were accepted.`);
+    facts.push(`Caret suggested ${totals.suggested} actions in the last day and ${totals.accepted} were accepted.`);
   }
   return unique(facts).slice(0, 4);
 }
@@ -1324,7 +1324,7 @@ function shoppingProfile(rows: ActionAnalytics['recent']): string {
   const checkoutSkips = shoppingRows.filter((row) => row.outcome !== 'accepted' && /\b(checkout|buy|purchase|place order|pay)\b/i.test(actionText(row))).length;
   const comparisons = shoppingRows.filter((row) => /\b(back|reviews?|compare|price|shipping|details?|different|another)\b/i.test(row.actual ?? '')).length;
   if (acceptedCart > 0 && checkoutSkips > 0) {
-    return `Cart commitment issue: the user accepts cart-ish steps, then dodges checkout. Carat should slow down before pushing purchase actions.`;
+    return `Cart commitment issue: the user accepts cart-ish steps, then dodges checkout. Caret should slow down before pushing purchase actions.`;
   }
   if (comparisons >= 2) {
     return `Indecisive shopper energy: ${comparisons} suggestions turned into comparison or backtracking moves.`;
@@ -1393,7 +1393,7 @@ function indexName(s: ElasticSettings, kind: IndexKind): string {
 }
 
 function pipelineName(s: ElasticSettings): string {
-  return `${indexPrefix(s.elasticIndexPrefix)}-carat-ingest`;
+  return `${indexPrefix(s.elasticIndexPrefix)}-caret-ingest`;
 }
 
 function semanticEnabled(s: ElasticSettings): boolean {
@@ -1411,7 +1411,7 @@ function indexPrefix(v: string): string {
       .toLowerCase()
       .replace(/[^a-z0-9_-]+/g, '-')
       .replace(/^-+|-+$/g, '')
-      .slice(0, 48) || 'carat'
+      .slice(0, 48) || 'caret'
   );
 }
 
@@ -1473,7 +1473,7 @@ function indexDefinition(_kind: IndexKind, inferenceId: string): Record<string, 
             module: { type: 'keyword' },
           },
         },
-        carat: {
+        caret: {
           properties: {
             ingest_pipeline: { type: 'keyword' },
             schema_version: { type: 'integer' },
@@ -1487,15 +1487,15 @@ function indexDefinition(_kind: IndexKind, inferenceId: string): Record<string, 
 
 function pipelineDefinition(s: ElasticSettings): Record<string, unknown> {
   return {
-    description: 'Carat ingest normalization: timestamps, normalized host fields, ECS-ish event metadata, and lightweight sensitive-number redaction.',
+    description: 'Caret ingest normalization: timestamps, normalized host fields, ECS-ish event metadata, and lightweight sensitive-number redaction.',
     processors: [
       { set: { field: 'received_at', value: '{{{_ingest.timestamp}}}' } },
-      { set: { field: 'event.module', value: 'carat' } },
+      { set: { field: 'event.module', value: 'caret' } },
       { set: { field: 'event.dataset', value: `${indexPrefix(s.elasticIndexPrefix)}.context` } },
       { set: { field: 'event.kind', value: 'event' } },
-      { set: { field: 'carat.ingest_pipeline', value: pipelineName(s) } },
-      { set: { field: 'carat.schema_version', value: INGEST_SCHEMA_VERSION } },
-      { set: { field: 'carat.semantic_enabled', value: semanticEnabled(s) } },
+      { set: { field: 'caret.ingest_pipeline', value: pipelineName(s) } },
+      { set: { field: 'caret.schema_version', value: INGEST_SCHEMA_VERSION } },
+      { set: { field: 'caret.semantic_enabled', value: semanticEnabled(s) } },
       { lowercase: { field: 'host', target_field: 'host_normalized', ignore_missing: true } },
       { lowercase: { field: 'origin', target_field: 'origin_normalized', ignore_missing: true } },
       { lowercase: { field: 'actionType', target_field: 'event.category', ignore_missing: true } },
@@ -1570,7 +1570,7 @@ function searchBody(s: ElasticSettings, query: string): Record<string, unknown> 
 
 /**
  * What this page can actually finish, in two tiers. The host decides when it
- * is one of Carat's destinations, and then it decides alone: on Maps the only
+ * is one of Caret's destinations, and then it decides alone: on Maps the only
  * task worth pulling is a Maps task. Otherwise the capability has to be
  * spelled out by a control the model could type into — matching page prose
  * meant a news article with a date in it claimed to be a calendar, and the
@@ -1629,7 +1629,7 @@ function detailFieldsWanted(page: PageContext): DetailField[] {
 /** AX roles that take typing, which is what a `follow_up` needs. */
 const ENTRY_ROLES = new Set(['textbox', 'searchbox', 'combobox', 'select', 'listbox', 'spinbutton']);
 
-/** One of Carat's own destinations, by host and path only. */
+/** One of Caret's own destinations, by host and path only. */
 function destinationCapability(where: string): string | null {
   if (/^calendar\.google\.com|^outlook\.live\.com\/calendar|^outlook\.office\.com\/calendar/.test(where)) return 'calendar_event';
   if (/^maps\.google\.[^/]+|^(?:www\.)?google\.[^/]+\/maps/.test(where)) return 'maps_lookup';
@@ -1668,7 +1668,7 @@ function esqlString(value: string): string {
 /**
  * The people this page could be filled for. Every subject is named, because
  * the whole question on a booking form is *whose* name goes in the box: the
- * person driving, or the friend they are booking for. Carat does not guess
+ * person driving, or the friend they are booking for. Caret does not guess
  * that from a conversation — it lays out what it knows and lets the page's own
  * labels decide.
  */

@@ -2,7 +2,7 @@ import { registerSurface } from '../dom/surfaces';
 import { DEBUG_CSS } from './styles';
 import type { DebugView, GateRow } from './view';
 
-const HOST_ATTR = 'data-carat-debug';
+const HOST_ATTR = 'data-caret-debug';
 
 export const PANEL_SIZE = {
   width: 440,
@@ -38,11 +38,11 @@ export interface DebugPanelOptions {
 }
 
 /**
- * What carat is thinking about this page, in a shadow host of its own at the
+ * What caret is thinking about this page, in a shadow host of its own at the
  * bottom right: the request as it was sent, the answer as it came back, the
  * timeline both sides wrote, and the gate in front of the next request.
  *
- * It is registered as one of carat's surfaces, so a click inside it is not
+ * It is registered as one of caret's surfaces, so a click inside it is not
  * the user getting on with the page and never takes the chip down. Its only
  * key listener is on its own host, so Tab and Esc reach it when the panel has
  * focus and never when the page does.
@@ -62,7 +62,7 @@ export function createDebugPanel(doc: Document = document, opts: DebugPanelOptio
 
   const head = doc.createElement('div');
   head.className = 'head';
-  const title = el(doc, 'span', 'title', 'carat debug');
+  const title = el(doc, 'span', 'title', 'caret debug');
   const where = el(doc, 'span', 'where', '');
   const copy = doc.createElement('button');
   copy.type = 'button';
@@ -128,7 +128,7 @@ export function createDebugPanel(doc: Document = document, opts: DebugPanelOptio
   /**
    * Dragging, by the header to move and by the corner grip to resize. Mouse
    * events rather than pointer capture: the listeners come off on mouseup,
-   * and carat's own surfaces are ignored by the chip, so none of this reads
+   * and caret's own surfaces are ignored by the chip, so none of this reads
    * as the user acting on the page.
    */
   function startDrag(e: MouseEvent, mode: 'move' | 'resize'): void {

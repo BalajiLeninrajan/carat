@@ -59,7 +59,7 @@ async function harness(over: Partial<Settings> = {}): Promise<Harness> {
       onMessage: { addListener: (fn: Listener) => (onMessage = fn) },
       sendMessage: sent,
       getContexts: async () => (open ? [{ contextType: 'OFFSCREEN_DOCUMENT' }] : []),
-      getURL: (path: string) => `chrome-extension://carat/${path}`,
+      getURL: (path: string) => `chrome-extension://caret/${path}`,
       ContextType: { OFFSCREEN_DOCUMENT: 'OFFSCREEN_DOCUMENT' },
     },
     windows: {
@@ -95,7 +95,7 @@ async function harness(over: Partial<Settings> = {}): Promise<Harness> {
     fetchImpl,
     say: async (text, seconds = 5) => {
       spoken.push(text);
-      onMessage?.({ type: 'carat-utterance', wav: btoa('wav bytes'), seconds });
+      onMessage?.({ type: 'caret-utterance', wav: btoa('wav bytes'), seconds });
       await settle();
     },
     unfocus: async () => {
@@ -216,7 +216,7 @@ describe('background listening', () => {
       expect.objectContaining({ url: 'offscreen.html', reasons: ['CLIPBOARD', 'USER_MEDIA'] }),
     );
     // The document being up is not the microphone being open: that is asked for.
-    expect(on.sent).toHaveBeenCalledWith({ type: 'carat-listen-start' });
+    expect(on.sent).toHaveBeenCalledWith({ type: 'caret-listen-start' });
   });
 
   it('gives the microphone back when Chrome loses focus, and notes what was said first', async () => {
@@ -226,7 +226,7 @@ describe('background listening', () => {
     await h.unfocus();
 
     // The microphone goes first, then the document, since nothing else wants it.
-    expect(h.sent).toHaveBeenCalledWith({ type: 'carat-listen-stop' });
+    expect(h.sent).toHaveBeenCalledWith({ type: 'caret-listen-stop' });
     expect(h.closeDocument).toHaveBeenCalledTimes(1);
     await settle();
     expect(recordHeard).toHaveBeenCalledTimes(1);

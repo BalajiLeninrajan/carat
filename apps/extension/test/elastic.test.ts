@@ -9,7 +9,7 @@ const settings = (over: Partial<Settings> = {}): Settings => ({
   ...DEFAULT_SETTINGS,
   elasticUrl: 'https://elastic.example.com',
   elasticApiKey: 'es-key',
-  elasticIndexPrefix: 'carat-test',
+  elasticIndexPrefix: 'caret-test',
   ...over,
 });
 
@@ -43,7 +43,7 @@ describe('ElasticMemory', () => {
   it('retrieves compact BM25 evidence lines', async () => {
     let searchBody: Record<string, unknown> | undefined;
     const fetchImpl = vi.fn<typeof fetch>(async (_url, init) => {
-      if (String(_url).includes('carat-test-observations,carat-test-facts/_search')) searchBody = JSON.parse(String(init?.body));
+      if (String(_url).includes('caret-test-observations,caret-test-facts/_search')) searchBody = JSON.parse(String(init?.body));
       return Response.json({
         hits: {
           hits: [
@@ -64,7 +64,7 @@ describe('ElasticMemory', () => {
     const lines = await elastic.retrieve(req(), 1);
 
     expect(fetchImpl).toHaveBeenCalledWith(
-      'https://elastic.example.com/carat-test-observations,carat-test-facts/_search?ignore_unavailable=true',
+      'https://elastic.example.com/caret-test-observations,caret-test-facts/_search?ignore_unavailable=true',
       expect.objectContaining({ method: 'POST' }),
     );
     expect(searchBody).toHaveProperty('query');
@@ -97,8 +97,8 @@ describe('ElasticMemory', () => {
 
     await elastic.indexFacts(item(), notes);
 
-    const factsMapping = writes.find(([url]) => url === 'https://elastic.example.com/carat-test-facts')?.[1];
-    const factsDoc = writes.find(([url]) => url.includes('carat-test-facts/_doc/ctx-1%3A0'))?.[1];
+    const factsMapping = writes.find(([url]) => url === 'https://elastic.example.com/caret-test-facts')?.[1];
+    const factsDoc = writes.find(([url]) => url.includes('caret-test-facts/_doc/ctx-1%3A0'))?.[1];
     expect(JSON.stringify(factsMapping)).toContain('"type":"semantic_text"');
     expect(JSON.stringify(factsMapping)).toContain('"inference_id":".elser-2-elasticsearch"');
     expect(factsDoc).toMatchObject({ text_semantic: notes[0]!.text });
@@ -118,8 +118,8 @@ describe('ElasticMemory', () => {
 
     await elastic.indexObservation(item());
 
-    const mapping = writes.find(([url]) => url === 'https://elastic.example.com/carat-test-observations')?.[1];
-    const doc = writes.find(([url]) => url.includes('carat-test-observations/_doc/ctx-1'))?.[1];
+    const mapping = writes.find(([url]) => url === 'https://elastic.example.com/caret-test-observations')?.[1];
+    const doc = writes.find(([url]) => url.includes('caret-test-observations/_doc/ctx-1'))?.[1];
     expect(JSON.stringify(mapping)).toContain('"type":"semantic_text"');
     expect(JSON.stringify(mapping)).not.toContain('"inference_id"');
     expect(doc).toMatchObject({ text_semantic: item().text });
@@ -136,12 +136,12 @@ describe('ElasticMemory', () => {
 
     await elastic.indexObservation(item());
 
-    const pipeline = writes.find(([url]) => url === 'https://elastic.example.com/_ingest/pipeline/carat-test-carat-ingest')?.[1];
+    const pipeline = writes.find(([url]) => url === 'https://elastic.example.com/_ingest/pipeline/caret-test-caret-ingest')?.[1];
     expect(JSON.stringify(pipeline)).toContain('"received_at"');
     expect(JSON.stringify(pipeline)).toContain('"host_normalized"');
     expect(JSON.stringify(pipeline)).toContain('"[redacted-number]"');
     expect(fetchImpl).toHaveBeenCalledWith(
-      'https://elastic.example.com/carat-test-observations/_doc/ctx-1?pipeline=carat-test-carat-ingest',
+      'https://elastic.example.com/caret-test-observations/_doc/ctx-1?pipeline=caret-test-caret-ingest',
       expect.objectContaining({ method: 'PUT' }),
     );
   });
@@ -149,7 +149,7 @@ describe('ElasticMemory', () => {
   it('uses RRF over BM25 and semantic_text when semantic mode is enabled', async () => {
     let searchBody: Record<string, unknown> | undefined;
     const fetchImpl = vi.fn<typeof fetch>(async (_url, init) => {
-      if (String(_url).includes('carat-test-observations,carat-test-facts')) searchBody = JSON.parse(String(init?.body));
+      if (String(_url).includes('caret-test-observations,caret-test-facts')) searchBody = JSON.parse(String(init?.body));
       return Response.json({ hits: { hits: [] } });
     });
     const elastic = createElasticMemory({
@@ -183,7 +183,7 @@ describe('ElasticMemory', () => {
       },
     ]);
 
-    const taskPut = fetchImpl.mock.calls.find(([url, init]) => String(url).includes('carat-test-tasks/_doc/') && init?.method === 'PUT');
+    const taskPut = fetchImpl.mock.calls.find(([url, init]) => String(url).includes('caret-test-tasks/_doc/') && init?.method === 'PUT');
     expect(taskPut).toBeDefined();
     const task = JSON.parse(String(taskPut![1]?.body));
     expect(task).toMatchObject({
@@ -214,10 +214,10 @@ describe('ElasticMemory', () => {
       },
     ]);
 
-    expect(writes.some((url) => url.includes('carat-test-facts/_doc/'))).toBe(true);
-    expect(writes.some((url) => url.includes('carat-test-tasks/_doc/'))).toBe(false);
+    expect(writes.some((url) => url.includes('caret-test-facts/_doc/'))).toBe(true);
+    expect(writes.some((url) => url.includes('caret-test-tasks/_doc/'))).toBe(false);
     // A distilled note lives in facts alone; it used to be copied into observations too.
-    expect(writes.some((url) => url.includes('carat-test-observations/_doc/'))).toBe(false);
+    expect(writes.some((url) => url.includes('caret-test-observations/_doc/'))).toBe(false);
   });
 
   it('classifies side quests near an office as a Maps lookup, not a calendar event', async () => {
@@ -239,7 +239,7 @@ describe('ElasticMemory', () => {
       },
     ]);
 
-    const task = writes.find(([url]) => url.includes('carat-test-tasks/_doc/'))?.[1];
+    const task = writes.find(([url]) => url.includes('caret-test-tasks/_doc/'))?.[1];
     expect(task).toMatchObject({ actionType: 'maps_lookup' });
   });
 
@@ -262,14 +262,14 @@ describe('ElasticMemory', () => {
       },
     ]);
 
-    const fact = writes.find(([url]) => url.includes('carat-test-facts/_doc/'))?.[1];
+    const fact = writes.find(([url]) => url.includes('caret-test-facts/_doc/'))?.[1];
     expect(fact).toMatchObject({
       sourceId: 'ctx-1',
       kind: 'fact',
       text: 'Side quests near the Toronto Shopify office tomorrow.',
     });
-    expect(writes.filter(([url]) => url.includes('carat-test-facts/_doc/'))).toHaveLength(1);
-    expect(writes.some(([url]) => url.includes('carat-test-observations/_doc/'))).toBe(false);
+    expect(writes.filter(([url]) => url.includes('caret-test-facts/_doc/'))).toHaveLength(1);
+    expect(writes.some(([url]) => url.includes('caret-test-observations/_doc/'))).toBe(false);
   });
 
   it('skips duplicate raw captures and distilled notes already present in Elastic', async () => {
@@ -297,7 +297,7 @@ describe('ElasticMemory', () => {
     ]);
 
     expect(writes.some((url) => url.includes('/_doc/'))).toBe(false);
-    expect(fetchImpl.mock.calls.some(([url]) => String(url).includes('carat-test-tasks/_doc/'))).toBe(false);
+    expect(fetchImpl.mock.calls.some(([url]) => String(url).includes('caret-test-tasks/_doc/'))).toBe(false);
     expect(fetchImpl.mock.calls.some(([url]) => String(url).includes('_search'))).toBe(true);
   });
 
@@ -333,9 +333,9 @@ describe('ElasticMemory', () => {
       },
     ]);
 
-    const task = writes.find(([url]) => url.includes('carat-test-tasks/_doc/'))?.[1];
+    const task = writes.find(([url]) => url.includes('caret-test-tasks/_doc/'))?.[1];
     expect(task).toMatchObject({ status: 'conflict', conflictReason: 'time_mismatch', timeValues: ['6', '7'] });
-    expect(writes.some(([url]) => url.includes('carat-test-cases'))).toBe(false);
+    expect(writes.some(([url]) => url.includes('caret-test-cases'))).toBe(false);
   });
 
   it('merges a semantically similar task instead of creating a duplicate', async () => {
@@ -357,7 +357,7 @@ describe('ElasticMemory', () => {
     const fetchImpl = vi.fn<typeof fetch>(async (url, init) => {
       if (init?.method === 'HEAD') return new Response(null, { status: 200 });
       if (init?.method === 'GET') return new Response(null, { status: 404 });
-      if (String(url).includes('carat-test-tasks/_search')) {
+      if (String(url).includes('caret-test-tasks/_search')) {
         similarSearchBody = JSON.parse(String(init?.body));
         return Response.json({ hits: { hits: [{ _source: existing }] } });
       }
@@ -379,7 +379,7 @@ describe('ElasticMemory', () => {
       },
     ]);
 
-    const taskWrite = writes.find(([url]) => url.includes('carat-test-tasks/_doc/calendar-event-seven-shores-cafe-friday'))?.[1];
+    const taskWrite = writes.find(([url]) => url.includes('caret-test-tasks/_doc/calendar-event-seven-shores-cafe-friday'))?.[1];
     expect(JSON.stringify(similarSearchBody)).toContain('"text_semantic"');
     expect(taskWrite).toMatchObject({
       groupKey: 'calendar-event-seven-shores-cafe-friday',
@@ -413,8 +413,8 @@ describe('ElasticMemory', () => {
   it('creates the tasks index before running ES|QL on a fresh cluster', async () => {
     const fetchImpl = vi.fn<typeof fetch>(async (url, init) => {
       const path = String(url);
-      if (init?.method === 'HEAD' && path.endsWith('/carat-test-tasks')) return new Response(null, { status: 404 });
-      if (init?.method === 'PUT' && path.endsWith('/carat-test-tasks')) return Response.json({ acknowledged: true });
+      if (init?.method === 'HEAD' && path.endsWith('/caret-test-tasks')) return new Response(null, { status: 404 });
+      if (init?.method === 'PUT' && path.endsWith('/caret-test-tasks')) return Response.json({ acknowledged: true });
       if (path.includes('/_query')) return Response.json({ columns: [], values: [] });
       return Response.json({ hits: { hits: [] } });
     });
@@ -422,16 +422,16 @@ describe('ElasticMemory', () => {
 
     await elastic.retrieve(req(), 1);
 
-    expect(fetchImpl).toHaveBeenCalledWith('https://elastic.example.com/carat-test-tasks', expect.objectContaining({ method: 'HEAD' }));
-    expect(fetchImpl).toHaveBeenCalledWith('https://elastic.example.com/carat-test-tasks', expect.objectContaining({ method: 'PUT' }));
+    expect(fetchImpl).toHaveBeenCalledWith('https://elastic.example.com/caret-test-tasks', expect.objectContaining({ method: 'HEAD' }));
+    expect(fetchImpl).toHaveBeenCalledWith('https://elastic.example.com/caret-test-tasks', expect.objectContaining({ method: 'PUT' }));
     const queryCall = fetchImpl.mock.calls.find(([url]) => String(url).includes('/_query'));
-    expect(JSON.parse(String(queryCall?.[1]?.body)).query).toContain('FROM carat-test-tasks');
+    expect(JSON.parse(String(queryCall?.[1]?.body)).query).toContain('FROM caret-test-tasks');
   });
 
   it('infers Maps capability from the accessibility tree and searches matching tasks', async () => {
     let searchBody: Record<string, unknown> | undefined;
     const fetchImpl = vi.fn<typeof fetch>(async (url, init) => {
-      if (String(url).includes('carat-test-tasks/_search')) searchBody = JSON.parse(String(init?.body));
+      if (String(url).includes('caret-test-tasks/_search')) searchBody = JSON.parse(String(init?.body));
       return Response.json({ hits: { hits: [] } });
     });
     const mapsReq: PageContext = {
@@ -457,7 +457,7 @@ describe('ElasticMemory', () => {
     let generalSearchBody: Record<string, unknown> | undefined;
     const fetchImpl = vi.fn<typeof fetch>(async (url, init) => {
       const path = String(url);
-      if (path.includes('carat-test-observations,carat-test-facts/_search')) {
+      if (path.includes('caret-test-observations,caret-test-facts/_search')) {
         generalSearchBody = JSON.parse(String(init?.body));
         return Response.json({
           hits: {
@@ -475,7 +475,7 @@ describe('ElasticMemory', () => {
           },
         });
       }
-      if (path.includes('carat-test-tasks')) throw new Error(`source page should not query task indices: ${path}`);
+      if (path.includes('caret-test-tasks')) throw new Error(`source page should not query task indices: ${path}`);
       return Response.json({ hits: { hits: [] } });
     });
     const discordReq: PageContext = {
@@ -495,7 +495,7 @@ describe('ElasticMemory', () => {
     expect(lines[0]).not.toContain('find a restaurant near bloor');
     expect(JSON.stringify(generalSearchBody)).not.toContain('"actionType":["email"]');
     expect(JSON.stringify(generalSearchBody)).not.toContain('"must_not"');
-    expect(fetchImpl.mock.calls.every(([url]) => !String(url).includes('carat-test-tasks'))).toBe(true);
+    expect(fetchImpl.mock.calls.every(([url]) => !String(url).includes('caret-test-tasks'))).toBe(true);
     expect(fetchImpl.mock.calls.some(([url]) => String(url).includes('/_query'))).toBe(false);
   });
 
@@ -518,9 +518,9 @@ describe('ElasticMemory', () => {
     await elastic.retrieve(articleReq, 4);
 
     // No destination host and no field named like one, so there is no task to pull.
-    expect(paths.some((path) => path.includes('carat-test-tasks'))).toBe(false);
+    expect(paths.some((path) => path.includes('caret-test-tasks'))).toBe(false);
     expect(paths.some((path) => path.includes('/_query'))).toBe(false);
-    expect(paths.some((path) => path.includes('carat-test-observations,carat-test-facts/_search'))).toBe(true);
+    expect(paths.some((path) => path.includes('caret-test-observations,caret-test-facts/_search'))).toBe(true);
   });
 
   it('runs the task and context queries side by side under one deadline', async () => {
@@ -537,14 +537,14 @@ describe('ElasticMemory', () => {
 
     await elastic.retrieve(req(), 1);
 
-    expect(started.filter((path) => path.includes('carat-test-tasks/_search'))).toHaveLength(1);
-    expect(started.filter((path) => path.includes('carat-test-observations,carat-test-facts/_search'))).toHaveLength(1);
+    expect(started.filter((path) => path.includes('caret-test-tasks/_search'))).toHaveLength(1);
+    expect(started.filter((path) => path.includes('caret-test-observations,caret-test-facts/_search'))).toHaveLength(1);
     expect(started.filter((path) => path.includes('/_query'))).toHaveLength(1);
   });
 
   it('renders the matched task as a single labelled line', async () => {
     const fetchImpl = vi.fn<typeof fetch>(async (url) => {
-      if (String(url).includes('carat-test-tasks/_search')) {
+      if (String(url).includes('caret-test-tasks/_search')) {
         return Response.json({
           hits: {
             hits: [
@@ -586,7 +586,7 @@ describe('ElasticMemory', () => {
     await elastic.sweepExpiredTasks();
 
     expect(fetchImpl).toHaveBeenCalledWith(
-      'https://elastic.example.com/carat-test-tasks/_delete_by_query?ignore_unavailable=true&conflicts=proceed',
+      'https://elastic.example.com/caret-test-tasks/_delete_by_query?ignore_unavailable=true&conflicts=proceed',
       expect.objectContaining({ method: 'POST' }),
     );
     expect(JSON.stringify(cleanupBody)).toContain('"lastSeenAt":{"lte":"now-5m"}');
@@ -620,7 +620,7 @@ describe('ElasticMemory', () => {
         writes.push([path, JSON.parse(String(init.body))]);
         return Response.json({ result: 'updated' });
       }
-      if (path.includes('carat-test-tasks/_search')) return Response.json({ hits: { hits: [{ _source: task }] } });
+      if (path.includes('caret-test-tasks/_search')) return Response.json({ hits: { hits: [{ _source: task }] } });
       if (init?.method === 'HEAD') return new Response(null, { status: 200 });
       return Response.json({ hits: { hits: [] } });
     });
@@ -644,7 +644,7 @@ describe('ElasticMemory', () => {
       accepted: true,
     });
 
-    const saved = writes.find(([url]) => url.includes('carat-test-tasks/_doc/'))?.[1] as
+    const saved = writes.find(([url]) => url.includes('caret-test-tasks/_doc/'))?.[1] as
       | { fields: Array<{ name: string; done: boolean }> }
       | undefined;
     expect(saved).toBeDefined();
@@ -672,7 +672,7 @@ describe('ElasticMemory', () => {
       accepted: true,
     });
 
-    expect(deletes.some((p) => p.includes('carat-test-tasks/_doc/'))).toBe(true);
+    expect(deletes.some((p) => p.includes('caret-test-tasks/_doc/'))).toBe(true);
   });
 
   it('keeps the task alive across a switch instead of consuming it', async () => {
@@ -693,7 +693,7 @@ describe('ElasticMemory', () => {
 
     // Travelling to the surface is not entering anything: the field stays open,
     // and lastSeenAt moves so the task survives the five-minute window.
-    const saved = writes.find(([url]) => url.includes('carat-test-tasks/_doc/'))?.[1] as
+    const saved = writes.find(([url]) => url.includes('caret-test-tasks/_doc/'))?.[1] as
       | { fields: Array<{ done: boolean }>; lastSeenAt: string }
       | undefined;
     expect(saved).toBeDefined();
@@ -717,7 +717,7 @@ describe('ElasticMemory', () => {
       accepted: false,
     });
 
-    const saved = writes.find(([url]) => url.includes('carat-test-tasks/_doc/'))?.[1] as
+    const saved = writes.find(([url]) => url.includes('caret-test-tasks/_doc/'))?.[1] as
       | { fields: Array<{ done: boolean }> }
       | undefined;
     expect(saved!.fields[0]?.done).toBe(false);
@@ -728,7 +728,7 @@ describe('ElasticMemory', () => {
     const fetchImpl = vi.fn<typeof fetch>(async (url, init) => {
       const path = String(url);
       if (init?.method === 'HEAD') return new Response(null, { status: 200 });
-      if (path.includes('carat-test-actions/_search')) {
+      if (path.includes('caret-test-actions/_search')) {
         return Response.json({
           hits: {
             hits: [
@@ -758,7 +758,7 @@ describe('ElasticMemory', () => {
     const fetchImpl = vi.fn<typeof fetch>(async (url, init) => {
       const path = String(url);
       if (init?.method === 'HEAD') return new Response(null, { status: 200 });
-      if (path.includes('carat-test-actions/_search')) {
+      if (path.includes('caret-test-actions/_search')) {
         return Response.json({
           hits: {
             hits: [
@@ -789,7 +789,7 @@ describe('ElasticMemory', () => {
 
   it('names the outstanding fields and their values on the task line', async () => {
     const fetchImpl = vi.fn<typeof fetch>(async (url) => {
-      if (String(url).includes('carat-test-tasks/_search')) {
+      if (String(url).includes('caret-test-tasks/_search')) {
         return Response.json({
           hits: {
             hits: [
@@ -842,7 +842,7 @@ describe('ElasticMemory', () => {
       },
     ]);
 
-    const task = writes.find(([url]) => url.includes('carat-test-tasks/_doc/'))?.[1] as
+    const task = writes.find(([url]) => url.includes('caret-test-tasks/_doc/'))?.[1] as
       | { fields: Array<{ name: string; value: string; done: boolean }> }
       | undefined;
     expect(task!.fields.map((f) => f.name).sort()).toEqual(['location', 'title', 'when']);

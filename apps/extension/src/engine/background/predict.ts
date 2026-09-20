@@ -164,13 +164,13 @@ export async function predictAction(opts: {
     } catch {
       const salvaged = salvage(result.text);
       if (!salvaged) {
-        console.warn("[carat] action: unparseable output", result.text);
+        console.warn("[caret] action: unparseable output", result.text);
         trace(opts, result, targetMs, null, "cleared: the model's output would not parse");
         post({ type: "clear", reqId });
         return;
       }
       parsed = salvaged;
-      console.warn(`[carat] action: output was cut off; salvaged ${parsed.kind} [${parsed.target}] with a ${parsed.value.length}-char value`);
+      console.warn(`[caret] action: output was cut off; salvaged ${parsed.kind} [${parsed.target}] with a ${parsed.value.length}-char value`);
     }
 
     const summary =
@@ -183,7 +183,7 @@ export async function predictAction(opts: {
       trace(opts, result, targetMs, parsed, "shown");
       pending.set(tabId, { reqId, url, kind: "scroll", value: "", label: parsed.label.trim() || "Read on" });
       post({ type: "action", reqId, kind: "scroll", label: parsed.label.trim() || "Read on", value: "", irreversible: false, browser: true });
-      console.log(`[carat] action → scroll one screen · ${summary}`);
+      console.log(`[caret] action → scroll one screen · ${summary}`);
       return;
     }
 
@@ -191,7 +191,7 @@ export async function predictAction(opts: {
     if (BROWSER_KINDS.includes(parsed.kind as ActionKind)) {
       const tab = parsed.kind === "switch" ? browser.tabs[parsed.target - 1] : undefined;
       if (parsed.kind === "switch" && !tab) {
-        console.log(`[carat] action → no tab [T${parsed.target}] · ${summary}`);
+        console.log(`[caret] action → no tab [T${parsed.target}] · ${summary}`);
         trace(opts, result, targetMs, parsed, `cleared: no tab [T${parsed.target}]`);
         post({ type: "clear", reqId });
         return;
@@ -202,13 +202,13 @@ export async function predictAction(opts: {
       pending.set(tabId, { reqId, url, tab, kind, value: parsed.value, label });
       trace(opts, result, targetMs, parsed, "shown");
       post({ type: "action", reqId, kind, label, value: parsed.value, irreversible: false, browser: true });
-      console.log(`[carat] action → ${kind} ${tab ? `tab "${tab.title}"` : `"${parsed.value}"`} · ${summary}`);
+      console.log(`[caret] action → ${kind} ${tab ? `tab "${tab.title}"` : `"${parsed.value}"`} · ${summary}`);
       return;
     }
 
     const c = candidateFor(parsed.target);
     if (!c) {
-      console.log(`[carat] action → unusable target [${parsed.target}] (not on the page, or dismissed) · ${summary}`);
+      console.log(`[caret] action → unusable target [${parsed.target}] (not on the page, or dismissed) · ${summary}`);
       trace(opts, result, targetMs, parsed, `cleared: [${parsed.target}] is not on the page, or was dismissed`);
       post({ type: "clear", reqId });
       return;
@@ -227,12 +227,12 @@ export async function predictAction(opts: {
     trace(opts, result, targetMs, { ...parsed, label, irreversible }, "shown");
     post({ type: "action", reqId, kind, label, value: parsed.value, irreversible });
     console.log(
-      `[carat] action → [${c.n}] ${kind} ${c.role} "${c.name}"${parsed.value ? ` = "${parsed.value}"` : ""}` +
+      `[caret] action → [${c.n}] ${kind} ${c.role} "${c.name}"${parsed.value ? ` = "${parsed.value}"` : ""}` +
         `${irreversible ? " (irreversible)" : ""} · ${summary}`,
     );
   } catch (e) {
     if (controller.signal.aborted) return;
-    console.error("[carat] action prediction failed:", e);
+    console.error("[caret] action prediction failed:", e);
     post({ type: "clear", reqId });
   } finally {
     if (inflight.get(tabId) === controller) inflight.delete(tabId);
@@ -282,7 +282,7 @@ export async function acceptAction(tabId: number, reqId: number): Promise<Actuat
         return { ok: false, reason: "That suggestion is no longer valid." };
     }
   } catch (e) {
-    console.error("[carat] accept failed:", e);
+    console.error("[caret] accept failed:", e);
     return { ok: false, reason: "The page changed underneath the suggestion." };
   }
 }

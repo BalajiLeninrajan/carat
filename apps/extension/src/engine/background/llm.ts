@@ -61,7 +61,7 @@ export async function streamResponse(
   onDelta: (textSoFar: string) => void,
   signal: AbortSignal,
 ): Promise<StreamResult> {
-  if (!settings.apiKey) throw new LlmError("No API key: set one in Carat's options page.");
+  if (!settings.apiKey) throw new LlmError("No API key: set one in Caret's options page.");
   const started = performance.now();
   const body = structuredClone(request) as Body;
   for (const fix of fixes.get(body.model) ?? []) fix(body);
@@ -78,7 +78,7 @@ export async function streamResponse(
     const err = await errorOf(res);
     const fix = res.status === 400 && err.param ? relax(body, err.param) : null;
     if (!fix) throw new LlmError(`${res.status}: ${err.message}`, res.status);
-    console.info(`[carat] ${body.model} rejected "${err.param}", adjusting and retrying`);
+    console.info(`[caret] ${body.model} rejected "${err.param}", adjusting and retrying`);
     fix(body);
     fixes.set(body.model, [...(fixes.get(body.model) ?? []), fix]);
     res = null;

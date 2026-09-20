@@ -110,7 +110,7 @@ export async function start(): Promise<void> {
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     });
   } catch (e) {
-    send({ type: "carat-listen-error", message: e instanceof Error ? `${e.name}: ${e.message}` : String(e) });
+    send({ type: "caret-listen-error", message: e instanceof Error ? `${e.name}: ${e.message}` : String(e) });
     return;
   }
 
@@ -123,10 +123,10 @@ export async function start(): Promise<void> {
   source.connect(proc);
   proc.connect(ctx.destination); // required for processing to run; outputs silence
   const ratio = ctx.sampleRate / TARGET_RATE;
-  const beat = setInterval(() => send({ type: "carat-listen-heartbeat" }), 20_000);
+  const beat = setInterval(() => send({ type: "caret-listen-heartbeat" }), 20_000);
   live = { stream, ctx, source, proc, beat };
   send({
-    type: "carat-listen-status",
+    type: "caret-listen-status",
     state: ctx.state,
     sampleRate: ctx.sampleRate,
     device: stream.getAudioTracks()[0]?.label ?? "",
@@ -147,7 +147,7 @@ export async function start(): Promise<void> {
     current = null;
     if (speechMs < MIN_SPEECH_MS) return;
     const wav = encodeWav(chunks, TARGET_RATE);
-    send({ type: "carat-utterance", wav: toBase64(wav), seconds: durationMs / 1000 });
+    send({ type: "caret-utterance", wav: toBase64(wav), seconds: durationMs / 1000 });
   };
 
   proc.onaudioprocess = (e): void => {

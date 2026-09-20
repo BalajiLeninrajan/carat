@@ -2,7 +2,7 @@
  * Plain page visits, from chrome.webNavigation: every top-level navigation is
  * logged with how the user got there (typed it, followed a link, submitted a
  * form, went back...), so the predictor knows about flows that did not start
- * with a click Carat saw.
+ * with a click Caret saw.
  *
  * Only host + path is recorded: query strings and fragments often carry
  * tokens, emails and ids.

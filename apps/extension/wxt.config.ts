@@ -2,7 +2,7 @@ import { defineConfig } from 'wxt';
 
 export default defineConfig({
   manifest: {
-    name: 'Carat',
+    name: 'Caret',
     description: "Cursor-style Tab for the browser, grounded in Chrome's accessibility tree.",
     // debugger: the engine reads every page through Accessibility.getFullAXTree and acts through CDP.
     // webNavigation: visits.ts logs every top-level navigation into the timeline.
@@ -21,23 +21,23 @@ export default defineConfig({
     optional_permissions: ['clipboardRead'] as chrome.runtime.ManifestOptionalPermission[],
     host_permissions: ['<all_urls>'],
     commands: {
-      'carat-suggest': {
+      'caret-suggest': {
         suggested_key: { default: 'Alt+Shift+C' },
-        description: 'Ask Carat for a suggestion on this page now',
+        description: 'Ask Caret for a suggestion on this page now',
       },
       clearContext: {
         suggested_key: { default: 'Alt+Shift+X' },
-        description: 'Clear what Carat remembers',
+        description: 'Clear what Caret remembers',
       },
       toggleDebug: {
         suggested_key: { default: 'Alt+Shift+D' },
-        description: 'Show what Carat is thinking on this page',
+        description: 'Show what Caret is thinking on this page',
       },
       // The content script hears Ctrl+Shift+K itself; this is the way in on a
       // page that has not loaded one, and the line Chrome's shortcut list shows.
       'open-palette': {
         suggested_key: { default: 'Ctrl+Shift+K', mac: 'Command+Shift+K' },
-        description: 'Ask Carat to do something on this page',
+        description: 'Ask Caret to do something on this page',
       },
     },
   },

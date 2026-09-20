@@ -68,7 +68,7 @@ export async function complete(opts: {
   const hit = cache.get(key);
   if (hit != null) {
     post({ type: "ghost", reqId, base, text: hit, done: true });
-    console.log(`[carat] ghost (cache) "${hit}"`);
+    console.log(`[caret] ghost (cache) "${hit}"`);
     return hit;
   }
 
@@ -114,7 +114,7 @@ export async function complete(opts: {
     cache.set(key, final);
     if (cache.size > CACHE_SIZE) cache.delete(cache.keys().next().value!);
     console.log(
-      `[carat] ghost "${final}"` +
+      `[caret] ghost "${final}"` +
         (result
           ? ` · ttft ${result.ttftMs}ms · total ${result.totalMs}ms · ${result.usage?.input ?? "?"} in (${result.usage?.cached ?? 0} cached) / ${result.usage?.output ?? "?"} out`
           : " · stopped at newline"),
@@ -122,7 +122,7 @@ export async function complete(opts: {
     return final;
   } catch (e) {
     if (controller.signal.aborted) return null;
-    console.error("[carat] completion failed:", e);
+    console.error("[caret] completion failed:", e);
     post({ type: "ghost", reqId, base, text: "", done: true });
     return null;
   } finally {

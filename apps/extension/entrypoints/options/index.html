@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark" />
     <meta name="manifest.open_in_tab" content="true" />
-    <title>Carat settings</title>
+    <title>Caret settings</title>
     <style>
       :root {
         --base: #1e1e2e;
@@ -75,16 +75,16 @@
   </head>
   <body>
     <main id="app" data-state="loading">
-      <h1>Carat settings</h1>
+      <h1>Caret settings</h1>
       <p class="lede">
-        Carat reads the page as Chrome's accessibility tree, asks one model what you are most likely to do next, and
+        Caret reads the page as Chrome's accessibility tree, asks one model what you are most likely to do next, and
         offers it. A tap of the <b>right Shift</b> accepts, <b>Esc</b> dismisses, <b>Ctrl+→</b> takes one word of ghost
         text. Something that cannot be undone wants the key twice. Tab stays the browser's, unless you ask for it
         below.
       </p>
 
       <div id="offline">
-        <p>Carat's background worker is not answering. Reload the extension, then try again.</p>
+        <p>Caret's background worker is not answering. Reload the extension, then try again.</p>
         <button type="button" id="retry">Retry</button>
       </div>
 
@@ -128,7 +128,7 @@
           </select>
         </label>
 
-        <h2>What Carat offers</h2>
+        <h2>What Caret offers</h2>
 
         <label>
           <span class="name">Accept with</span>
@@ -143,19 +143,19 @@
           <input type="checkbox" name="actionsEnabled" />
           <span class="name">Next-action suggestions</span>
         </label>
-        <span class="hint">A chip beside the control Carat thinks you want next. The key presses it, fills it, picks the option, or reads on down the page.</span>
+        <span class="hint">A chip beside the control Caret thinks you want next. The key presses it, fills it, picks the option, or reads on down the page.</span>
 
         <label class="row">
           <input type="checkbox" name="textEnabled" />
           <span class="name">Ghost text while you type</span>
         </label>
-        <span class="hint">Pause in a field and Carat writes the rest of the line in grey after the caret. The key takes it, Ctrl+→ takes one word, Esc drops it. Never in a password, card or one-time-code field.</span>
+        <span class="hint">Pause in a field and Caret writes the rest of the line in grey after the caret. The key takes it, Ctrl+→ takes one word, Esc drops it. Never in a password, card or one-time-code field.</span>
 
         <label class="row">
           <input type="checkbox" name="memoryEnabled" />
           <span class="name">Reading memory</span>
         </label>
-        <span class="hint">When you leave a page, Carat asks the model to note the facts on it you might act on elsewhere, keeps them for an hour in session memory, and includes them in later prompts. The page's visible text is sent to the API to do this. Off by default. Skipped on blocklisted sites and pages with a password field.</span>
+        <span class="hint">When you leave a page, Caret asks the model to note the facts on it you might act on elsewhere, keeps them for an hour in session memory, and includes them in later prompts. The page's visible text is sent to the API to do this. Off by default. Skipped on blocklisted sites and pages with a password field.</span>
 
         <label class="row">
           <input type="checkbox" name="listenEnabled" />
@@ -175,7 +175,7 @@
         <h2>Clipboard</h2>
 
         <p class="hint">
-          What you copy on a page is always a note: Carat sees the copy without asking for anything, and keeps the text
+          What you copy on a page is always a note: Caret sees the copy without asking for anything, and keeps the text
           for an hour like everything else it reads. Nothing is kept from a copy made in a password, card or one-time-code
           field, from a page showing a password field, or from a blocklisted site, and text shaped like a password, a key
           or a card number is dropped whatever field it came from.
@@ -185,7 +185,7 @@
           <input type="checkbox" name="clipboardRead" />
           <span class="name">Read the system clipboard</span>
         </label>
-        <span class="hint">Off unless you turn it on, and it saves itself the moment you do. When on, Carat also reads what you last copied anywhere else on this computer, including other apps and other Chrome profiles. Chrome asks you for the permission when you tick the box and Carat gives it back when you untick it, along with everything that permission produced. It reads at most once every five seconds, only when you switch tabs or a page loads, never while the tab in front is blocklisted or showing a password field, and keeps only a hash of the last text between reads.</span>
+        <span class="hint">Off unless you turn it on, and it saves itself the moment you do. When on, Caret also reads what you last copied anywhere else on this computer, including other apps and other Chrome profiles. Chrome asks you for the permission when you tick the box and Caret gives it back when you untick it, along with everything that permission produced. It reads at most once every five seconds, only when you switch tabs or a page loads, never while the tab in front is blocklisted or showing a password field, and keeps only a hash of the last text between reads.</span>
 
         <h2>Display</h2>
 
@@ -199,7 +199,7 @@
           <input type="checkbox" name="statusLine" />
           <span class="name">Show status line</span>
         </label>
-        <span class="hint">A small pill in the bottom-left corner of every page: whether Carat is running there and which model answers. Off by default.</span>
+        <span class="hint">A small pill in the bottom-left corner of every page: whether Caret is running there and which model answers. Off by default.</span>
 
         <label>
           <span class="name">Blocklist</span>
@@ -208,7 +208,7 @@
         </label>
 
         <h2>Elasticsearch context layer</h2>
-        <span class="hint">Optional. With a URL and an API key, Carat indexes the accessibility tree of every page it reads, the facts distilled from it, and the chips you accept or dismiss — then retrieves the one open task this page can finish before each prediction. Leave the URL blank to keep everything local.</span>
+        <span class="hint">Optional. With a URL and an API key, Caret indexes the accessibility tree of every page it reads, the facts distilled from it, and the chips you accept or dismiss — then retrieves the one open task this page can finish before each prediction. Leave the URL blank to keep everything local.</span>
 
         <label>
           <span class="name">Elasticsearch URL</span>
@@ -223,7 +223,7 @@
         <div class="row2">
           <label>
             <span class="name">Index prefix</span>
-            <input type="text" name="elasticIndexPrefix" placeholder="carat" autocomplete="off" spellcheck="false" />
+            <input type="text" name="elasticIndexPrefix" placeholder="caret" autocomplete="off" spellcheck="false" />
           </label>
           <label>
             <span class="name">Inference endpoint</span>
@@ -239,9 +239,9 @@
       </form>
 
       <p class="note">
-        Carat holds a <code>chrome.debugger</code> session on the tab it is reading, which is why Chrome shows the
-        yellow "being debugged" bar. Dismissing that bar pauses Carat on that tab; the toolbar icon resumes it. Nothing
-        Carat reads is written to disk: the timeline and the notes live in session memory and are gone when the browser
+        Caret holds a <code>chrome.debugger</code> session on the tab it is reading, which is why Chrome shows the
+        yellow "being debugged" bar. Dismissing that bar pauses Caret on that tab; the toolbar icon resumes it. Nothing
+        Caret reads is written to disk: the timeline and the notes live in session memory and are gone when the browser
         closes.
       </p>
     </main>

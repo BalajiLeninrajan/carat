@@ -20,7 +20,7 @@ import type { StatusInfo } from './status/info';
 export interface Protocol {
   /** Alt+Shift+C: ask on this page now, past the idle wait. */
   forceSuggest(): void;
-  /** Alt+Shift+X, or the popup's button: what carat remembered is gone, so drop the chip too. */
+  /** Alt+Shift+X, or the popup's button: what caret remembered is gone, so drop the chip too. */
   contextCleared(): void;
   /** The popup's button and Alt+Shift+X both end here. Settings stay. */
   clearKnown(): void;

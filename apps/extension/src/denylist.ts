@@ -1,4 +1,4 @@
-// Hosts Carat never touches, whatever the user has in their own blocklist. Ours, kept from the old engine.
+// Hosts Caret never touches, whatever the user has in their own blocklist. Ours, kept from the old engine.
 export const DENYLIST_HOSTS: readonly string[] = [
   'accounts.google.com',
   'myaccount.google.com',

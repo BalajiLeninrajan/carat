@@ -1,7 +1,7 @@
 /**
  * What kind of element this is, asked without `instanceof`. Every document
  * has its own copy of the DOM classes, so an input inside a child frame is
- * not an instance of the top frame's `HTMLInputElement`, and carat now reads
+ * not an instance of the top frame's `HTMLInputElement`, and caret now reads
  * and fills inside same-origin frames from the top frame. Tag names are the
  * same in every realm; where a tag will not do (`HTMLElement` covers every
  * tag there is), the element's own window supplies the class.

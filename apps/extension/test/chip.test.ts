@@ -44,7 +44,7 @@ function key(target: EventTarget, k: string, init: KeyboardEventInit = {}): Keyb
   return e;
 }
 
-/** Carat's key: the right Shift pressed and let go with nothing in between. */
+/** Caret's key: the right Shift pressed and let go with nothing in between. */
 function tap(target: EventTarget, init: KeyboardEventInit = {}): KeyboardEvent {
   const shape = { key: 'Shift', code: ACCEPT_KEYS.rightShift.code, location: 2, shiftKey: true, bubbles: true, cancelable: true, ...init };
   target.dispatchEvent(new KeyboardEvent('keydown', shape));
@@ -63,11 +63,11 @@ function chord(target: EventTarget, k: string): KeyboardEvent {
 }
 
 function hosts(): NodeListOf<Element> {
-  return document.querySelectorAll('[data-carat-chip]');
+  return document.querySelectorAll('[data-caret-chip]');
 }
 
 function ringHosts(): NodeListOf<Element> {
-  return document.querySelectorAll('carat-ring');
+  return document.querySelectorAll('caret-ring');
 }
 
 // jsdom reports zero-size rects; give the target a viewport position.
@@ -151,7 +151,7 @@ describe('chip', () => {
 
   it('does not accept a right Shift held down as part of a chord', () => {
     show();
-    // Shift+Tab is carat's too, so a chord the page owns makes the point better.
+    // Shift+Tab is caret's too, so a chord the page owns makes the point better.
     const e = chord(target, 'a');
     expect(e.defaultPrevented).toBe(false);
     expect(onAccept).not.toHaveBeenCalled();
@@ -587,7 +587,7 @@ describe('chip', () => {
     chip.destroy();
     expect(hosts()).toHaveLength(0);
     expect(ringHosts()).toHaveLength(0);
-    expect(document.querySelectorAll('[data-carat-fx]')).toHaveLength(0);
+    expect(document.querySelectorAll('[data-caret-fx]')).toHaveLength(0);
   });
 
   describe('how it feels', () => {
@@ -644,7 +644,7 @@ describe('chip', () => {
       expect(chip.classes).not.toContain('is-breathing');
       // The pill keeps its own colour: the red ring on the control is the warning.
       expect(CHIP_CSS).not.toContain('.chip.is-armed {');
-      expect(CHIP_CSS).not.toContain('--carat-amber');
+      expect(CHIP_CSS).not.toContain('--caret-amber');
       vi.advanceTimersByTime(ARM_MS);
       expect(chip.classes).not.toContain('is-armed');
     });
@@ -668,7 +668,7 @@ describe('chip', () => {
     });
 
     it('leaves the arrival mark to the ring, and outlines the control once the offer is taken', () => {
-      const fx = (): string => document.querySelector('[data-carat-fx]')?.getAttribute('data-carat-fx') ?? '';
+      const fx = (): string => document.querySelector('[data-caret-fx]')?.getAttribute('data-caret-fx') ?? '';
       chip.show({ target, label: 'Fill Search with "x"', kind: 'fill', onAccept, onDismiss });
       expect(fx()).toBe('');
       tap(target);
@@ -701,7 +701,7 @@ describe('chip', () => {
     it('still marks the control it acted on, standing still', () => {
       chip.show({ target, label: 'Click "Pay"', kind: 'click', onAccept, onDismiss });
       tap(target);
-      expect(document.querySelector('[data-carat-fx]')?.getAttribute('data-carat-fx')).toBe('flash');
+      expect(document.querySelector('[data-caret-fx]')?.getAttribute('data-caret-fx')).toBe('flash');
     });
   });
 

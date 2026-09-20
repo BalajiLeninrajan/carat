@@ -14,7 +14,7 @@ export interface ScrollOptions {
 
 const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
 
-/** Scrolls carat started that have not stopped yet. */
+/** Scrolls caret started that have not stopped yet. */
 let running = 0;
 /** The tail after the last of them: frames still landing once the settle has resolved. */
 let tail: number | null = null;
@@ -22,23 +22,23 @@ let tail: number | null = null;
 let waiting: Array<() => void> = [];
 
 /**
- * Whether the page is moving because carat moved it. A smooth scroll of one
+ * Whether the page is moving because caret moved it. A smooth scroll of one
  * viewport takes longer than the window it is measured with, so the mark
  * stands from the first pixel to a settle window past the last. A scroll
  * event while it stands is not the user reading on: it neither dismisses the
  * chip nor counts as the user acting.
  */
-export function caratScrolling(): boolean {
+export function caretScrolling(): boolean {
   return running > 0 || tail !== null;
 }
 
 /**
  * Resolves the moment the mark comes off, or at once when it is not on. The
- * question after a scroll carat performed waits on this rather than on a
+ * question after a scroll caret performed waits on this rather than on a
  * timer: the outline read while the page is still moving is the old one.
  */
-export function caratScrollEnd(): Promise<void> {
-  if (!caratScrolling()) return Promise.resolve();
+export function caretScrollEnd(): Promise<void> {
+  if (!caretScrolling()) return Promise.resolve();
   return new Promise((resolve) => {
     waiting.push(resolve);
   });
@@ -52,7 +52,7 @@ function release(): void {
 }
 
 /**
- * Run a scroll of carat's own under that mark. A glide is watched until its
+ * Run a scroll of caret's own under that mark. A glide is watched until its
  * events stop, then held for one more settle window for the frames still
  * landing. A jump fires one event on the next frame and is over: the mark
  * comes off as soon as that event has been heard, or after a short cap when

@@ -14,7 +14,7 @@ const LEFT_SHIFT = { key: 'Shift', code: 'ShiftLeft', location: 1, shiftKey: tru
 const down = (init: KeyboardEventInit): KeyboardEvent => new KeyboardEvent('keydown', init);
 const up = (init: KeyboardEventInit): KeyboardEvent => new KeyboardEvent('keyup', init);
 
-describe('which key carat answers to', () => {
+describe('which key caret answers to', () => {
   it('offers two, and starts on the one that costs the page nothing', () => {
     expect([...ACCEPT_KEY_NAMES]).toEqual(['rightShift', 'tab']);
     expect(DEFAULT_ACCEPT_KEY).toBe('rightShift');

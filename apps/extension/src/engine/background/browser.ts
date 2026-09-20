@@ -32,7 +32,7 @@ function page(url: string): string {
   }
 }
 
-/** The other tabs in this window, plus a note of what else Carat can do. */
+/** The other tabs in this window, plus a note of what else Caret can do. */
 export async function browserContext(currentTabId: number): Promise<BrowserContext> {
   const all = await chrome.tabs.query({ currentWindow: true });
   const others = all

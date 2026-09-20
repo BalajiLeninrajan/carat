@@ -62,7 +62,7 @@ interface ChipText extends ChipCallbacks {
 export interface ChipShowOptions extends ChipText {
   target: Element;
   /**
-   * An element Tab is also taken from, besides the target: the field carat
+   * An element Tab is also taken from, besides the target: the field caret
    * just filled, which still holds focus while the next chip is up.
    */
   interceptFrom?: Element | null;
@@ -132,11 +132,11 @@ export const PENDING_HINT = 'checking with the model…';
 export const QUIET_HINT = 'Shift+Tab: quiet for a minute';
 /** Held down on their own these say nothing; the key that follows does. */
 const MODIFIER_KEYS = new Set(['Shift', 'Control', 'Alt', 'Meta', 'AltGraph', 'CapsLock', 'NumLock', 'ScrollLock', 'OS', 'Dead', 'Unidentified']);
-const HOST_ATTR = 'data-carat-chip';
+const HOST_ATTR = 'data-caret-chip';
 
 interface SessionBase extends ChipCallbacks {
   timer: ReturnType<typeof setTimeout>;
-  /** When the chip went up, so a scroll right after it can be read as carat's own. */
+  /** When the chip went up, so a scroll right after it can be read as caret's own. */
   shownAt: number;
   onScreen: boolean;
   /** The control the chip is about, when it has one; keys typed there dismiss as `typed`. */
@@ -162,7 +162,7 @@ type Session = ControlSession | BannerSession;
 /**
  * `rings` is the engine's ring. The caller passes the one it already put up
  * when the target streamed in, so the mark on the control never blinks
- * between "carat is working on this" and "here is the offer".
+ * between "caret is working on this" and "here is the offer".
  */
 export function createChip(doc: Document = document, rings: Ring = new Ring()): Chip {
   // Which key answers the chip, and the latch behind it. The options page can
@@ -221,8 +221,8 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
 
   const onKeydown = (e: KeyboardEvent): void => {
     if (!session) return;
-    // A key pressed inside one of carat's own surfaces — the debug panel — is
-    // the user working carat, not answering the chip. Esc closes the panel,
+    // A key pressed inside one of caret's own surfaces — the debug panel — is
+    // the user working caret, not answering the chip. Esc closes the panel,
     // Tab moves inside it, and neither reaches this.
     if (fromSurface(e)) {
       accepts.cancel();
@@ -250,7 +250,7 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
       dismiss('escape');
       return;
     }
-    // Shift+Tab is only carat's while there is something on screen to silence;
+    // Shift+Tab is only caret's while there is something on screen to silence;
     // with no chip up the listener is not even bound, so the page keeps the key.
     if (e.key === 'Tab' && e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
       e.preventDefault();
@@ -268,7 +268,7 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
 
   /**
    * The tap lands here. The page never sees the keyup, so a page that watches
-   * Shift for itself does not act on carat's key; it did see the keydown,
+   * Shift for itself does not act on caret's key; it did see the keydown,
    * which on its own does nothing anywhere.
    */
   const onKeyup = (e: KeyboardEvent): void => {
@@ -291,7 +291,7 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
     return !aboutTheChipsField(e.target);
   }
 
-  /** The field the chip is about, or the one carat just filled: keys there belong to the `typed` path. */
+  /** The field the chip is about, or the one caret just filled: keys there belong to the `typed` path. */
   function aboutTheChipsField(node: EventTarget | null): boolean {
     if (!session || !(node instanceof Node)) return false;
     const { target, interceptFrom } = session;
@@ -301,7 +301,7 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
 
   /**
    * The chip lives in a closed root, so its host is as deep as a path from
-   * outside goes. Carat's other surfaces count the same way: a click in the
+   * outside goes. Caret's other surfaces count the same way: a click in the
    * debug panel is not the user getting on with the page.
    */
   function onTheChip(e: Event): boolean {
@@ -585,7 +585,7 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
     session.targetWin?.addEventListener('keyup', onKeyup, true);
     session.targetWin?.addEventListener('scroll', reposition, { capture: true, passive: true });
     opts.target.addEventListener('input', onTyped);
-    // Typing on in the field carat just filled means the user is busy there, not ready for the next chip.
+    // Typing on in the field caret just filled means the user is busy there, not ready for the next chip.
     opts.interceptFrom?.addEventListener('input', onTyped);
     ring(opts.target);
     render();

@@ -6,7 +6,7 @@ const settings = () => ({
   ...DEFAULT_SETTINGS,
   elasticUrl: 'https://es.example.com',
   elasticApiKey: 'k',
-  elasticIndexPrefix: 'carat',
+  elasticIndexPrefix: 'caret',
 });
 
 /** A cluster that keeps documents, so details accumulate across notes. */
@@ -24,7 +24,7 @@ function cluster() {
       docs.set(id, JSON.parse(String(init.body)));
       return Response.json({ result: 'created' });
     }
-    if (p.includes('carat-details/_search')) {
+    if (p.includes('caret-details/_search')) {
       return Response.json({ hits: { hits: [...docs.values()].filter((d) => d.detailField).map((d) => ({ _source: d })) } });
     }
     return Response.json({ hits: { hits: [] } });

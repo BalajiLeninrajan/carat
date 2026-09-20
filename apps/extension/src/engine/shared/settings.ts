@@ -34,9 +34,9 @@ export interface Settings {
    * the user copies inside the browser is remembered either way.
    */
   clipboardRead: boolean;
-  /** Hostnames Carat never touches (suffix match). */
+  /** Hostnames Caret never touches (suffix match). */
   blocklist: string[];
-  /** Ours: the pill in the bottom-left corner that says whether Carat is running here. */
+  /** Ours: the pill in the bottom-left corner that says whether Caret is running here. */
   statusLine: boolean;
   /** Ours: the chip's short note on accept. Off means no AudioContext is ever built. */
   sound: boolean;
@@ -88,7 +88,7 @@ export const DEFAULT_SETTINGS: Settings = {
   acceptKey: DEFAULT_ACCEPT_KEY,
   elasticUrl: "",
   elasticApiKey: "",
-  elasticIndexPrefix: "carat",
+  elasticIndexPrefix: "caret",
   elasticInferenceId: "",
 };
 

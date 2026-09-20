@@ -1,7 +1,7 @@
 /**
- * Carat's own surfaces on the page: the debug panel, and anything else that
+ * Caret's own surfaces on the page: the debug panel, and anything else that
  * mounts a shadow host the user can click. A click, a scroll or a keystroke
- * inside one of these is the user working carat, not the page, so the chip
+ * inside one of these is the user working caret, not the page, so the chip
  * must not read it as "the user moved on" and the scheduler must not count it
  * as a reason to ask again. The chip's own host is not registered here; it
  * checks for itself, because a click there accepts the offer.
@@ -21,7 +21,7 @@ export function clearSurfaces(): void {
   surfaces.clear();
 }
 
-/** Whether a node sits inside one of carat's surfaces. */
+/** Whether a node sits inside one of caret's surfaces. */
 export function inSurface(node: EventTarget | null): boolean {
   if (surfaces.size === 0 || !(node instanceof Node)) return false;
   for (const host of surfaces) if (host === node || host.contains(node)) return true;
@@ -29,7 +29,7 @@ export function inSurface(node: EventTarget | null): boolean {
 }
 
 /**
- * Whether an event came out of one of carat's surfaces. A closed shadow root
+ * Whether an event came out of one of caret's surfaces. A closed shadow root
  * retargets to its host, so the host is as deep as the path goes from
  * outside, which is exactly what needs matching.
  */

@@ -6,7 +6,7 @@
  * - Read: when a page is hidden (tab switch, navigation away), the content
  *   script sends its visible text.
  * - Heard: background listening sends batches of transcribed speech.
- * - Copied (ours): the user pressed Ctrl+C on a page, or Carat read the system
+ * - Copied (ours): the user pressed Ctrl+C on a page, or Caret read the system
  *   clipboard. This one skips the model: what they copied is already the fact.
  *
  * Read and heard input goes through a small model call that distills it into
@@ -109,7 +109,7 @@ async function extract(settings: Settings, instructions: string, content: string
   try {
     return (JSON.parse(result.text).notes as string[]).map((n) => n.trim()).filter(Boolean).slice(0, 5);
   } catch {
-    console.warn("[carat] notes: unparseable output", result.text);
+    console.warn("[caret] notes: unparseable output", result.text);
     return null;
   }
 }
@@ -180,7 +180,7 @@ function saysNothingNew(fact: string, title: string, url: string): boolean {
 export async function recordSeen(msg: SeenMessage, settings: Settings): Promise<Note[]> {
   const skip = transientReason(msg);
   if (skip) {
-    console.log(`[carat] not noting ${hostOf(msg.url)}: ${skip}`);
+    console.log(`[caret] not noting ${hostOf(msg.url)}: ${skip}`);
     return [];
   }
   const text = msg.text.trim();
@@ -193,7 +193,7 @@ export async function recordSeen(msg: SeenMessage, settings: Settings): Promise<
   if (!distilled) return [];
   const facts = distilled.filter((f) => !saysNothingNew(f, msg.title, msg.url));
   console.log(
-    `[carat] noted ${facts.length} from ${hostOf(msg.url)} · ${Math.round(performance.now() - started)}ms` +
+    `[caret] noted ${facts.length} from ${hostOf(msg.url)} · ${Math.round(performance.now() - started)}ms` +
       (facts.length ? "\n" + facts.map((f) => `  - ${f}`).join("\n") : ""),
   );
   if (!facts.length) return [];
@@ -225,7 +225,7 @@ export async function recordHeard(lines: string[], context: string[], settings: 
   const facts = await extract(settings, HEARD_INSTRUCTIONS, content);
   if (!facts) return [];
   console.log(
-    `[carat] noted ${facts.length} from the microphone · ${Math.round(performance.now() - started)}ms` +
+    `[caret] noted ${facts.length} from the microphone · ${Math.round(performance.now() - started)}ms` +
       (facts.length ? "\n" + facts.map((f) => `  - ${f}`).join("\n") : ""),
   );
   if (!facts.length) return [];
@@ -322,7 +322,7 @@ export function renderNotes(notes: Note[], now: number): string {
  * on, so a note outlives the switch by no longer than it takes to drop it.
  *
  * Ours: a copy from the last ten minutes goes in front of everything else. It
- * is the freshest thing Carat has and the one piece of text the user has
+ * is the freshest thing Caret has and the one piece of text the user has
  * already said matters. After that it queues with the rest.
  */
 export async function notesFor(currentUrl: string, settings: Settings): Promise<string> {

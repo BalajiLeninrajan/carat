@@ -53,7 +53,7 @@ const FLOW_WINDOW_MS = 60_000;
 
 /** The ids the manifest gives the three keyboard shortcuts. */
 export const COMMANDS = {
-  suggest: 'carat-suggest',
+  suggest: 'caret-suggest',
   clear: 'clearContext',
   debug: 'toggleDebug',
   palette: 'open-palette',
@@ -61,7 +61,7 @@ export const COMMANDS = {
 
 /** How often expired Elastic tasks are swept, in minutes. */
 const SWEEP_MINUTES = 1;
-const SWEEP_ALARM = 'carat-elastic-sweep';
+const SWEEP_ALARM = 'caret-elastic-sweep';
 
 export default defineBackground(() => {
   const debug = new DebugLog(chrome.storage.session as unknown as DebugArea);
@@ -85,7 +85,7 @@ export default defineBackground(() => {
     const on = !!settings.elasticUrl && !!settings.elasticApiKey;
     if (!on && !elasticOffNoted) {
       elasticOffNoted = true;
-      console.info('[carat] elastic: off — set a URL and an API key in the options page to index and retrieve');
+      console.info('[caret] elastic: off — set a URL and an API key in the options page to index and retrieve');
     }
     return on;
   };
@@ -100,7 +100,7 @@ export default defineBackground(() => {
     outcome: 'accepted' | 'dismissed' | 'alternative',
     actual?: string,
   ): Promise<void> => {
-    console.log(`[carat] elastic → ${outcome} ${chip.kind}: ${chip.label}`);
+    console.log(`[caret] elastic → ${outcome} ${chip.kind}: ${chip.label}`);
     return elastic
       .recordAction({
         tabId,
@@ -112,7 +112,7 @@ export default defineBackground(() => {
         outcome,
         actual,
       })
-      .catch((e) => console.warn('[carat] elastic recordAction failed:', e));
+      .catch((e) => console.warn('[caret] elastic recordAction failed:', e));
   };
 
   /**
@@ -127,7 +127,7 @@ export default defineBackground(() => {
       if (alarm.name === SWEEP_ALARM) void elastic.sweepExpiredTasks();
     });
   } else {
-    console.warn('[carat] no alarms permission; expired Elastic tasks will not be swept');
+    console.warn('[caret] no alarms permission; expired Elastic tasks will not be swept');
   }
 
   chrome.runtime.onInstalled.addListener(async (details) => {
@@ -241,7 +241,7 @@ export default defineBackground(() => {
           const result = await acceptAction(tabId, msg.reqId);
           post({ type: 'result', reqId: msg.reqId, ...result });
           void event(tabId, 'accepted', result.ok ? undefined : result.reason);
-          if (!result.ok) console.warn(`[carat] accept refused: ${result.reason}`);
+          if (!result.ok) console.warn(`[caret] accept refused: ${result.reason}`);
           if (chip && result.ok) void recordChip(tabId, chip, 'accepted');
           break;
         }
@@ -281,23 +281,23 @@ export default defineBackground(() => {
             .then((added) => {
               if (added.length && elasticOn(settings)) {
                 console.log(
-                  `[carat] elastic → ${added.length} fact(s) from ${hostOf(msg.url)}\n` +
+                  `[caret] elastic → ${added.length} fact(s) from ${hostOf(msg.url)}\n` +
                     added.map((n) => `  - ${n.text}`).join('\n'),
                 );
                 void elastic.indexFacts(observationOf(tabId, msg.url, msg.title, msg.text), added);
               }
             })
-            .catch((e) => console.error('[carat] noting failed:', e));
+            .catch((e) => console.error('[caret] noting failed:', e));
           break;
         }
         // Ours: a copy made on the page. Stored as it stands, with no model
         // call and no setting behind it: the page fires `copy` at the content
-        // script whatever else Carat is allowed to do.
+        // script whatever else Caret is allowed to do.
         case 'copied': {
           const settings = await loadSettings();
           if (!settings.enabled || isBlocked(settings, msg.url)) break;
           recordCopied({ text: msg.text, url: msg.url, title: msg.title }).catch((e) =>
-            console.error('[carat] noting a copy failed:', e),
+            console.error('[caret] noting a copy failed:', e),
           );
           break;
         }
@@ -328,8 +328,8 @@ export default defineBackground(() => {
     try {
       tree = await getTree(tabId, msg.url, msg.pageChanged);
     } catch (e) {
-      if (e instanceof CdpPausedError) console.info(`[carat] ${e.message}`);
-      else console.error('[carat] AX tree fetch failed:', e);
+      if (e instanceof CdpPausedError) console.info(`[caret] ${e.message}`);
+      else console.error('[caret] AX tree fetch failed:', e);
       void event(tabId, 'no page', e instanceof Error ? e.message : String(e));
       return;
     }
@@ -345,7 +345,7 @@ export default defineBackground(() => {
     // outline the model reads, not a separate DOM scrape.
     if (elasticOn(settings)) {
       console.log(
-        `[carat] elastic → observation · ${hostOf(msg.url)} · ${textOutline.text.length} chars of AX outline` +
+        `[caret] elastic → observation · ${hostOf(msg.url)} · ${textOutline.text.length} chars of AX outline` +
           ` · ${actionOutline.candidates.length} controls · "${msg.title.slice(0, 60)}"`,
       );
       void elastic.indexObservation(observationOf(tabId, msg.url, msg.title, textOutline.text));
@@ -364,11 +364,11 @@ export default defineBackground(() => {
           },
           tabId,
         );
-        if (lines.length) console.log(`[carat] elastic \u2190 ${lines.length} line(s)\n${lines.map((l) => `  ${l}`).join('\n')}`);
-        else console.log('[carat] elastic \u2190 nothing for this page');
+        if (lines.length) console.log(`[caret] elastic \u2190 ${lines.length} line(s)\n${lines.map((l) => `  ${l}`).join('\n')}`);
+        else console.log('[caret] elastic \u2190 nothing for this page');
         return lines;
       } catch (e) {
-        console.warn('[carat] elastic retrieve failed:', e);
+        console.warn('[caret] elastic retrieve failed:', e);
         return [];
       }
     };
@@ -379,7 +379,7 @@ export default defineBackground(() => {
     if (idleSeq.get(tabId) !== seq) return;
 
     console.log(
-      `[carat] idle after ${msg.reason} · tab ${tabId} · ${snapshot.nodes.length} AX nodes ` +
+      `[caret] idle after ${msg.reason} · tab ${tabId} · ${snapshot.nodes.length} AX nodes ` +
         `(${cached ? 'cached' : `fetched in ${snapshot.fetchMs}ms`}) · ` +
         `outline ${actionOutline.stats.chars} chars, ${actionOutline.candidates.length} targets`,
     );
@@ -390,7 +390,7 @@ export default defineBackground(() => {
     );
 
     if (!settings.apiKey) {
-      console.warn('[carat] no API key set; set one in the options page');
+      console.warn('[caret] no API key set; set one in the options page');
       return;
     }
 
@@ -516,7 +516,7 @@ export default defineBackground(() => {
   /**
    * Ask this tab for a suggestion now, past the idle wait. Alt+Shift+C and the
    * popup's Resume button both end here. Asking on a paused tab means the user
-   * wants carat back, so the pause goes first.
+   * wants caret back, so the pause goes first.
    */
   async function askNow(tabId: number): Promise<void> {
     if (await isPaused(tabId)) await resume(tabId);
@@ -537,7 +537,7 @@ export default defineBackground(() => {
       const id = tabId ?? activeTabId;
       const post = id === undefined ? undefined : ports.get(id);
       if (post) post({ type: 'palette' });
-      else console.warn('[carat] no content script on this tab (reload the page, or it is a chrome:// page)');
+      else console.warn('[caret] no content script on this tab (reload the page, or it is a chrome:// page)');
       return;
     }
     if (command === COMMANDS.clear) {
@@ -572,7 +572,7 @@ export default defineBackground(() => {
   onMessage('isTabPaused', ({ data }) => isPaused(data.tabId));
   onMessage('resumeTab', async ({ data }) => {
     await resume(data.tabId);
-    // The user came to the popup because carat had gone quiet, so answer with a
+    // The user came to the popup because caret had gone quiet, so answer with a
     // suggestion rather than waiting for them to touch the page again.
     await askNow(data.tabId);
   });
@@ -586,7 +586,7 @@ export default defineBackground(() => {
     return { on: data.on };
   });
 
-  console.log('[carat] service worker started');
+  console.log('[caret] service worker started');
 });
 
 function hostOf(url: string): string {
@@ -606,7 +606,7 @@ function hostOf(url: string): string {
  */
 function logElastic(event: ElasticDebugEvent): void {
   const status = event.status === undefined ? '' : ` ${event.status}`;
-  const line = `[carat] elastic ${event.kind}${status} · ${event.summary}`;
+  const line = `[caret] elastic ${event.kind}${status} · ${event.summary}`;
   if (event.ok) console.log(line);
   else console.warn(`${line}\n  ${event.path}`, event.response);
 }

@@ -24,7 +24,7 @@ describe('task survives the journey', () => {
   it('carries a calendar plan from Discord through a switch and three fills', async () => {
     const { fetchImpl, peek } = cluster();
     const elastic = createElasticMemory({
-      settings: async () => ({ ...DEFAULT_SETTINGS, elasticUrl: 'https://es.example.com', elasticApiKey: 'k', elasticIndexPrefix: 'carat' }),
+      settings: async () => ({ ...DEFAULT_SETTINGS, elasticUrl: 'https://es.example.com', elasticApiKey: 'k', elasticIndexPrefix: 'caret' }),
       fetchImpl,
     });
 
@@ -37,7 +37,7 @@ describe('task survives the journey', () => {
     expect(names().map((f) => f.name).sort()).toEqual(['location', 'title', 'when']);
 
     // Travelling to the surface must not consume the task: this is the bug
-    // where Carat switched tabs and then had nothing left to type.
+    // where Caret switched tabs and then had nothing left to type.
     await elastic.recordAction({ tabId: 5, host: 'calendar.google.com', kind: 'open', label: 'Open Google Calendar', value: 'https://calendar.google.com', accepted: true });
     expect(peek()).not.toBeNull();
     expect(names().filter((f) => !f.done)).toHaveLength(3);

@@ -8,7 +8,7 @@ export type StatusReason = 'disabled' | 'blocked' | 'no-key' | 'not-http' | 'pau
 export interface StatusInfo {
   /** The user turned the status line on. */
   show: boolean;
-  /** Carat reads and suggests on this page. */
+  /** Caret reads and suggests on this page. */
   running: boolean;
   reason?: StatusReason;
   /** The model that answers for next actions. Never the key. */

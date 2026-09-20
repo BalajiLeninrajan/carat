@@ -29,6 +29,6 @@ onMessage('readClipboard', () => {
 });
 
 chrome.runtime.onMessage.addListener((msg: { type?: string } | undefined) => {
-  if (msg?.type === 'carat-listen-start') void start();
-  if (msg?.type === 'carat-listen-stop') void stop();
+  if (msg?.type === 'caret-listen-start') void start();
+  if (msg?.type === 'caret-listen-stop') void stop();
 });

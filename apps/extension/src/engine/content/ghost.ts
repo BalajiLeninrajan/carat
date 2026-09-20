@@ -8,7 +8,7 @@
  * suggestion in a dimmed span, and then the keycap that takes it. The
  * mirror scrolls with the field and never takes pointer events. Its host is
  * aria-hidden so the suggestion never shows up in the accessibility tree
- * Carat reads.
+ * Caret reads.
  *
  * None of this is in the field: the value, the caret and every measurement
  * taken off them are the page's own and are never touched.
@@ -68,7 +68,7 @@ export class Ghost {
 
   private mount(): void {
     if (this.host?.isConnected) return;
-    this.host = document.createElement("carat-ghost");
+    this.host = document.createElement("caret-ghost");
     this.host.setAttribute("aria-hidden", "true");
     this.host.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:2147483646;";
     const root = this.host.attachShadow({ mode: "closed" });

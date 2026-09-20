@@ -5,7 +5,7 @@
  * grants the optional `clipboardRead` permission.
  *
  * Three things keep it cheap and quiet. At most one read every five seconds,
- * whatever fires. Only a hash of the last text is kept between reads, so Carat
+ * whatever fires. Only a hash of the last text is kept between reads, so Caret
  * holds no copy of the clipboard beyond the note it decided to store. And it
  * never reads while the tab in front is blocked or showing a password field: a
  * paste target that sensitive is not worth a note.
@@ -58,7 +58,7 @@ export interface ClipboardReader {
   forget(): Promise<void>;
 }
 
-/** Short stable hash (FNV-1a). Only this is kept of a clipboard Carat did not store. */
+/** Short stable hash (FNV-1a). Only this is kept of a clipboard Caret did not store. */
 function hash(s: string): number {
   let h = 0x811c9dc5;
   for (let i = 0; i < s.length; i++) {
@@ -90,7 +90,7 @@ export function createClipboardReader(deps: ReaderDeps): ClipboardReader {
 
     const where = tab ?? (await deps.activeTab());
     const url = where?.url ?? "";
-    // The tab in front has to be an ordinary web page Carat is allowed on, and
+    // The tab in front has to be an ordinary web page Caret is allowed on, and
     // not one asking for a password. A paste target that sensitive is not
     // worth a note.
     if (!isWebPage(url) || isBlocked(settings, url)) return "blocked";

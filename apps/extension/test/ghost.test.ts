@@ -54,7 +54,7 @@ describe('the key hint at the end of ghost text', () => {
     ghost.hide();
     expect(ghost.drawn).toBeNull();
 
-    // And the field is its own: nothing carat drew ever went into the value.
+    // And the field is its own: nothing caret drew ever went into the value.
     expect(field.value).toBe('sev');
   });
 

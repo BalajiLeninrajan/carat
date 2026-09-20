@@ -16,12 +16,12 @@ export const PREVIEW_CSS = `
   color: #a6adc8;
   overflow: hidden;
   text-overflow: ellipsis;
-  animation: carat-preview-in 120ms ease-out;
+  animation: caret-preview-in 120ms ease-out;
 }
 .preview[hidden] { display: none; }
 .chip.is-armed .preview { color: #4c4f69; }
 .chip.is-banner .preview { font-size: 12px; }
-@keyframes carat-preview-in {
+@keyframes caret-preview-in {
   from { opacity: 0; }
   to { opacity: 1; }
 }

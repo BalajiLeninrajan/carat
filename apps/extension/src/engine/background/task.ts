@@ -70,7 +70,7 @@ export function stopTask(tabId: number, reason = "Stopped."): void {
   task.confirm?.(false);
   tasks.delete(tabId);
   task.post({ type: "task-done", summary: reason });
-  console.log(`[carat] task ended: ${reason}`);
+  console.log(`[caret] task ended: ${reason}`);
 }
 
 export function answerTask(tabId: number, answer: string): void {
@@ -120,11 +120,11 @@ export async function startTask(tabId: number, goal: string, url: string, sender
     post: (msg) => sender(task.tabId, msg),
   };
   tasks.set(tabId, task);
-  console.log(`[carat] task: "${goal}" on ${url}`);
+  console.log(`[caret] task: "${goal}" on ${url}`);
   try {
     await runTask(tabId, task);
   } catch (e) {
-    console.error("[carat] task failed:", e);
+    console.error("[caret] task failed:", e);
     if (tasks.get(tabId) === task) {
       tasks.delete(tabId);
       task.post({ type: "task-done", summary: "Something went wrong; see the service worker console." });
@@ -216,7 +216,7 @@ async function runTask(startTabId: number, task: Task): Promise<void> {
   let tabId = startTabId;
   const settings = await loadSettings();
   if (!settings.apiKey) {
-    stopTask(tabId, "No API key: set one in Carat's options page.");
+    stopTask(tabId, "No API key: set one in Caret's options page.");
     return;
   }
 
@@ -237,13 +237,13 @@ async function runTask(startTabId: number, task: Task): Promise<void> {
     }
     const url = tab.url ?? "";
     if (isBlocked(settings, url)) {
-      stopTask(tabId, "This page is blocked in Carat's options.");
+      stopTask(tabId, "This page is blocked in Caret's options.");
       return;
     }
     // A task goes wherever the work leads: a search, another site, a new tab.
     if (originOf(url) !== task.origin) {
       task.origin = originOf(url);
-      console.log(`[carat] task followed the page to ${task.origin || url}`);
+      console.log(`[caret] task followed the page to ${task.origin || url}`);
     }
 
     // Always read the page fresh: the last step probably changed it.
@@ -278,7 +278,7 @@ async function runTask(startTabId: number, task: Task): Promise<void> {
     // the output limit) that one unreadable reply is worth retrying, not fatal.
     const parsed = parseLoose<Partial<Step>>(result.text);
     if (!parsed?.kind) {
-      console.warn("[carat] task: unreadable answer", JSON.stringify(result.text));
+      console.warn("[caret] task: unreadable answer", JSON.stringify(result.text));
       unreadable++;
       if (unreadable >= 2) {
         stopTask(tabId, "The model's answers could not be read twice in a row.");
@@ -299,7 +299,7 @@ async function runTask(startTabId: number, task: Task): Promise<void> {
       message: parsed.message ?? "",
     };
     console.log(
-      `[carat] task step ${n + 1}: ${step.kind} [${step.target}] "${step.label}"${step.value ? ` = "${step.value}"` : ""}` +
+      `[caret] task step ${n + 1}: ${step.kind} [${step.target}] "${step.label}"${step.value ? ` = "${step.value}"` : ""}` +
         ` · ${step.why} · ${Math.round(performance.now() - started)}ms`,
     );
 
@@ -447,7 +447,7 @@ async function runTask(startTabId: number, task: Task): Promise<void> {
     }
 
     emit(task, { type: "task-step", index: n, text, state: "done", why: step.why });
-    appendHistory(tabId, `${step.kind === "click" ? "clicked" : "filled"} ${candidate.role} "${candidate.name}" (Carat task)`, url);
+    appendHistory(tabId, `${step.kind === "click" ? "clicked" : "filled"} ${candidate.role} "${candidate.name}" (Caret task)`, url);
     await wait(SETTLE_MS);
 
     // A step that leaves the page exactly as it was did not work. Saying so
@@ -455,6 +455,6 @@ async function runTask(startTabId: number, task: Task): Promise<void> {
     // clicks, a disabled control that looks enabled).
     const changed = step.kind === "fill" ? true : await pageChangedSince(tabId, before);
     task.steps.push(`${text} — ${changed ? "done" : "done, but nothing on the page changed"}`);
-    if (!changed) console.log(`[carat] task step ${n + 1} changed nothing`);
+    if (!changed) console.log(`[caret] task step ${n + 1} changed nothing`);
   }
 }

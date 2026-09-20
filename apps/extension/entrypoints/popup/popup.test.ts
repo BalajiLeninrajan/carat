@@ -85,7 +85,7 @@ describe('popup', () => {
     expect(site.checked).toBe(false);
   });
 
-  it('says why carat went quiet on a paused tab, and resumes it', async () => {
+  it('says why caret went quiet on a paused tab, and resumes it', async () => {
     sendMessage.mockImplementation(async (type: string) => (type === 'isTabPaused' ? true : settings));
     await import('./main');
     await flush();

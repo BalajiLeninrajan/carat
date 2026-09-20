@@ -1,19 +1,19 @@
 import { FX_CSS, TIMING } from './styles';
 
 /**
- * The mark carat leaves on a page's own control. It is an overlay box of
- * carat's own, positioned over the control's rect in a fixed,
+ * The mark caret leaves on a page's own control. It is an overlay box of
+ * caret's own, positioned over the control's rect in a fixed,
  * pointer-events-none host: nothing on the page is styled, so nothing the
  * page laid out can move.
  */
 export type FxKind = 'flash';
 
-const FX_ATTR = 'data-carat-fx';
+const FX_ATTR = 'data-caret-fx';
 
 export interface Effects {
-  /** The control carat just acted on, outlined for a moment as a receipt. */
+  /** The control caret just acted on, outlined for a moment as a receipt. */
   flash(el: Element, opts?: { alarm?: boolean }): void;
-  /** Take every mark off now — the user acted, and carat is out of the way. */
+  /** Take every mark off now — the user acted, and caret is out of the way. */
   clear(): void;
   destroy(): void;
 }

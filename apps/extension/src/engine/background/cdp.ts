@@ -3,7 +3,7 @@
  * first use and kept open while the tab is in use.
  *
  * If the user dismisses Chrome's "started debugging this browser" banner,
- * every session is detached with reason "canceled_by_user". Carat then marks
+ * every session is detached with reason "canceled_by_user". Caret then marks
  * those tabs paused (badge "OFF") rather than immediately re-attaching, which
  * would just bring the banner straight back. The popup's Resume button and
  * Alt+Shift+C both clear it.
@@ -16,7 +16,7 @@ const PAUSED_KEY = "pausedTabs";
 
 export class CdpPausedError extends Error {
   constructor(tabId: number) {
-    super(`Carat is paused on tab ${tabId} (debugger was detached by the user)`);
+    super(`Caret is paused on tab ${tabId} (debugger was detached by the user)`);
   }
 }
 
@@ -44,7 +44,7 @@ async function setPaused(tabIds: number[], paused: boolean, origin = ""): Promis
     else tabs.delete(id);
     chrome.action.setBadgeText({ tabId: id, text: paused ? "OFF" : "" }).catch(() => {});
     chrome.action
-      .setTitle({ tabId: id, title: paused ? "Carat is paused on this tab. Open Carat to resume." : "Carat" })
+      .setTitle({ tabId: id, title: paused ? "Caret is paused on this tab. Open Caret to resume." : "Caret" })
       .catch(() => {});
   }
   await chrome.storage.session.set({ [PAUSED_KEY]: Object.fromEntries(tabs) });
@@ -139,13 +139,13 @@ chrome.debugger.onDetach.addListener((source, reason) => {
   clearTimeout(idleTimers.get(tabId));
   idleTimers.delete(tabId);
   for (const l of detachListeners) l(tabId);
-  console.info(`[carat] debugger detached from tab ${tabId}: ${reason}`);
+  console.info(`[caret] debugger detached from tab ${tabId}: ${reason}`);
   if (reason === "canceled_by_user") void pause(tabId);
 });
 
 /**
  * Dismissing the banner was about the page it appeared over, not about the
- * tab forever. Leaving that site clears the pause, so carat comes back on its
+ * tab forever. Leaving that site clears the pause, so caret comes back on its
  * own instead of staying dead for the rest of the session. Clicking around
  * the same site does not: that is still the page the user objected to.
  */
@@ -156,7 +156,7 @@ chrome.webNavigation.onCommitted.addListener(({ tabId, frameId, url }) => {
     if (pausedOn === undefined) return;
     const now = originOf(url);
     if (now === "" || now === pausedOn) return;
-    console.info(`[carat] tab ${tabId} left ${pausedOn || "an unknown page"}; carat is running there again`);
+    console.info(`[caret] tab ${tabId} left ${pausedOn || "an unknown page"}; caret is running there again`);
     await resume(tabId);
   })();
 });

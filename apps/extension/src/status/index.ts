@@ -6,18 +6,18 @@ export interface StatusLine {
   /**
    * Say one thing for `ms`, then go back to whatever the settings allow. This
    * is the only way the pill speaks while it is switched off, so it is for
-   * news the page cannot otherwise get: carat has stopped, and why.
+   * news the page cannot otherwise get: caret has stopped, and why.
    */
   notice(text: string, ms: number): void;
   /** A suggestion request is in flight; the dot pulses until `setBusy(false)`. */
   setBusy(busy: boolean): void;
-  /** Milliseconds left of a Shift+Tab snooze, or null when carat is not in one. */
+  /** Milliseconds left of a Shift+Tab snooze, or null when caret is not in one. */
   setQuiet(left: number | null): void;
   destroy(): void;
   readonly visible: boolean;
 }
 
-const HOST_ATTR = 'data-carat-status';
+const HOST_ATTR = 'data-caret-status';
 
 const REASON_TEXT: Record<NonNullable<StatusInfo['reason']>, string> = {
   disabled: 'off',
@@ -28,7 +28,7 @@ const REASON_TEXT: Record<NonNullable<StatusInfo['reason']>, string> = {
 };
 
 /** What a paused tab says once, out loud, even when the pill is switched off. */
-export const PAUSED_NOTICE = 'carat · paused, click the icon to resume';
+export const PAUSED_NOTICE = 'caret · paused, click the icon to resume';
 
 /**
  * A small pill in the bottom-left corner, clear of the tab-offer banner at the bottom centre.
@@ -124,10 +124,10 @@ export function createStatusLine(doc: Document = document): StatusLine {
 }
 
 export function statusText(info: StatusInfo, busy = false, quietLeft: number | null = null): string {
-  if (!info.running) return `carat · ${REASON_TEXT[info.reason ?? 'disabled']}`;
+  if (!info.running) return `caret · ${REASON_TEXT[info.reason ?? 'disabled']}`;
   // Nothing is in flight during a snooze, so the countdown is all there is to say.
-  if (quietLeft !== null) return `carat · quiet ${clock(quietLeft)}`;
-  return busy ? `carat · ${info.model} · thinking` : `carat · ${info.model}`;
+  if (quietLeft !== null) return `caret · quiet ${clock(quietLeft)}`;
+  return busy ? `caret · ${info.model} · thinking` : `caret · ${info.model}`;
 }
 
 /** What is left of the minute, as `0:42`. Rounded up, so the last second still reads 0:01. */
