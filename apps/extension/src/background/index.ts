@@ -40,6 +40,8 @@ export { describeStatus } from './status';
 export type { StatusInfo, StatusReason } from './status';
 export { HistoryStore, HISTORY_KEY } from './history';
 export type { CommittedDetails, NavigationEvents, TabEvents } from './history';
+export { createGoal, createGoalAsk, goalMessages, nextGoal, readGoalReply, GOAL_KEY, GOAL_LIMITS, GOAL_NONE, GOAL_PROMPT } from './goal';
+export type { Goal, GoalAsk, GoalDeps, GoalStore } from './goal';
 export { createNotes, fallbackFacts, NOTES_KEY, NOTES_LIMITS } from './notes';
 export type { Distill, Note, Notes, NotesDeps } from './notes';
 export { KEEP_WARM_ALARM, KEEP_WARM_PERIOD_MINUTES, WARM_LIMITS, createKeepWarm, createWarmer, newestMark } from './warm';

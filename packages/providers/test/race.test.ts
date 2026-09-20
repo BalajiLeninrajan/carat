@@ -127,6 +127,6 @@ describe('the placeholder before the network', () => {
   });
 
   it('says it has no prefix to warm when nothing in it does', () => {
-    expect(new RaceProvider([new Fake('local', null), new Fake('cloudflare', null)], { id: 'cloudflare' }).warms).toBe(false);
+    expect(new RaceProvider([new Fake('local', null), new Fake('local', null)], { id: 'local' }).warms).toBe(false);
   });
 });

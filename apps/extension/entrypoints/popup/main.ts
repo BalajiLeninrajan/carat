@@ -13,6 +13,9 @@ const pinnedNote = document.getElementById('pinned-note') as HTMLElement;
 const siteRow = document.getElementById('site-row') as HTMLElement;
 const siteEnabled = document.getElementById('site-enabled') as HTMLInputElement;
 const siteHostLabel = document.getElementById('site-host') as HTMLElement;
+const goalRow = document.getElementById('goal-row') as HTMLElement;
+const goalText = document.getElementById('goal-text') as HTMLElement;
+const goalDrop = document.getElementById('goal-drop') as HTMLButtonElement;
 
 const diagCapture = document.getElementById('diag-capture') as HTMLElement;
 const diagSuggest = document.getElementById('diag-suggest') as HTMLElement;
@@ -109,6 +112,12 @@ function renderList(items: KnownItem[]): void {
   app.dataset.state = items.length === 0 ? 'empty' : 'ready';
 }
 
+/** One line for what carat thinks the user is getting done, or nothing at all. */
+function renderGoal(goal: string | undefined): void {
+  goalRow.hidden = !goal;
+  goalText.textContent = goal ?? '';
+}
+
 function renderPinned(pinned: boolean): void {
   pinButton.textContent = pinned ? 'Unpin' : 'Pin';
   pinButton.setAttribute('aria-pressed', String(pinned));
@@ -127,6 +136,7 @@ async function load(): Promise<void> {
     enabled.checked = settings.enabled;
     renderSite(settings);
     renderList(known.items);
+    renderGoal(known.goal);
     renderPinned(known.pinned === true);
     renderDiag(await fetchDiag(tab.id));
   } catch {
@@ -166,6 +176,7 @@ clearButton.addEventListener('click', async () => {
   // The list is this popup's copy of what carat knows; empty it as the user
   // clicks rather than after the round trip. Clear wipes the pin with the rest.
   renderList([]);
+  renderGoal(undefined);
   renderPinned(false);
   setClearState('working');
   try {
@@ -177,6 +188,17 @@ clearButton.addEventListener('click', async () => {
     setClearState('idle');
   } finally {
     clearing = false;
+  }
+});
+
+// The goal goes as the user clicks the cross; a worker that never answers
+// leaves the popup offline rather than putting a dropped goal back.
+goalDrop.addEventListener('click', async () => {
+  renderGoal(undefined);
+  try {
+    await withTimeout(sendMessage('clearGoal', undefined));
+  } catch {
+    app.dataset.state = 'offline';
   }
 });
 

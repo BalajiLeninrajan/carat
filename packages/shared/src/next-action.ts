@@ -48,6 +48,12 @@ export interface NextActionRequest {
   history: string[];
   /** Distilled facts from pages read recently in other tabs, newest first, at most 8. */
   notes: string[];
+  /**
+   * One line for what the user is trying to get done across tabs, at most 120
+   * chars, in their own terms. Absent when carat has not worked one out. It
+   * sits inside the cached prefix, so a goal that changes costs one cache miss.
+   */
+  goal?: string;
   /** Open tabs the user could switch to. */
   tabs: OpenTab[];
   now: string;

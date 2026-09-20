@@ -24,8 +24,6 @@ const apiKey = field<HTMLInputElement>('apiKey');
 const model = field<HTMLInputElement>('model');
 const statusLine = field<HTMLInputElement>('statusLine');
 const sound = field<HTMLInputElement>('sound');
-const cfAccountId = field<HTMLInputElement>('cfAccountId');
-const cfApiToken = field<HTMLInputElement>('cfApiToken');
 const smartModel = field<HTMLInputElement>('smartModel');
 const screenshots = field<HTMLInputElement>('screenshots');
 const eagerness = field<HTMLInputElement>('eagerness');
@@ -57,8 +55,6 @@ function render(s: Settings): void {
   model.value = s.model;
   statusLine.checked = s.statusLine;
   sound.checked = s.sound;
-  cfAccountId.value = s.cfAccountId;
-  cfApiToken.value = s.cfApiToken;
   smartModel.value = s.smartModel;
   screenshots.checked = s.screenshots;
   ghost.checked = s.ghost;
@@ -75,8 +71,6 @@ function read(): Partial<Settings> {
     model: model.value,
     statusLine: statusLine.checked,
     sound: sound.checked,
-    cfAccountId: cfAccountId.value,
-    cfApiToken: cfApiToken.value,
     smartModel: smartModel.value,
     screenshots: screenshots.checked,
     eagerness: eagernessAt(eagerness.value),

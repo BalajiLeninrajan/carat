@@ -3,8 +3,8 @@ import { hashText, normalizeWhitespace, registrableDomain, truncate } from '@car
 import { isVisible } from '../capture/visibility';
 import { isSecretField } from '../dom/secret';
 import { isIframe, isInput, isSelect, isTextArea } from '../dom/tags';
-import type { FrameRef } from '../frames/protocol';
-import { frameNumber } from '../frames/protocol';
+import type { FrameLine, FrameRef } from '../frames/protocol';
+import { FRAME_MAX_INDENT, FRAME_MAX_LINES, frameNumber } from '../frames/protocol';
 import { accessibleName } from '../interact';
 import { labelOf } from '../snapshot/labels';
 import { documentHeight, inViewport, viewportRect } from '../scroll';
@@ -22,6 +22,10 @@ export const OUTLINE_LIMITS = {
   maxControls: 60,
   /** Same-origin frames are walked this many levels down, as the rest of carat reads them. */
   frameDepth: 2,
+  /** Open shadow roots are walked this many roots deep; what is nested deeper is left out. */
+  shadowDepth: 8,
+  /** Elements one walk may look at, light DOM and shadow roots together. */
+  maxNodes: 20000,
   /** How far past the fold still counts as on screen, in viewports. */
   foldMargin: 0.25,
 } as const;
@@ -116,6 +120,12 @@ export interface FrameOutline {
   /** The hub's token for the frame; the top performs there by the control's own number. */
   token: string;
   controls: readonly OutlineControl[];
+  /** The child's own outline lines, prose included. Without them only the controls are spliced. */
+  lines?: readonly FrameLine[];
+  /** The child's notes about its own fold, when it scrolls independently. */
+  summary?: readonly string[];
+  /** The child's host, for the line written above its lines. */
+  host?: string;
 }
 
 export interface OutlineOptions {
@@ -152,6 +162,8 @@ interface WalkContext {
   /** The frame number when this document is a same-origin child. */
   fr?: number;
   depth: number;
+  /** How many open shadow roots this node sits inside. */
+  shadow: number;
   /** Inside the focused control's region, which is described past the fold. */
   exempt: boolean;
 }
@@ -171,6 +183,14 @@ interface ViewportNotes {
  * walked directly; a cross-origin one arrives through the frame hub as
  * `opts.frames` and its controls are spliced in where its frame element sits.
  * Both carry `fr`.
+ *
+ * An element with an open shadow root is walked through its root instead of
+ * its light children, and a `<slot>` is walked through the nodes assigned to
+ * it, so a page built from web components reads in composed order and its
+ * controls are numbered like any other. The registry holds the real element
+ * inside the root, so perform reaches it. A closed root is opaque: Chrome
+ * gives `shadowRoot` as null and carat does not go looking, so a component
+ * that closes its root contributes only its host's own box.
  *
  * Only what is on screen is described: a box lying entirely above the fold,
  * entirely below it plus a quarter of a viewport, or off to the side is left
@@ -203,6 +223,8 @@ export function buildOutline(doc: Document, win: Window | null = doc.defaultView
   let order = 0;
   /** Controls left out for being off screen, counted for the closing line. */
   let hidden = 0;
+  /** Elements looked at so far; a component tree that loops or fans out stops here. */
+  let seenNodes = 0;
 
   const fold = win.innerHeight * (1 + OUTLINE_LIMITS.foldMargin);
   const offScreen = (el: Element): boolean => {
@@ -220,8 +242,10 @@ export function buildOutline(doc: Document, win: Window | null = doc.defaultView
 
   // An ancestor of the focused control is walked into wherever it sits, but
   // only the control's own region carries the exemption down to its children.
-  const holdsFocus = (el: Element): boolean =>
-    focusedEl !== null && el.ownerDocument === focusedEl.ownerDocument && el.contains(focusedEl);
+  // `contains` stops at a shadow boundary, so the path is composed: the host
+  // of the root the focus sits in holds it too.
+  const focusPath = composedPath(focusedEl);
+  const holdsFocus = (el: Element): boolean => focusPath.has(el);
 
   // Text between two structural lines is gathered up and emitted as one `text:` line.
   let buffer: string[] = [];
@@ -258,7 +282,7 @@ export function buildOutline(doc: Document, win: Window | null = doc.defaultView
     const role = controlRoleOf(el);
     if (!role) return;
     const focused = el === focusedEl;
-    const name = truncate(normalizeWhitespace(controlName(el, ctx.doc, role)), OUTLINE_LIMITS.nameChars);
+    const name = truncate(normalizeWhitespace(controlName(el, idScope(el, ctx.doc), role)), OUTLINE_LIMITS.nameChars);
     if (!name && NEEDS_NAME.has(role) && !focused) return;
     flush();
     noteAnchor(el);
@@ -290,33 +314,96 @@ export function buildOutline(doc: Document, win: Window | null = doc.defaultView
     }
   };
 
+  /**
+   * A cross-origin child frame's own outline, put where its frame element
+   * sits, under a line naming the frame. The child's lines keep their order
+   * and their nesting; its controls are renumbered into this page's sequence
+   * and registered against the frame, so performing one goes back through
+   * the hub. Everything in the report is another document's text. It is
+   * truncated and normalised here, and it counts against this page's budget
+   * like a region of the page's own.
+   */
   const spliceFrame = (report: FrameOutline, ctx: WalkContext): void => {
+    const clean = (text: string, chars: number): string => truncate(normalizeWhitespace(String(text ?? '')), chars);
     const fr = frameNumber(doc, report.frame);
-    const index = push('struct', 'frame:', ctx);
-    const inner: WalkContext = { ...ctx, indent: ctx.indent + 1, region: index, fr };
-    for (const c of report.controls) {
+    const host = clean(report.host ?? '', OUTLINE_LIMITS.nameChars);
+    const index = push('struct', host ? `frame ${host}:` : 'frame:', ctx);
+    const base = ctx.indent + 1;
+    const byNumber = new Map<number, OutlineControl>();
+    for (const c of report.controls) byNumber.set(c.n, c);
+
+    // Child indent -> the line index that opened it, so a nested region's lines are trimmed with it.
+    const openedAt = new Map<number, number>();
+    const regionFor = (depth: number): number => {
+      for (let d = depth - 1; d >= 0; d--) {
+        const at = openedAt.get(d);
+        if (at !== undefined) return at;
+      }
+      return index;
+    };
+
+    const placed = new Set<number>();
+    const addRemote = (c: OutlineControl, at: { indent: number; region: number }): void => {
+      placed.add(c.n);
+      const name = clean(c.name, OUTLINE_LIMITS.nameChars);
       const entry: RawControl = {
         el: report.frame,
         role: c.role,
-        name: truncate(c.name, OUTLINE_LIMITS.nameChars),
-        ...(c.value ? { value: truncate(c.value, OUTLINE_LIMITS.valueChars) } : {}),
-        ...(c.state ? { state: c.state } : {}),
-        ...(c.host ? { host: c.host } : {}),
+        name,
+        ...(c.value ? { value: clean(c.value, OUTLINE_LIMITS.valueChars) } : {}),
+        ...(c.state ? { state: clean(c.state, OUTLINE_LIMITS.nameChars) } : {}),
+        ...(c.host ? { host: clean(c.host, OUTLINE_LIMITS.nameChars) } : {}),
         fr,
         frame: { token: report.token, remoteId: String(c.n) },
-        ...(c.risky || isRiskyName(c.name) ? { risky: true } : {}),
+        ...(c.risky || isRiskyName(name) ? { risky: true } : {}),
       };
       raw.push(entry);
-      push('control', renderControl(entry), inner, { control: raw.length - 1 });
+      push('control', renderControl(entry), at, { control: raw.length - 1 });
+    };
+
+    for (const line of (report.lines ?? []).slice(0, FRAME_MAX_LINES)) {
+      const depth = Math.min(Math.max(Math.trunc(line.indent) || 0, 0), FRAME_MAX_INDENT);
+      for (const open of [...openedAt.keys()]) if (open >= depth) openedAt.delete(open);
+      const at = { indent: base + depth, region: regionFor(depth) };
+      if (line.kind === 'control') {
+        const c = byNumber.get(line.n);
+        if (c && !placed.has(c.n)) addRemote(c, at);
+        continue;
+      }
+      const text = clean(line.text, OUTLINE_LIMITS.textChars);
+      if (!text) continue;
+      const opened = push(line.kind, text, at);
+      if (line.kind === 'struct') openedAt.set(depth, opened);
+    }
+    // A child too old to send lines, or one whose lines lost a control: list what is left flat.
+    for (const c of report.controls) if (!placed.has(c.n)) addRemote(c, { indent: base, region: index });
+    for (const note of report.summary ?? []) {
+      const text = clean(note, OUTLINE_LIMITS.nameChars);
+      if (text) push('text', text, { indent: base, region: index });
     }
   };
 
   const visit = (el: Element, outer: WalkContext): void => {
+    if (seenNodes++ > OUTLINE_LIMITS.maxNodes) return;
     const tag = el.tagName.toLowerCase();
     if (SKIP_TAGS.has(tag)) return;
     if (el.getAttribute('aria-hidden') === 'true' || el.hasAttribute('inert')) return;
+
+    // A slot is a hole, not a thing: it has no box of its own, so the
+    // visibility check cannot be asked about it, and each node that lands in
+    // it is judged where it lands rather than where it was written. A root
+    // that hides a slot outright hides what was put in it.
+    if (tag === 'slot') {
+      if (isHiddenSlot(el, outer.win)) return;
+      walkNodes(slotted(el), outer);
+      return;
+    }
+
     if (el.matches(JUNK)) return;
-    if (!isVisible(el, outer.win)) return;
+    // `display: contents` is how a component host gets out of the way; it has
+    // no box, so the visibility check calls it invisible while its content is
+    // on screen. Everything inside is checked on its own anyway.
+    if (!isVisible(el, outer.win) && !isBoxless(el, outer.win)) return;
 
     const exempt = outer.exempt || el === focusRegion || el === focusedEl;
     if (!exempt && !holdsFocus(el) && offScreen(el)) {
@@ -362,7 +449,7 @@ export function buildOutline(doc: Document, win: Window | null = doc.defaultView
 
     const region = regionOf(el, tag);
     if (region) {
-      const name = truncate(normalizeWhitespace(regionName(el, ctx.doc)), OUTLINE_LIMITS.nameChars);
+      const name = truncate(normalizeWhitespace(regionName(el, idScope(el, ctx.doc))), OUTLINE_LIMITS.nameChars);
       if (region.landmark || name) {
         flush();
         noteAnchor(el);
@@ -388,8 +475,22 @@ export function buildOutline(doc: Document, win: Window | null = doc.defaultView
     if (!INLINE_TAGS.has(tag)) flush();
   };
 
+  // An open shadow root replaces the light children it was given: those reach
+  // the outline through the slots inside the root, in the order the root puts
+  // them in. A closed root leaves `shadowRoot` null, so the host walks its own
+  // children and the component's insides stay unread.
   const walkChildren = (el: Element, ctx: WalkContext): void => {
-    for (const node of Array.from(el.childNodes)) {
+    const root = openShadowRoot(el);
+    if (!root) {
+      walkNodes(Array.from(el.childNodes), ctx);
+      return;
+    }
+    if (ctx.shadow >= OUTLINE_LIMITS.shadowDepth) return;
+    walkNodes(Array.from(root.childNodes), { ...ctx, shadow: ctx.shadow + 1 });
+  };
+
+  const walkNodes = (nodes: readonly Node[], ctx: WalkContext): void => {
+    for (const node of nodes) {
       if (node.nodeType === 3) {
         if (ctx.inNamed) continue;
         const text = normalizeWhitespace(node.nodeValue ?? '');
@@ -418,12 +519,13 @@ export function buildOutline(doc: Document, win: Window | null = doc.defaultView
       doc: child,
       fr,
       depth: ctx.depth + 1,
+      shadow: 0,
       exempt: ctx.exempt,
     });
     flush();
   };
 
-  walkChildren(doc.body, { indent: 0, region: -1, inNamed: false, win, doc, depth: 0, exempt: false });
+  walkChildren(doc.body, { indent: 0, region: -1, inNamed: false, win, doc, depth: 0, shadow: 0, exempt: false });
   flush();
 
   const anchor = focusedLine >= 0 ? lines[focusedLine]!.order : Math.max(0, anchorOrder);
@@ -462,7 +564,7 @@ function noteSize(notes: ViewportNotes): number {
 function regionAround(el: Element | null): Element | null {
   if (!el) return null;
   let nearest: Element | null = null;
-  for (let node = el.parentElement, hops = 0; node && hops < 24; node = node.parentElement, hops++) {
+  for (let node = composedParent(el), hops = 0; node && hops < 24; node = composedParent(node), hops++) {
     const region = regionOf(node, node.tagName.toLowerCase());
     if (!region) continue;
     if (region.landmark) return node;
@@ -471,13 +573,104 @@ function regionAround(el: Element | null): Element | null {
   return nearest;
 }
 
+/**
+ * The shadow root carat is allowed to read. Chrome hands back null for a
+ * closed root, and carat does not go around that: a component that closes its
+ * root stays opaque, and nothing inside it is numbered or offered.
+ */
+function openShadowRoot(el: Element): ShadowRoot | null {
+  try {
+    const root = (el as Element & { shadowRoot?: ShadowRoot | null }).shadowRoot ?? null;
+    return root?.mode === 'open' ? root : null;
+  } catch {
+    return null;
+  }
+}
+
+/** What a slot actually shows: the nodes assigned to it, or its fallback when nothing was. */
+function slotted(el: Element): Node[] {
+  const slot = el as Element & { assignedNodes?: (opts?: { flatten?: boolean }) => Node[] };
+  if (typeof slot.assignedNodes !== 'function') return Array.from(el.childNodes);
+  try {
+    const assigned = slot.assignedNodes({ flatten: true });
+    return assigned.length > 0 ? assigned : Array.from(el.childNodes);
+  } catch {
+    return Array.from(el.childNodes);
+  }
+}
+
+/** A slot the root has switched off, along with whatever was slotted into it. */
+function isHiddenSlot(el: Element, win: Window): boolean {
+  try {
+    const style = win.getComputedStyle(el);
+    return style.display === 'none' || style.visibility === 'hidden';
+  } catch {
+    return false;
+  }
+}
+
+function isShadowRoot(node: Node | null): node is ShadowRoot {
+  return node !== null && node.nodeType === 11 && 'host' in node;
+}
+
+/** Up one step in the composed tree: out of an open shadow root through its host. */
+function composedParent(el: Element): Element | null {
+  if (el.parentElement) return el.parentElement;
+  const root = el.parentNode;
+  return isShadowRoot(root) ? root.host : null;
+}
+
+/** The element and everything that holds it, shadow hosts included. */
+function composedPath(el: Element | null): Set<Element> {
+  const path = new Set<Element>();
+  for (let node = el, hops = 0; node && hops < 64; node = composedParent(node), hops++) path.add(node);
+  return path;
+}
+
+/**
+ * Where an element's id references resolve. Inside a shadow root that is the
+ * root, not the document: `aria-labelledby="label"` on a control in a root
+ * names an element in the same root, and the document may well have its own
+ * `#label`. A root answers `getElementById` and `querySelectorAll`, which is
+ * all the naming helpers ask of the document they are handed.
+ */
+function idScope(el: Element, doc: Document): Document {
+  const root = el.getRootNode();
+  if (root === doc) return doc;
+  if (isShadowRoot(root)) return root as unknown as Document;
+  return root.nodeType === 9 ? (root as Document) : doc;
+}
+
+/**
+ * An element with no box of its own, `display: contents`, which is not the
+ * same as hidden: `checkVisibility` says false for both. Its content is on
+ * screen as long as what holds it is.
+ */
+function isBoxless(el: Element, win: Window): boolean {
+  try {
+    const style = win.getComputedStyle(el);
+    if (style.display !== 'contents' || style.visibility === 'hidden' || style.opacity === '0') return false;
+    const parent = composedParent(el);
+    return !parent || isVisible(parent, win);
+  } catch {
+    return false;
+  }
+}
+
 /** Elements that could hold a control role, for counting what an off-screen subtree took with it. */
 const CONTROL_CANDIDATES = 'a[href],button,input,select,textarea,summary,[role],[contenteditable],[tabindex],[onclick]';
 
-function countControls(el: Element, win: Window): number {
+function countControls(el: Element, win: Window, depth = 0): number {
   let n = controlRoleOf(el) ? 1 : 0;
   for (const node of Array.from(el.querySelectorAll(CONTROL_CANDIDATES))) {
     if (controlRoleOf(node) && isVisible(node, win)) n++;
+  }
+  if (depth >= OUTLINE_LIMITS.shadowDepth) return n;
+  // Controls the subtree took with it include the ones inside its components.
+  for (const node of [el, ...Array.from(el.querySelectorAll('*'))]) {
+    const root = openShadowRoot(node);
+    if (!root) continue;
+    for (const child of Array.from(root.children)) n += countControls(child, win, depth + 1);
   }
   return n;
 }

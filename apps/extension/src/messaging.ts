@@ -91,7 +91,9 @@ export interface Protocol {
    * opened it at; either way the tab the chip was on comes back to the front.
    */
   undoNavigate(data: { kind: 'open' | 'switch'; tabId?: number; url?: string }): { ok: boolean };
-  getKnown(): { items: KnownItem[]; pinned: boolean };
+  getKnown(): { items: KnownItem[]; pinned: boolean; goal?: string };
+  /** The × beside the goal line in the popup: drop it, and let the next derivation find another. */
+  clearGoal(): void;
   /** The popup's button. The keyboard shortcut runs the same routine in the background. */
   clearKnown(): void;
   setPinned(data: { pinned: boolean }): { pinned: boolean };

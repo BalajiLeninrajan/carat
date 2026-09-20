@@ -27,6 +27,8 @@ export interface WarmDeps {
   history: (tabId: number, now: number) => Promise<string[]>;
   /** The same open tabs, this one excluded. */
   tabs?: (tabId: number) => Promise<OpenTab[]>;
+  /** The same goal, which sits at the head of the prefix; without it the warmed bytes are the wrong ones. */
+  goal?: () => Promise<string | undefined>;
   createProvider?: (settings: Settings) => Provider;
   now?: () => number;
   abortMs?: number;
@@ -45,7 +47,7 @@ export interface Warmer {
    * this tab. Compares the prefix itself, not just the tab: a note that
    * landed in between makes the warmed bytes the wrong ones.
    */
-  warmed(tabId: number | undefined, req: Pick<NextActionRequest, 'notes' | 'history' | 'tabs'>, at?: number): boolean;
+  warmed(tabId: number | undefined, req: Pick<NextActionRequest, 'goal' | 'notes' | 'history' | 'tabs'>, at?: number): boolean;
   forget(tabId: number): void;
 }
 
@@ -91,17 +93,18 @@ export function createWarmer(deps: WarmDeps): Warmer {
       if (!settings.enabled) return;
       if (isSiteOff(settings, page.host) || isDenylisted(page.host)) return;
 
-      const [notes, history, tabs] = await Promise.all([
+      const [notes, history, tabs, goal] = await Promise.all([
         deps.notes(tabId).catch(() => []),
         deps.history(tabId, at).catch(() => []),
         deps.tabs?.(tabId).catch(() => []) ?? [],
+        deps.goal?.().catch(() => undefined) ?? undefined,
       ]);
       // With nothing read and nothing done, the prefix is the static part alone,
       // which the provider has cached since the first page of the session.
       if (notes.length === 0 && history.length === 0) return;
 
       const provider = (deps.createProvider ?? createProvider)(settings);
-      // A race of the regex placeholder and Jev has no prefix to put anywhere.
+      // A race of the regex placeholder alone has no prefix to put anywhere.
       if (!provider.warm || (provider instanceof RaceProvider && !provider.warms)) return;
       const req: NextActionRequest = {
         page: { host: page.host, title: '', path: page.path, scroll: { y: 0, pages: 1, more: false } },
@@ -109,6 +112,7 @@ export function createWarmer(deps: WarmDeps): Warmer {
         controls: [],
         history,
         notes,
+        ...(goal ? { goal } : {}),
         tabs,
         now: new Date(at).toISOString(),
         eagerness: settings.eagerness,

@@ -3,9 +3,17 @@ import type { KnownItem } from '../messaging';
 import type { ContextStore } from '../store';
 import { STORE_LIMITS } from '../store';
 
-export async function getKnown(store: ContextStore): Promise<{ items: KnownItem[]; pinned: boolean }> {
-  const [items, pinned] = await Promise.all([store.items(), store.isPinned()]);
+export async function getKnown(
+  store: ContextStore,
+  goal?: { current(): Promise<string | undefined> },
+): Promise<{ items: KnownItem[]; pinned: boolean; goal?: string }> {
+  const [items, pinned, line] = await Promise.all([
+    store.items(),
+    store.isPinned(),
+    goal?.current().catch(() => undefined) ?? undefined,
+  ]);
   return {
+    ...(line ? { goal: line } : {}),
     items: items.map((i) => ({
       id: i.id,
       origin: i.origin,

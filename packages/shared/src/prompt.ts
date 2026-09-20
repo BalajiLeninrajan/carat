@@ -25,6 +25,7 @@ Kinds:
 - "switch": bring one of the tabs in <tabs> forward. \`target\` is null, \`value\` is that tab's id as a string.
 
 How to decide:
+- <goal> is what the user is trying to get done across tabs; prefer the action that advances it; if the page cannot advance it, choose the page's own obvious next step.
 - Follow the flow the history shows. Read it as a sequence: what was the user getting done, and what step comes next? A filled-in form wants its submit button; an opened dialog wants its primary action; a just-added cart item wants checkout.
 - The focused control and the controls near it are the strongest signal. Required fields that are still empty come before submitting.
 - <notes> often explain why the user came to this page. When the page is where they would act on a note, the next step is usually to put the note's details into the page (fill the matching field, select the matching option) or to press the control that acts on it.
@@ -195,19 +196,31 @@ function escapeAttr(s: string): string {
 }
 
 /**
- * The head of the user turn: notes, then history, then the open tabs, and
- * nothing that moves between two requests on the same page. A warm-up call
- * sends exactly this much and the real call repeats it byte for byte, so the
- * provider's prefix cache is already hot when the outline lands.
+ * The head of the user turn: the goal, then notes, history and the open tabs,
+ * and nothing that moves between two requests on the same page. A warm-up
+ * call sends exactly this much and the real call repeats it byte for byte, so
+ * the provider's prefix cache is already hot when the outline lands.
+ *
+ * `<goal>` is here rather than after the page because it frames everything
+ * that follows, which does mean a goal that changes invalidates the prefix
+ * cache once. That is the trade: a goal changes on the order of minutes, a
+ * page on the order of seconds. A page with no goal behind it sends the same
+ * bytes it always did, so the common case costs nothing.
  *
  * `now` is deliberately not in here: a clock in the prefix would break the
  * cache on every request. It goes after, with the page.
  */
-export function renderPrefix(req: Pick<NextActionRequest, 'notes' | 'history' | 'tabs'>): string {
+export function renderPrefix(req: Pick<NextActionRequest, 'goal' | 'notes' | 'history' | 'tabs'>): string {
+  const goal = req.goal?.trim();
   const notes = req.notes.map((n) => `- ${n}`);
   const history = req.history.map((h) => `- ${h}`);
   const tabs = req.tabs.map((t) => `- [tab ${t.id}] ${t.host} — ${t.title}`);
-  return [block('notes', notes), block('history', history), block('tabs', tabs)].join('\n');
+  return [
+    ...(goal ? [block('goal', [goal])] : []),
+    block('notes', notes),
+    block('history', history),
+    block('tabs', tabs),
+  ].join('\n');
 }
 
 /**

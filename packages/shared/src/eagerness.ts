@@ -11,8 +11,6 @@ export type Eagerness = (typeof EAGERNESS_LEVELS)[number];
 export interface EagernessKnobs {
   /** Suggestions under this confidence are dropped, by the provider and again by the service worker. */
   minConfidence: number;
-  /** Jev's request-level "is any of this relevant" answer must reach this before any field is filled. */
-  jevGateMin: number;
   /** Fills per answer, and interactions per answer; still one per field or element. */
   maxSuggestions: number;
   /** Fresh text from another tab on the page's own origin counts as context. The requesting tab's own text never does. */
@@ -33,9 +31,9 @@ export interface EagernessKnobs {
 }
 
 export const EAGERNESS: Record<Eagerness, EagernessKnobs> = {
-  conservative: { minConfidence: 0.7, jevGateMin: 0.6, maxSuggestions: 2, sameOriginContext: false, looseNames: false, primaryWithoutFill: false, priorMin: 1.01 },
-  balanced: { minConfidence: 0.55, jevGateMin: 0.5, maxSuggestions: 2, sameOriginContext: false, looseNames: false, primaryWithoutFill: false, priorMin: 0.6 },
-  eager: { minConfidence: 0.35, jevGateMin: 0.25, maxSuggestions: 4, sameOriginContext: true, looseNames: true, primaryWithoutFill: true, priorMin: 0.5 },
+  conservative: { minConfidence: 0.7, maxSuggestions: 2, sameOriginContext: false, looseNames: false, primaryWithoutFill: false, priorMin: 1.01 },
+  balanced: { minConfidence: 0.55, maxSuggestions: 2, sameOriginContext: false, looseNames: false, primaryWithoutFill: false, priorMin: 0.6 },
+  eager: { minConfidence: 0.35, maxSuggestions: 4, sameOriginContext: true, looseNames: true, primaryWithoutFill: true, priorMin: 0.5 },
 };
 
 export const DEFAULT_EAGERNESS: Eagerness = 'eager';

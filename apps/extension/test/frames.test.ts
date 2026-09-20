@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createChip } from '../src/chip';
 import { anchorInFrame, placeAt } from '../src/chip/position';
 import type { ScriptContext } from '../src/content';
-import { FRAME_TIMING, HUB_TIMING, createFrameHub, findIframeFor, startFrameAgent, stamp } from '../src/frames';
-import type { FrameReport, ToChild, ToTop } from '../src/frames';
+import { FRAME_TIMING, HUB_TIMING, createFrameHub, findIframeFor, frameNumber, startFrameAgent, stamp } from '../src/frames';
+import type { FrameLine, FrameReport, ToChild, ToTop } from '../src/frames';
+import { buildOutline } from '../src/outline';
 import { inViewport, viewportRect } from '../src/scroll';
 import { childDocuments } from '../src/snapshot/frames';
 
@@ -137,11 +138,62 @@ describe('frame hub', () => {
     expect(findIframeFor(document, stranger)).toBeNull();
   });
 
-  it('hands the outline the frame’s own controls, to splice in where its element sits', () => {
+  it('hands the outline the frame’s own lines and controls, to splice in where its element sits', () => {
     const { iframe, win } = sameOriginFrame();
     const hub = createFrameHub(fakeCtx(), document, { onReport: () => undefined, onKey: () => undefined });
-    fromFrame(win, stamp({ type: 'report', token: 'abc', reply: false, report: report() }));
-    expect(hub.outlines()).toEqual([{ frame: iframe, token: 'abc', controls: report().controls }]);
+    const lines: FrameLine[] = [
+      { kind: 'text', indent: 0, text: 'text: Pay in three instalments.' },
+      { kind: 'control', indent: 0, n: 1 },
+      { kind: 'control', indent: 0, n: 2 },
+    ];
+    fromFrame(win, stamp({ type: 'report', token: 'abc', reply: false, report: report({ lines, host: 'pay.example' }) }));
+    expect(hub.outlines()).toEqual([{ frame: iframe, token: 'abc', controls: report().controls, lines, host: 'pay.example' }]);
+  });
+
+  it('takes a frame that is all prose, and drops a report whose lines are malformed', () => {
+    const { iframe, win } = sameOriginFrame();
+    const hub = createFrameHub(fakeCtx(), document, { onReport: () => undefined, onKey: () => undefined });
+    const prose: FrameLine[] = [{ kind: 'text', indent: 0, text: 'text: Seven Shores Cafe, Friday at 6.' }];
+    fromFrame(win, stamp({ type: 'report', token: 'abc', reply: false, report: { controls: [], rects: {}, lines: prose } }));
+    expect(hub.outlines()).toEqual([{ frame: iframe, token: 'abc', controls: [], lines: prose }]);
+
+    fromFrame(win, {
+      carat: 'carat-frame',
+      v: 1,
+      type: 'report',
+      token: 'bad',
+      reply: false,
+      report: { controls: [], rects: {}, lines: [{ kind: 'sermon', indent: 0, text: 'do as I say' }] } as unknown as FrameReport,
+    });
+    expect(hub.frames()).toHaveLength(1);
+  });
+
+  it('matches and numbers a frame that sits inside an open shadow root', () => {
+    // The outline walks into open roots, so a frame inside a component is
+    // described. The hub has to reach it too, or its report is thrown away.
+    const plain = document.createElement('iframe');
+    document.body.append(plain);
+    const host = document.createElement('div');
+    document.body.append(host);
+    const inner = document.createElement('iframe');
+    host.attachShadow({ mode: 'open' }).append(inner);
+
+    expect(findIframeFor(document, inner.contentWindow!)).toBe(inner);
+    expect(frameNumber(document, plain)).toBe(1);
+    expect(frameNumber(document, inner)).toBe(2);
+
+    const hub = createFrameHub(fakeCtx(), document, { onReport: () => undefined, onKey: () => undefined });
+    fromFrame(inner.contentWindow!, stamp({ type: 'report', token: 'deep', reply: false, report: report() }));
+    expect(hub.frames().map((f) => f.iframe)).toEqual([inner]);
+    expect(hub.numberOf(hub.frames()[0]!)).toBe(2);
+  });
+
+  it('leaves a closed shadow root opaque, as the outline does', () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const inner = document.createElement('iframe');
+    host.attachShadow({ mode: 'closed' }).append(inner);
+    expect(findIframeFor(document, inner.contentWindow!)).toBeNull();
   });
 
   it('asks frames for a fresh report and waits for the replies or the cap, without re-triggering a snapshot', async () => {
@@ -222,9 +274,9 @@ describe('frame agent', () => {
     return { agent, ctx, top, fromTop, sent };
   }
 
-  it('reports its own controls with boxes after the initial delay, again only when they change, and always when asked', async () => {
+  it('reports its own outline with boxes after the initial delay, again only when it changes, and always when asked', async () => {
     const { doc } = sameOriginFrame();
-    doc.body.innerHTML = '<main><input aria-label="Card number"><button>Pay now</button></main>';
+    doc.body.innerHTML = '<main><h2>Card details</h2><p>We never store it.</p><input aria-label="Card number"><button>Pay now</button></main>';
     for (const el of doc.querySelectorAll('input,button')) lay(el, 10, 20, 200, 30);
     const { fromTop, sent } = agentIn(doc);
     await tick(FRAME_TIMING.initialMs);
@@ -233,6 +285,16 @@ describe('frame agent', () => {
     expect(first.reply).toBe(false);
     expect(first.report.controls.map((c) => c.name)).toEqual(['Card number', 'Pay now']);
     expect(first.report.rects['1']).toEqual({ x: 10, y: 20, w: 200, h: 30 });
+    // The prose around the fields comes too, in the order the frame reads.
+    expect(first.report.lines).toEqual([
+      { kind: 'struct', indent: 0, text: 'main:' },
+      { kind: 'heading', indent: 1, text: 'h2 Card details' },
+      { kind: 'text', indent: 1, text: 'text: We never store it.' },
+      { kind: 'control', indent: 1, n: 1 },
+      { kind: 'control', indent: 1, n: 2 },
+    ]);
+    // A frame the size of its content has nothing of its own below the fold to report.
+    expect(first.report.summary).toBeUndefined();
 
     // Same page, a focus: nothing new to say.
     doc.querySelector('input')!.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
@@ -243,6 +305,28 @@ describe('frame agent', () => {
     await tick(0);
     expect(sent()).toHaveLength(2);
     expect((sent()[1] as Extract<ToTop, { type: 'report' }>).reply).toBe(true);
+  });
+
+  it('reports again when only the words changed, and carries its own fold when it scrolls on its own', async () => {
+    const { doc, win } = sameOriginFrame();
+    doc.body.innerHTML = '<p id="copy">We never store it.</p><input aria-label="Card number">';
+    const { sent } = agentIn(doc);
+    await tick(FRAME_TIMING.initialMs);
+    expect(sent()).toHaveLength(1);
+
+    doc.getElementById('copy')!.textContent = 'Your bank will ask you to confirm.';
+    await tick(FRAME_TIMING.debounceMs);
+    const second = sent().at(-1) as Extract<ToTop, { type: 'report' }>;
+    expect(sent()).toHaveLength(2);
+    expect(second.report.lines).toContainEqual({ kind: 'text', indent: 0, text: 'text: Your bank will ask you to confirm.' });
+    expect(second.report.summary).toBeUndefined();
+
+    // A frame taller than its own viewport has a fold of its own, and says where it is against it.
+    Object.defineProperty(doc.documentElement, 'scrollHeight', { value: win.innerHeight * 3, configurable: true });
+    doc.getElementById('copy')!.textContent = 'Scroll for the rest.';
+    await tick(FRAME_TIMING.debounceMs);
+    const third = sent().at(-1) as Extract<ToTop, { type: 'report' }>;
+    expect(third.report.summary).toEqual(['(2.0 more screens below)']);
   });
 
   it('performs a fill or a click on the control it numbered, from the top window only', async () => {
@@ -279,6 +363,32 @@ describe('frame agent', () => {
     await tick(0);
     expect(clicks.mock.calls.length).toBe(before);
     expect(top.postMessage.mock.calls.some((c) => (c[0] as { seq?: number }).seq === 10)).toBe(false);
+  });
+
+  it('is reached again by the number the page gave the line it contributed', async () => {
+    const { iframe, doc, win } = sameOriginFrame();
+    doc.body.innerHTML = '<p>Say something nice.</p><textarea aria-label="Comment"></textarea><button>Post</button>';
+    const clicks = vi.fn();
+    doc.querySelector('button')!.addEventListener('click', clicks);
+    const hub = createFrameHub(fakeCtx(), document, { onReport: () => undefined, onKey: () => undefined });
+    const { top } = agentIn(doc);
+    // Wire the two halves to each other, which a real page does over origins.
+    top.postMessage.mockImplementation((msg: ToTop) => void window.dispatchEvent(new MessageEvent('message', { data: msg, source: win })));
+    win.postMessage = ((msg: ToChild) =>
+      void win.dispatchEvent(new MessageEvent('message', { data: msg, source: top as unknown as Window }))) as typeof win.postMessage;
+    await tick(FRAME_TIMING.initialMs);
+
+    const { outline, controls, registry } = buildOutline(document, window, { frames: hub.outlines() });
+    expect(outline).toContain('text: Say something nice.');
+    const post = controls.find((c) => c.name === 'Post')!;
+    const target = registry.get(post.n)!;
+    expect(target.el).toBe(iframe);
+
+    const frame = hub.frames().find((f) => f.token === target.frame!.token)!;
+    const reply = hub.perform(frame, { kind: 'outline', n: Number(target.frame!.remoteId), action: 'click', value: '' });
+    await tick(0);
+    expect(await reply).toEqual({ ok: true });
+    expect(clicks).toHaveBeenCalledTimes(1);
   });
 
   it('takes the armed key in the frame and relays it, relays Esc and typing, and stops when disarmed', async () => {

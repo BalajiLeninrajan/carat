@@ -26,12 +26,10 @@ export interface PageMeta {
 
 export interface Settings {
   enabled: boolean;
-  provider: 'openai' | 'baseten' | 'local' | 'cloudflare';
+  provider: 'openai' | 'baseten' | 'local';
   baseURL: string; // default https://api.openai.com/v1
   apiKey: string; // may be ''
   model: string; // default gpt-5.6-luna
-  cfAccountId: string; // Cloudflare account id for Workers AI; may be ''
-  cfApiToken: string; // Workers AI token; stays in chrome.storage.local like apiKey
   disabledHosts: string[]; // exact hosts (with port) where carat neither reads nor suggests
   statusLine: boolean; // small bottom-right line on every page: running or not, and which model
   /**
@@ -83,8 +81,6 @@ export const DEFAULT_SETTINGS: Settings = {
   baseURL: 'https://api.openai.com/v1',
   apiKey: '',
   model: 'gpt-5.6-luna',
-  cfAccountId: '',
-  cfApiToken: '',
   disabledHosts: [],
   statusLine: false,
   sound: true,
