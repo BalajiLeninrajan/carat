@@ -481,8 +481,27 @@ function grounded(value: string, req: NextActionRequest): boolean {
   const needle = norm(value);
   if (needle === '') return false;
   const typed = req.focused === undefined ? undefined : req.controls.find((c) => c.n === req.focused)?.value;
-  const sources = [...req.notes, ...req.history, req.outline, ...(typed ? [typed] : [])];
+  const sources = [...req.notes, ...req.history, ...prose(req.outline), ...(typed ? [typed] : [])];
   return sources.some((source) => norm(source).includes(needle));
+}
+
+/** A paragraph, a heading, a list item, a line of an article: what the page says. */
+const PROSE_LINE = /^\s*(?:text: |heading\(\d\) )/;
+
+/** A line the page put there to tell the user their field is wrong; see `prose`. */
+const FIELD_MESSAGE = /\(field message\)\s*$/;
+
+/**
+ * The lines of the outline that are the page talking to the reader, and not
+ * the page's own furniture. Control names, button labels, badges, tab names,
+ * placeholders and the outline's landmark headers are all in there too, and
+ * every one of them is a short plausible-looking string sitting next to a
+ * field: "Ad", "Join", "Search Reddit". Grounding a fill in those is how a
+ * chip ends up offering to type the page's own chrome back into it. The model
+ * still sees the whole outline; only this check is narrowed.
+ */
+function prose(outline: string): string[] {
+  return outline.split('\n').filter((line) => PROSE_LINE.test(line) && !FIELD_MESSAGE.test(line));
 }
 
 /** Why a fill was refused when its value is the name of a page, a tab or a site. */

@@ -244,6 +244,25 @@ describe('validation is safety only', () => {
     }
   });
 
+  it('grounds a fill in what the page says, never in its buttons and badges', () => {
+    const outline = [
+      'main:',
+      '  text: Ad',
+      '  [1] textbox "Add a comment"',
+      '  [2] button "Join"',
+      '  group "Promoted":',
+      '    text: Quarry Lane Tavern opens at five on Fridays.',
+    ].join('\n');
+    const page = request({ outline, controls: [{ n: 1, role: 'textbox', name: 'Notes' }], focused: 1 });
+    const fill = (value: string) => action({ kind: 'fill', target: 1, value });
+    // A button's name and a landmark's own header are furniture, whatever they read like.
+    expect(validate(fill('Join'), page, s)).toBeNull();
+    expect(validate(fill('Promoted'), page, s)).toBeNull();
+    expect(validate(fill('Add a comment'), page, s)).toBeNull();
+    // What the page actually says still counts.
+    expect(validate(fill('Quarry Lane Tavern'), page, s)?.kind).toBe('fill');
+  });
+
   it('refuses a page name, a tab name or a site name as a value to type', () => {
     const feed = redditFeed();
     const diag: SuggestDiag = { at: 0, host: 'www.reddit.com', controls: 3, gate: 'ok', eagerness: 'eager' };
