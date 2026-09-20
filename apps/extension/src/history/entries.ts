@@ -1,4 +1,3 @@
-import type { NextActionKind } from '@carat/shared';
 import { normalizeWhitespace, truncate } from '@carat/shared';
 import { relativeAge } from '../format/age';
 
@@ -55,36 +54,7 @@ export type HistoryEntry =
   | { t: number; kind: 'opened'; from: number }
   | { t: number; kind: 'accepted'; what: string }
   | { t: number; kind: 'dismissed'; what: string }
-  | { t: number; kind: 'undone'; what: string }
   | { t: number; kind: 'snoozed' };
-
-/**
- * The clause a suggestion line is built from: `fill "Search"`. The verbs
- * match the ones the service worker writes for an accepted or dismissed chip,
- * so an `undid:` line reads against them.
- */
-export function suggestionClause(kind: NextActionKind, name: string): string {
-  return `${suggestionVerb(kind)}${name ? ` "${name}"` : ''}`;
-}
-
-function suggestionVerb(kind: NextActionKind): string {
-  switch (kind) {
-    case 'fill':
-      return 'fill';
-    case 'click':
-      return 'click';
-    case 'select':
-      return 'select in';
-    case 'scroll':
-      return 'scroll down';
-    case 'open':
-      return 'open';
-    case 'switch':
-      return 'switch to';
-    case 'none':
-      return 'nothing';
-  }
-}
 
 /**
  * One line of the timeline, without its age: `clicked button "Add to cart"`,
@@ -104,8 +74,6 @@ export function describeEntry(e: HistoryEntry): string {
       return `accepted suggestion: ${e.what}`;
     case 'dismissed':
       return `dismissed suggestion: ${e.what}`;
-    case 'undone':
-      return `undid: ${e.what}`;
     case 'snoozed':
       return 'snoozed for a minute';
   }

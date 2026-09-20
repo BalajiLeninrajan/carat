@@ -97,7 +97,6 @@ export interface Chip {
    * label and no key, for `ms` and then nothing. The next chip takes the space
    * back the moment it goes up.
    */
-  flash(detail: string, ms: number): void;
   /** The action on screen is final: drop the indicator and the tooltip's waiting line, keep the chip. */
   settle(): void;
   hide(): void;
@@ -218,8 +217,6 @@ export function createChip(doc: Document = document): Chip {
   let pending = false;
   let armed = false;
   let armTimer: ReturnType<typeof setTimeout> | undefined;
-  /** The accept flash's own clock, which outlives the chip it followed. */
-  let flashTimer: ReturnType<typeof setTimeout> | undefined;
   // The reason on its own, so the waiting line can go on and come off it.
   let reason = '';
   // The preview line this chip would show, and the rest it is waiting out.
@@ -675,43 +672,6 @@ export function createChip(doc: Document = document): Chip {
     enter();
   }
 
-  /**
-   * The accept flash. It only ever runs with no session up, which is where an
-   * accepted chip leaves things: the pill comes back as the banner, carrying
-   * the detail line alone, and takes no keys while it is there.
-   */
-  function flash(detail: string, ms: number): void {
-    if (session) return;
-    // The accepted chip may still be playing its last frames. They are over:
-    // the flash takes the same pill, and the exit's timer would hide it.
-    endExit();
-    clearTimeout(flashTimer);
-    label.textContent = '';
-    sub.textContent = detail;
-    sub.hidden = false;
-    spinner.hidden = true;
-    key.hidden = true;
-    pill.classList.add('is-banner', 'is-flash');
-    host.style.top = 'auto';
-    host.style.right = 'auto';
-    host.style.left = '50%';
-    host.style.bottom = `${CORNER_INSET_PX}px`;
-    host.style.transform = 'translateX(-50%)';
-    host.style.display = 'block';
-    flashTimer = setTimeout(endFlash, ms);
-  }
-
-  function endFlash(): void {
-    clearTimeout(flashTimer);
-    flashTimer = undefined;
-    if (!pill.classList.contains('is-flash')) return;
-    pill.classList.remove('is-flash');
-    key.hidden = false;
-    sub.hidden = true;
-    sub.textContent = '';
-    if (!session) host.style.display = 'none';
-  }
-
   /** Put the ring on a control before there is anything to say about it. */
   function ring(target: Element): void {
     ringTarget = target;
@@ -747,8 +707,6 @@ export function createChip(doc: Document = document): Chip {
    * left on screen is a pill that can no longer do anything.
    */
   function hide(exit?: Exit): void {
-    // A chip going up, or anything putting one away, takes the flash with it.
-    endFlash();
     const seen = session !== null && host.style.display !== 'none';
     const wasArmed = armed;
     endExit();
@@ -869,7 +827,6 @@ export function createChip(doc: Document = document): Chip {
   }
 
   function destroy(): void {
-    endFlash();
     hide();
     endExit();
     fx.destroy();
@@ -891,7 +848,6 @@ export function createChip(doc: Document = document): Chip {
     show,
     showBanner,
     ring,
-    flash,
     settle,
     hide,
     destroy,
