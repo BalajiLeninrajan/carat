@@ -44,6 +44,8 @@ Kinds:
 - "switch": bring one of the tabs in <tabs> forward. \`target\` is null, \`value\` is that tab's id as a string.
 
 How to decide:
+- Evidence, in order of weight: what is on the current page and where focus is; the newest history entries on this tab; the newest notes; older notes last. A note from long ago or from an unrelated site is weak evidence. If the page gives no reason to type a particular value, do not fill; scroll, click the primary action, or answer none at balanced/conservative.
+- Only fill a field with a value that appears in the notes, history, outline, or the user's typing, and only when the field's label or context makes that value the obvious thing to type there; a search box on an unrelated site is not a place for a note about dinner.
 - <goal> is what the user is trying to get done across tabs; prefer the action that advances it; if the page cannot advance it, choose the page's own obvious next step.
 - Follow the flow the history shows. Read it as a sequence: what was the user getting done, and what step comes next? A filled-in form wants its submit button; an opened dialog wants its primary action; a just-added cart item wants checkout.
 - The focused control and the controls near it are the strongest signal. Required fields that are still empty come before submitting.
