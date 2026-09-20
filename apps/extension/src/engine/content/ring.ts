@@ -9,15 +9,30 @@
 
 import type { ActionKind } from "../shared/protocol";
 
+/**
+ * The one description of the ring: colour, width, radius and how far outside
+ * the control it sits. The chip is drawn against the same numbers, so the
+ * ring, the control and the pill read as one mark rather than three.
+ */
+export const RING = {
+  accent: "#7c3aed",
+  halo: "rgba(124, 58, 237, .18)",
+  armed: "#d97706",
+  armedHalo: "rgba(217, 119, 6, .25)",
+  widthPx: 2,
+  radiusPx: 7,
+  padPx: 3,
+} as const;
+
 const CSS = `
   :host { all: initial; }
   .ring {
-    position: fixed; box-sizing: border-box; border-radius: 7px; pointer-events: none;
-    border: 2px solid #7c3aed; box-shadow: 0 0 0 4px rgba(124, 58, 237, .18);
+    position: fixed; box-sizing: border-box; border-radius: ${RING.radiusPx}px; pointer-events: none;
+    border: ${RING.widthPx}px solid ${RING.accent}; box-shadow: 0 0 0 4px ${RING.halo};
     transition: opacity .12s, border-color .12s, box-shadow .12s;
   }
   .ring.pending { border-style: dashed; opacity: .55; box-shadow: none; }
-  .ring.armed { border-color: #d97706; box-shadow: 0 0 0 4px rgba(217, 119, 6, .25); }
+  .ring.armed { border-color: ${RING.armed}; box-shadow: 0 0 0 4px ${RING.armedHalo}; }
   .chip {
     position: fixed; display: flex; align-items: center; gap: 6px; white-space: nowrap;
     font: 600 12px/1 system-ui, -apple-system, "Segoe UI", sans-serif; color: #fff;
@@ -53,6 +68,8 @@ export class Ring {
   private action: RingAction | null = null;
   private armed = false;
   private message: string | null = null;
+  /** The action has landed, even though another surface is the one saying what it is. */
+  private settled = false;
 
   /** The host element, so the page MutationObserver can ignore it. */
   get element(): HTMLElement | null {
@@ -91,6 +108,7 @@ export class Ring {
     this.target = target;
     this.action = null;
     this.armed = false;
+    this.settled = false;
     this.message = null;
     this.render();
     this.ring.hidden = false;
@@ -104,6 +122,15 @@ export class Ring {
 
   setAction(action: RingAction): void {
     this.action = action;
+    this.render();
+  }
+
+  /**
+   * The ring stops looking provisional without taking an action of its own:
+   * the chip is up and saying what the action is, so the ring only rings.
+   */
+  solid(): void {
+    this.settled = true;
     this.render();
   }
 
@@ -123,6 +150,7 @@ export class Ring {
     this.target = null;
     this.floating = false;
     this.action = null;
+    this.settled = false;
     if (!this.host) return;
     this.ring.hidden = true;
     this.chip.hidden = true;
@@ -141,7 +169,7 @@ export class Ring {
 
   private render(): void {
     if (!this.host) return;
-    this.ring.className = "ring" + (this.action ? "" : " pending") + (this.armed ? " armed" : "");
+    this.ring.className = "ring" + (this.action || this.settled ? "" : " pending") + (this.armed ? " armed" : "");
     this.chip.className = "chip" + (this.armed ? " armed" : "") + (this.message ? " error" : "");
     const a = this.action;
     if (!a && !this.message) {
@@ -183,7 +211,7 @@ export class Ring {
       return;
     }
     const r = t.getBoundingClientRect();
-    const pad = 3;
+    const pad = RING.padPx;
     Object.assign(this.ring.style, {
       left: `${r.left - pad}px`,
       top: `${r.top - pad}px`,

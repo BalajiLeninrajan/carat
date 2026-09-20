@@ -1,4 +1,5 @@
 import { fromSurface } from '../dom/surfaces';
+import { Ring } from '../engine/content/ring';
 import { SCROLL_SETTLE_MS, caratScrolling } from '../scroll';
 import { createEffects } from './effects';
 import { deepActiveElement, shouldInterceptTab } from './keys';
@@ -90,7 +91,11 @@ export interface BannerShowOptions extends ChipText {
 export interface Chip {
   show(opts: ChipShowOptions): void;
   showBanner(opts: BannerShowOptions): void;
-  /** Ring a control while the rest of the action is still being written. */
+  /**
+   * Ring a control while the rest of the action is still being written. The
+   * ring stays on it for as long as the offer does; it is the same ring the
+   * engine puts up the moment a target streams in, not a second one.
+   */
   ring(target: Element): void;
   /**
    * The line left behind once the chip has accepted and gone: one detail, no
@@ -146,7 +151,6 @@ const EXIT_MS: Record<Exit, number> = {
 /** Held down on their own these say nothing; the key that follows does. */
 const MODIFIER_KEYS = new Set(['Shift', 'Control', 'Alt', 'Meta', 'AltGraph', 'CapsLock', 'NumLock', 'ScrollLock', 'OS', 'Dead', 'Unidentified']);
 const HOST_ATTR = 'data-carat-chip';
-const RING_ATTR = 'data-carat-ring';
 
 interface SessionBase extends ChipCallbacks {
   timer: ReturnType<typeof setTimeout>;
@@ -175,7 +179,12 @@ interface BannerSession extends SessionBase {
 }
 type Session = ControlSession | BannerSession;
 
-export function createChip(doc: Document = document): Chip {
+/**
+ * `rings` is the engine's ring. The caller passes the one it already put up
+ * when the target streamed in, so the mark on the control never blinks
+ * between "carat is working on this" and "here is the offer".
+ */
+export function createChip(doc: Document = document, rings: Ring = new Ring()): Chip {
   const host = doc.createElement('div');
   host.setAttribute(HOST_ATTR, '');
   host.style.cssText = 'all:initial;position:fixed;top:0;left:0;z-index:2147483647;display:none;';
@@ -205,13 +214,6 @@ export function createChip(doc: Document = document): Chip {
   const previewStyle = doc.createElement('style');
   previewStyle.textContent = PREVIEW_CSS;
   root.append(style, previewStyle, pill);
-
-  // The ring lives in its own host: it goes up on the target as soon as the
-  // model names it, before there is anything to say about it.
-  const ringHost = doc.createElement('div');
-  ringHost.setAttribute(RING_ATTR, '');
-  ringHost.style.cssText = 'all:initial;position:fixed;pointer-events:none;z-index:2147483646;display:none;border-radius:7px;border:2px solid #89b4fa;box-shadow:0 0 0 4px rgba(137,180,250,.18);';
-  let ringTarget: Element | null = null;
 
   let session: Session | null = null;
   let pending = false;
@@ -375,7 +377,6 @@ export function createChip(doc: Document = document): Chip {
   const onMousedown = (e: MouseEvent): void => e.preventDefault();
 
   const reposition = (): void => {
-    positionRing();
     if (!session || session.mode !== 'control') return;
     if (!session.target.isConnected) {
       dismiss('detached');
@@ -552,9 +553,7 @@ export function createChip(doc: Document = document): Chip {
   }
 
   function mount(opts: ChipText): SessionBase {
-    const keepRing = ringTarget;
     hide();
-    ringTarget = keepRing;
     sub.textContent = opts.detail ?? '';
     sub.hidden = !opts.detail;
     previewText = opts.preview ?? '';
@@ -644,8 +643,6 @@ export function createChip(doc: Document = document): Chip {
       return;
     }
     enter();
-    // And a hairline round the control, so the chip and its target read as one thing.
-    fx.outline(opts.target);
   }
 
   function showBanner(opts: BannerShowOptions): void {
@@ -672,32 +669,20 @@ export function createChip(doc: Document = document): Chip {
     enter();
   }
 
-  /** Put the ring on a control before there is anything to say about it. */
+  /**
+   * Put the ring on a control. Before the offer has landed it is the engine's
+   * dashed ring; once the chip is up it goes solid and stays until the chip
+   * does. Either way it follows the control's box frame by frame, so the ring
+   * and the pill move together.
+   */
   function ring(target: Element): void {
-    ringTarget = target;
-    if (!ringHost.isConnected) doc.documentElement.appendChild(ringHost);
-    ringHost.style.display = 'block';
-    ringHost.style.borderStyle = session ? 'solid' : 'dashed';
-    positionRing();
-  }
-
-  function positionRing(): void {
-    if (!ringTarget) return;
-    if (!ringTarget.isConnected) {
-      clearRing();
-      return;
-    }
-    const r = ringTarget.getBoundingClientRect();
-    ringHost.style.left = `${Math.round(r.left - 3)}px`;
-    ringHost.style.top = `${Math.round(r.top - 3)}px`;
-    ringHost.style.width = `${Math.round(r.width + 6)}px`;
-    ringHost.style.height = `${Math.round(r.height + 6)}px`;
-    ringHost.style.borderColor = armed ? '#f9e2af' : '#89b4fa';
+    rings.show(target);
+    if (session) rings.solid();
+    rings.setArmed(armed);
   }
 
   function clearRing(): void {
-    ringTarget = null;
-    ringHost.style.display = 'none';
+    rings.hide();
   }
 
   /**
@@ -764,7 +749,7 @@ export function createChip(doc: Document = document): Chip {
     if (!s) return;
     armed = true;
     render();
-    positionRing();
+    rings.setArmed(true);
     sounds.arm();
     clearTimeout(armTimer);
     armTimer = setTimeout(() => {
@@ -778,7 +763,7 @@ export function createChip(doc: Document = document): Chip {
     armed = false;
     clearTimeout(armTimer);
     render();
-    positionRing();
+    rings.setArmed(false);
   }
 
   function accept(): void {
@@ -832,7 +817,7 @@ export function createChip(doc: Document = document): Chip {
     fx.destroy();
     sounds.close();
     host.remove();
-    ringHost.remove();
+    rings.element?.remove();
   }
 
   // Bound once, for the life of the chip, and on the host rather than the

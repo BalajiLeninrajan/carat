@@ -241,8 +241,10 @@ export default defineContentScript({
     // Action suggestions: their ring while the answer streams, our chip once
     // it has landed.
 
+    // One ring, shared: the engine puts it on the target the moment one
+    // streams in, and the chip keeps the same ring there until the offer goes.
     const ring = new Ring();
-    const chip = createChip(document);
+    const chip = createChip(document, ring);
     const status = createStatusLine(document);
     const debug = startDebug(ctx, document);
 
@@ -304,8 +306,6 @@ export default defineContentScript({
           if (reason === 'escape' && s) post({ type: 'dismiss', reqId: s.reqId });
         },
       };
-      // Their ring has done its job: the chip draws its own round the target.
-      ring.hide();
       if (msg.browser || !suggestion?.el) chip.showBanner(common);
       else chip.show({ ...common, target: suggestion.el });
     }

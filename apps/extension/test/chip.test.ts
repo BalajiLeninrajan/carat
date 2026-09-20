@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { ARM_MS, ATTENTION_AFTER_MS, AUTO_DISMISS_MS, CHIP_SETTLE_MS, CORNER_INSET_PX, PENDING_HINT, createChip, type Chip, type DismissReason } from '../src/chip';
 import { KEYFRAME_CLASSES, TIMING } from '../src/chip/styles';
+import { Ring } from '../src/engine/content/ring';
 
 /** jsdom has no Web Audio; this is enough of a context to count how many were built. */
 class FakeAudioContext {
@@ -45,8 +46,8 @@ function hosts(): NodeListOf<Element> {
   return document.querySelectorAll('[data-carat-chip]');
 }
 
-function rings(): NodeListOf<Element> {
-  return document.querySelectorAll('[data-carat-ring]');
+function ringHosts(): NodeListOf<Element> {
+  return document.querySelectorAll('carat-ring');
 }
 
 // jsdom reports zero-size rects; give the target a viewport position.
@@ -57,6 +58,7 @@ function onScreen(el: Element): void {
 
 describe('chip', () => {
   let chip: Chip;
+  let ring: Ring;
   let target: HTMLInputElement;
   let other: HTMLInputElement;
   let onAccept: Mock<() => void>;
@@ -68,7 +70,8 @@ describe('chip', () => {
     other = document.createElement('input');
     onScreen(target);
     document.body.append(target, other);
-    chip = createChip();
+    ring = new Ring();
+    chip = createChip(document, ring);
     onAccept = vi.fn<() => void>();
     onDismiss = vi.fn<(reason: DismissReason) => void>();
   });
@@ -167,15 +170,26 @@ describe('chip', () => {
     });
   });
 
-  it('rings the control it is about, and rings one early with no chip on it yet', () => {
+  it('rings the control it is about, keeps the ring for the whole offer, and takes it with it', () => {
+    // The engine's ring, up the moment a target streams in, before there is
+    // anything to say about it.
     chip.ring(target);
-    expect(rings()).toHaveLength(1);
-    expect((rings()[0] as HTMLElement).style.display).toBe('block');
+    expect(ring.visible).toBe(true);
+    expect(ringHosts()).toHaveLength(1);
     expect(chip.visible).toBe(false);
+    // The offer lands on the same ring rather than a second one.
     show();
-    expect((rings()[0] as HTMLElement).style.display).toBe('block');
+    expect(ring.visible).toBe(true);
+    expect(ringHosts()).toHaveLength(1);
     chip.hide();
-    expect((rings()[0] as HTMLElement).style.display).toBe('none');
+    expect(ring.visible).toBe(false);
+  });
+
+  it('rings the target of every action that has one', () => {
+    chip.show({ target, label: 'Click "Pay"', kind: 'click', onAccept, onDismiss });
+    expect(ring.visible).toBe(true);
+    key(target, 'Tab');
+    expect(ring.visible).toBe(false);
   });
 
   it('sits at the bottom centre as a banner, and takes Tab from anywhere', () => {
@@ -281,7 +295,7 @@ describe('chip', () => {
     chip.ring(target);
     chip.destroy();
     expect(hosts()).toHaveLength(0);
-    expect(rings()).toHaveLength(0);
+    expect(ringHosts()).toHaveLength(0);
     expect(document.querySelectorAll('[data-carat-fx]')).toHaveLength(0);
   });
 
@@ -370,10 +384,10 @@ describe('chip', () => {
       expect(chip.classes).not.toContain('is-attention');
     });
 
-    it('marks the control it is about, and marks it again when the offer is taken', () => {
+    it('leaves the arrival mark to the ring, and marks the control when the offer is taken', () => {
       const fx = (): string => document.querySelector('[data-carat-fx]')?.getAttribute('data-carat-fx') ?? '';
       chip.show({ target, label: 'Fill Search with "x"', kind: 'fill', onAccept, onDismiss });
-      expect(fx()).toBe('outline');
+      expect(fx()).toBe('');
       key(target, 'Tab');
       // The arrival mark goes with the chip; the receipt stays a moment longer.
       expect(fx().split(' ').sort()).toEqual(['flash', 'tint']);
