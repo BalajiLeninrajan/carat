@@ -39,6 +39,12 @@ export interface IdleMessage {
   moreBelow?: boolean;
   /** What the user has highlighted on the page, trimmed and capped. Empty when nothing is selected. */
   selection?: string;
+  /**
+   * Ours: the page is showing a password field. The decision loop ignores it;
+   * it is the one place the worker learns a tab is on a login form, so the
+   * system clipboard is never read while that tab is in front.
+   */
+  password?: boolean;
 }
 
 /** Something the user just did, appended to the per-tab history. */
@@ -48,7 +54,7 @@ export interface LogMessage {
   url: string;
 }
 
-/** Tab pressed on a ready action suggestion (after arming, if irreversible). */
+/** Carat's key tapped on a ready action suggestion (after arming, if irreversible). */
 export interface AcceptMessage {
   type: "accept";
   reqId: number;
@@ -69,7 +75,24 @@ export interface SeenMessage {
   text: string;
 }
 
-export type ContentToWorker = IdleMessage | LogMessage | AcceptMessage | DismissMessage | SeenMessage;
+/**
+ * Ours: text the user just copied or cut on the page. It becomes a note as it
+ * stands, with no model call in between: what they copied is already the fact.
+ */
+export interface CopiedMessage {
+  type: "copied";
+  url: string;
+  title: string;
+  text: string;
+}
+
+export type ContentToWorker =
+  | IdleMessage
+  | LogMessage
+  | AcceptMessage
+  | DismissMessage
+  | SeenMessage
+  | CopiedMessage;
 
 // ---------------------------------------------------------------------------
 // Worker → content

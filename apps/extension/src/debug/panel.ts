@@ -164,7 +164,7 @@ export function createDebugPanel(doc: Document = document, opts: DebugPanelOptio
    * The panel's only key listener, and it is on the panel. Esc closes it;
    * Tab is left to move focus between the panel's own buttons, which it can
    * only do once the panel has focus. A key pressed on the page never
-   * reaches here, so carat's own Tab is never taken.
+   * reaches here, so the page's Tab is never taken.
    */
   const onKeydown = (e: KeyboardEvent): void => {
     keys++;

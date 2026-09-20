@@ -43,6 +43,11 @@ export interface Protocol {
   resumeTab(data: { tabId: number }): void;
   getSettings(): Settings;
   setSettings(s: Partial<Settings>): Settings;
+  /**
+   * Background to the offscreen document: paste and hand back what came out.
+   * A service worker has no DOM, so this is the only way to read the clipboard.
+   */
+  readClipboard(): { text: string };
 }
 
 export const { sendMessage, onMessage } = defineExtensionMessaging<Protocol>();

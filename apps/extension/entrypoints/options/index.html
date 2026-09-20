@@ -77,8 +77,8 @@
       <h1>Carat settings</h1>
       <p class="lede">
         Carat reads the page as Chrome's accessibility tree, asks one model what you are most likely to do next, and
-        offers it. <b>Tab</b> accepts, <b>Esc</b> dismisses, <b>Ctrl+→</b> takes one word of ghost text. Something that
-        cannot be undone wants Tab twice.
+        offers it. A tap of the <b>right Shift</b> accepts, <b>Esc</b> dismisses, <b>Ctrl+→</b> takes one word of ghost
+        text. Something that cannot be undone wants the key twice. Tab stays the browser's.
       </p>
 
       <div id="offline">
@@ -132,13 +132,13 @@
           <input type="checkbox" name="actionsEnabled" />
           <span class="name">Next-action suggestions</span>
         </label>
-        <span class="hint">A chip beside the control Carat thinks you want next. Tab presses it, fills it, picks the option, or reads on down the page.</span>
+        <span class="hint">A chip beside the control Carat thinks you want next. The key presses it, fills it, picks the option, or reads on down the page.</span>
 
         <label class="row">
           <input type="checkbox" name="textEnabled" />
           <span class="name">Ghost text while you type</span>
         </label>
-        <span class="hint">Pause in a field and Carat writes the rest of the line in grey after the caret. Tab takes it, Ctrl+→ takes one word, Esc drops it. Never in a password, card or one-time-code field.</span>
+        <span class="hint">Pause in a field and Carat writes the rest of the line in grey after the caret. The key takes it, Ctrl+→ takes one word, Esc drops it. Never in a password, card or one-time-code field.</span>
 
         <label class="row">
           <input type="checkbox" name="memoryEnabled" />
@@ -146,13 +146,43 @@
         </label>
         <span class="hint">When you leave a page, Carat asks the model to note the facts on it you might act on elsewhere, keeps them for an hour in session memory, and includes them in later prompts. The page's visible text is sent to the API to do this. Off by default. Skipped on blocklisted sites and pages with a password field.</span>
 
+        <label class="row">
+          <input type="checkbox" name="listenEnabled" />
+          <span class="name">Listen through the microphone</span>
+        </label>
+        <span class="hint">
+          The microphone runs in the background whenever a Chrome window is focused, and stops when you leave Chrome.
+          Speech is sent to OpenAI to be transcribed; the audio is never stored. The transcript is distilled into the
+          same notes reading memory keeps, for an hour in session memory, and then dropped. Off by default. Chrome asks
+          for microphone access the first time, on this page.
+        </span>
+        <div class="actions">
+          <button type="button" id="mic">Enable microphone</button>
+          <span id="micStatus" role="status" aria-live="polite" class="hint"></span>
+        </div>
+
+        <h2>Clipboard</h2>
+
+        <p class="hint">
+          What you copy on a page is always a note: Carat sees the copy without asking for anything, and keeps the text
+          for an hour like everything else it reads. Nothing is kept from a copy made in a password, card or one-time-code
+          field, from a page showing a password field, or from a blocklisted site, and text shaped like a password, a key
+          or a card number is dropped whatever field it came from.
+        </p>
+
+        <label class="row">
+          <input type="checkbox" name="clipboardRead" />
+          <span class="name">Read the system clipboard</span>
+        </label>
+        <span class="hint">Off unless you turn it on, and it saves itself the moment you do. When on, Carat also reads what you last copied anywhere else on this computer, including other apps and other Chrome profiles. Chrome asks you for the permission when you tick the box and Carat gives it back when you untick it, along with everything that permission produced. It reads at most once every five seconds, only when you switch tabs or a page loads, never while the tab in front is blocklisted or showing a password field, and keeps only a hash of the last text between reads.</span>
+
         <h2>Display</h2>
 
         <label class="row">
           <input type="checkbox" name="sound" />
-          <span class="name">Sound on Tab</span>
+          <span class="name">Sound on accept</span>
         </label>
-        <span class="hint">A short note when a chip is accepted, a softer one on Esc, and a rising pair when an action arms for its second Tab. Synthesized in the page at the moment you press the key.</span>
+        <span class="hint">A short note when a chip is accepted, a softer one on Esc, and a rising pair when an action arms for its second tap. Synthesized in the page at the moment you press the key.</span>
 
         <label class="row">
           <input type="checkbox" name="statusLine" />

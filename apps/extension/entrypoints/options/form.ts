@@ -1,7 +1,7 @@
 import { DEFAULT_SETTINGS, indexPrefix, type Settings } from '@/src/engine/shared/settings';
 
 const TEXT_KEYS = ['apiKey', 'baseUrl', 'textModel', 'actionModel', 'elasticUrl', 'elasticApiKey', 'elasticIndexPrefix', 'elasticInferenceId'] as const;
-const BOOL_KEYS = ['enabled', 'textEnabled', 'actionsEnabled', 'memoryEnabled', 'sound', 'statusLine'] as const;
+const BOOL_KEYS = ['enabled', 'textEnabled', 'actionsEnabled', 'memoryEnabled', 'listenEnabled', 'sound', 'statusLine'] as const;
 const TIERS: ReadonlySet<Settings['serviceTier']> = new Set(['auto', 'default', 'priority']);
 
 function input(form: HTMLFormElement, name: string): HTMLInputElement {
@@ -11,6 +11,9 @@ function input(form: HTMLFormElement, name: string): HTMLInputElement {
 export function renderForm(form: HTMLFormElement, s: Settings): void {
   for (const k of TEXT_KEYS) input(form, k).value = s[k];
   for (const k of BOOL_KEYS) input(form, k).checked = s[k];
+  // Ours: the clipboard box is not part of Save. It needs a user gesture to
+  // ask Chrome for the permission, so it saves itself the moment it is ticked.
+  input(form, 'clipboardRead').checked = s.clipboardRead;
   (form.elements.namedItem('serviceTier') as HTMLSelectElement).value = s.serviceTier;
   (form.elements.namedItem('blocklist') as HTMLTextAreaElement).value = s.blocklist.join('\n');
 }
@@ -37,6 +40,34 @@ export function readForm(form: HTMLFormElement): Partial<Settings> {
   };
   for (const k of BOOL_KEYS) patch[k] = input(form, k).checked;
   return patch;
+}
+
+/** Ours: the optional permission behind "Read the system clipboard". */
+export const CLIPBOARD_PERMISSION = 'clipboardRead' as const;
+
+/** The slice of `chrome.permissions` the toggle uses. Both calls need a user gesture. */
+export interface PermissionsApi {
+  request(p: { permissions: chrome.runtime.ManifestPermission[] }): Promise<boolean>;
+  remove(p: { permissions: chrome.runtime.ManifestPermission[] }): Promise<boolean>;
+}
+
+/**
+ * Turn the clipboard permission on or off, and say where the box should end
+ * up. Chrome asks the user on `request`, so a refusal, a missing
+ * `chrome.permissions` and a call that throws all leave the setting off: the
+ * box reverts rather than promising a read that cannot happen.
+ */
+export async function setClipboardPermission(api: PermissionsApi | undefined, want: boolean): Promise<boolean> {
+  if (!api) return false;
+  try {
+    if (!want) {
+      await api.remove({ permissions: [CLIPBOARD_PERMISSION] });
+      return false;
+    }
+    return (await api.request({ permissions: [CLIPBOARD_PERMISSION] })) === true;
+  } catch {
+    return false;
+  }
 }
 
 const MAX_BLOCKED_HOSTS = 200;
