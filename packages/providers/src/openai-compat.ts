@@ -4,8 +4,10 @@ import {
   LIMITS,
   NEXT_ACTION_RESPONSE_FORMAT,
   TRANSCRIBE_PROMPT,
+  buildGhostMessages,
   buildNextActionMessages,
   buildWarmupMessages,
+  cleanGhost,
   distillMessages,
   fnv1a,
   normalizeWhitespace,
@@ -14,7 +16,7 @@ import {
   stripFences,
   truncate,
 } from '@carat/shared';
-import type { NextOptions, VisionProvider } from './provider';
+import type { CompleteOptions, CompleteRequest, NextOptions, VisionProvider } from './provider';
 
 export type OutputMode = 'json_schema' | 'json_object' | 'prompt';
 
@@ -126,6 +128,41 @@ export class OpenAICompatProvider implements VisionProvider {
     opts.onRaw?.(text);
     const parsed = parseNextAction(text);
     return parsed.ok ? parsed.action : null;
+  }
+
+  /**
+   * The ghost: a short continuation of what the user is typing, streamed as
+   * plain text. No JSON mode and no reasoning, because the answer is a phrase
+   * and the user is waiting on it mid-keystroke. `onDelta` sees the cleaned
+   * text after every chunk, so the first token is grey on the page while the
+   * rest is still being written. An abort, a refusal or a failure all resolve
+   * to '': nothing to continue is a real answer here, and it hands Tab back
+   * to the next-action path.
+   */
+  async complete(req: CompleteRequest, opts: CompleteOptions): Promise<string> {
+    if (opts.signal.aborted) return '';
+    const body: Record<string, unknown> = {
+      model: this.options.model,
+      messages: buildGhostMessages(req),
+      stream: true,
+      max_completion_tokens: req.maxTokens,
+      ...(req.page ? { prompt_cache_key: cacheKey(req.page.host, req.page.path) } : {}),
+      // A phrase in the user's own voice; thinking about it first only costs them the pause.
+      ...(this.options.reasoningEffort ? { reasoning_effort: 'none' } : {}),
+    };
+    let shown = '';
+    try {
+      const text = await this.stream(body, opts.signal, (soFar) => {
+        if (!opts.onDelta) return;
+        const cleaned = cleanGhost(soFar, req.singleLine);
+        if (cleaned === shown) return;
+        shown = cleaned;
+        opts.onDelta(cleaned);
+      });
+      return text === null ? '' : cleanGhost(text, req.singleLine);
+    } catch {
+      return '';
+    }
   }
 
   /**

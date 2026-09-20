@@ -1,4 +1,4 @@
-import type { ImageInput, NextAction, NextActionRequest, Settings } from '@carat/shared';
+import type { GhostRequest, ImageInput, NextAction, NextActionRequest, Settings } from '@carat/shared';
 import { JevProvider } from './jev';
 import { LocalProvider } from './local';
 import { OpenAICompatProvider } from './openai-compat';
@@ -21,6 +21,20 @@ export interface NextOptions {
   onRaw?: (text: string) => void;
 }
 
+/** The ghost's question: the text so far, plus the page it is being typed on. */
+export interface CompleteRequest extends GhostRequest {
+  /** 24 for a one-line field, 48 for a textarea or an editor. */
+  maxTokens: number;
+  /** For the prompt cache key, which is one entry per origin and path. */
+  page?: { host: string; path: string };
+}
+
+export interface CompleteOptions {
+  signal: AbortSignal;
+  /** The cleaned text so far, after every chunk, so the first token is drawn before the last arrives. */
+  onDelta?: (soFar: string) => void;
+}
+
 /** One page in, one action out. Swapping providers only ever means implementing this. */
 export interface Provider {
   readonly id: Settings['provider'];
@@ -33,6 +47,13 @@ export interface Provider {
    * no network behind them leave it out.
    */
   warm?(req: NextActionRequest, opts: { signal: AbortSignal }): Promise<void>;
+  /**
+   * The grey text after the caret: a short continuation of what the user is
+   * typing, as plain text. Empty means "nothing to add", which is how Tab
+   * goes back to the next-action path. Providers with no network behind them
+   * leave it out.
+   */
+  complete?(req: CompleteRequest, opts: CompleteOptions): Promise<string>;
 }
 
 /** The model that also reads screenshots and distills a page the user left into notes. */
@@ -69,6 +90,16 @@ export function createProvider(settings: Settings, fetchImpl: typeof fetch = fet
 export function createVisionProvider(settings: Settings, fetchImpl: typeof fetch = fetch, relax?: RelaxStore): VisionProvider | undefined {
   if (settings.provider === 'local') return undefined;
   return chatProvider(settings, settings.smartModel || settings.model, 'low', fetchImpl, relax) ?? undefined;
+}
+
+/**
+ * The model behind the ghost: the fast one the engine already uses, with no
+ * reasoning. Undefined when there is no chat model, since neither the regex
+ * placeholder nor Jev can write a sentence.
+ */
+export function createCompleter(settings: Settings, fetchImpl: typeof fetch = fetch, relax?: RelaxStore): OpenAICompatProvider | undefined {
+  if (settings.provider === 'local') return undefined;
+  return chatProvider(settings, settings.model, 'none', fetchImpl, relax) ?? undefined;
 }
 
 function chatProvider(
