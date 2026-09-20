@@ -80,6 +80,20 @@ export const KEYCAP = {
 } as const;
 
 /**
+ * The keycap, as declarations rather than a whole rule, so the chip's pill
+ * and the hint at the end of ghost text draw the same key to the pixel.
+ */
+export const KEYCAP_CSS = `
+  display: inline-block;
+  padding: ${KEYCAP.padYPx}px ${KEYCAP.padXPx}px;
+  border-radius: ${KEYCAP.radiusPx}px;
+  background: #313244;
+  color: #cdd6f4;
+  border: ${KEYCAP.borderPx}px solid #45475a;
+  font: 600 ${KEYCAP.fontPx}px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+`;
+
+/**
  * Classes that only mean anything as an animation. Under
  * `prefers-reduced-motion` none of them is ever put on the pill; the static
  * states (`is-still`, `is-armed`, `is-press`) carry the meaning instead.
@@ -201,15 +215,7 @@ kbd.is-press { background: #232334; color: #9399b2; }
 }
 /* Sized off the label, not off itself: see KEYCAP above. */
 kbd {
-  all: initial;
-  display: inline-block;
-  padding: ${KEYCAP.padYPx}px ${KEYCAP.padXPx}px;
-  border-radius: ${KEYCAP.radiusPx}px;
-  background: #313244;
-  color: #cdd6f4;
-  border: ${KEYCAP.borderPx}px solid #45475a;
-  font: 600 ${KEYCAP.fontPx}px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-}
+  all: initial;${KEYCAP_CSS}}
 `;
 
 /**
