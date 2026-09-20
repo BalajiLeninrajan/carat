@@ -167,32 +167,34 @@ function saysNothingNew(fact: string, title: string, url: string): boolean {
 // ---------------------------------------------------------------------------
 // Read
 
-export async function recordSeen(msg: SeenMessage, settings: Settings): Promise<void> {
+export async function recordSeen(msg: SeenMessage, settings: Settings): Promise<Note[]> {
   const skip = transientReason(msg);
   if (skip) {
     console.log(`[carat] not noting ${hostOf(msg.url)}: ${skip}`);
-    return;
+    return [];
   }
   const text = msg.text.trim();
-  if (lastSeen.get(msg.url) === text) return;
+  if (lastSeen.get(msg.url) === text) return [];
   lastSeen.set(msg.url, text);
 
   const started = performance.now();
   const content = `<page title="${msg.title.replace(/"/g, "'")}" url="${msg.url}">\n${text}\n</page>`;
   const distilled = await extract(settings, READ_INSTRUCTIONS, content);
-  if (!distilled) return;
+  if (!distilled) return [];
   const facts = distilled.filter((f) => !saysNothingNew(f, msg.title, msg.url));
   console.log(
     `[carat] noted ${facts.length} from ${hostOf(msg.url)} · ${Math.round(performance.now() - started)}ms` +
       (facts.length ? "\n" + facts.map((f) => `  - ${f}`).join("\n") : ""),
   );
-  if (!facts.length) return;
+  if (!facts.length) return [];
 
   const now = Date.now();
   // Replace earlier notes from the same page: the newest reading supersedes them.
   const kept = (await load()).filter((n) => n.source !== "read" || n.url !== msg.url);
   const added: Note[] = facts.map((text) => ({ at: now, source: "read", url: msg.url, title: msg.title, text }));
   await chrome.storage.session.set({ [NOTES_KEY]: [...kept, ...added].slice(-MAX_NOTES) });
+  // Ours: the caller forwards these to the Elastic context layer.
+  return added;
 }
 
 // ---------------------------------------------------------------------------

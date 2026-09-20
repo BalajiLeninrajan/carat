@@ -134,6 +134,118 @@ Four sections:
 - **Timeline.** The tab's history entries and the scheduler's own events in one scrolling log: which trigger asked and what refused it, memo hits, snoozes and lost tickets, each with a relative timestamp.
 - **Gate.** The last verdict and every precondition behind it: the global switch, the per-site switch, the denylist, a password field, whether there was a snapshot at all, whether the tab is hidden, and how much of a Shift+Tab minute is left.
 
+## Elasticsearch context layer
+
+Carat can optionally use Elasticsearch as its longer-lived context layer. In
+the options page, fill in:
+
+- Elasticsearch URL
+- Elasticsearch API key
+- Index prefix, default `carat`
+- Optional inference endpoint id, or `default`
+
+With a URL and API key set, the background worker auto-creates five indices:
+
+- `<prefix>-observations`: the page as Chrome's accessibility tree, read over the Chrome DevTools Protocol — the same outline the model is given, not a separate DOM scrape
+- `<prefix>-facts`: distilled actionable facts, from pages the user left and from anything the microphone heard when listening is on
+- `<prefix>-actions`: accepted and dismissed Carat suggestions
+- `<prefix>-details`: what Carat knows about a person — name parts, email, phone, postal code — keyed by who it is about
+- `<prefix>-tasks`: unresolved tasks grouped from facts by action type, likely entity and date bucket, carrying `status: conflict` and a reason when two sources disagree
+
+It also auto-creates an ingest pipeline named `<prefix>-carat-ingest` and sends
+every write through it. The pipeline adds `received_at`, normalized host/origin
+fields, lightweight ECS-style `event.*` metadata, `carat.*` schema metadata,
+and redacts card-like digit sequences before the document is indexed. Carat
+still does app-level extraction and conflict detection before indexing; the
+ingest pipeline handles Elastic-native normalization and safety cleanup at
+write time.
+
+If the inference endpoint id is blank, retrieval is BM25/full-text only. Set it
+to `default` to use Elastic's deployment default `semantic_text` endpoint, or to
+a specific `semantic_text` inference endpoint id. New indices then include a
+`text_semantic` field and Carat retrieves with RRF over BM25 plus semantic
+matching. The extension does not create custom inference endpoints itself;
+create one in Elastic/Kibana first if you do not want to use `default`.
+Existing indices are left alone, so delete the demo indices or use a fresh
+prefix after changing the inference endpoint.
+
+Every write is fed by the CDP path rather than the DOM: `getTree` pulls the
+accessibility tree, `buildOutline` renders it, and that text is what is
+indexed, so what Elasticsearch remembers and what the model reads are the same
+thing. Facts arrive from `recordSeen`, which hands back what it distilled.
+
+Not everything worth remembering is an errand. A conversation gives away who
+people are, and a form asks for exactly that, so personal details live in
+`<prefix>-details` rather than in the task index: they are reference data, they
+never expire, and filling a form with one does not use it up.
+
+Each document is one person's one detail, and **who it is about is the point**.
+"My name is X" is the person at the keyboard; "is your name X" said to them by
+somebody else, or "booking the ticket for X", is a different person — the one
+they are filling the form *for*. Carat files those separately and never assumes
+a form is about the user. When a page has fields for personal details, every
+person it knows is offered, each labelled, and if more than one could fill the
+form it says so and leaves the choice to the form's own labels: passenger,
+main contact, account holder.
+
+Identity is resolved on the given name, so a surname heard two ways is one
+person in dispute rather than two people:
+
+```
+[task] personal_detail for Pez Kwan — still to enter: given_name="Pez",
+  family_name="Kwan" — conflict: family_name has been given as Guan / Kwan,
+  so do not fill it
+```
+
+Two real people sharing a first name would merge, which is the price of
+catching the misheard surname that actually happens.
+
+A task is not one step but the fields the destination will ask for. The plan
+above becomes a `calendar_event` carrying `title`, `when` and `location`, and
+those fields are what drive it home: the retrieved line names the ones still
+outstanding and the exact value for each, so the model puts a string in a box
+rather than being handed a paragraph and left to guess.
+
+What a finished chip does to a task depends on what the chip was. A `fill`,
+`select` or `submit` completes the one field it entered, and only the last
+field closes the task out. A `switch` or an `open` completes nothing — it is a
+step toward the task, not the doing of it — so it refreshes the task instead,
+which is what carries it across the five-minute window onto the surface that
+finishes it. A dismissal never spends a field.
+
+Distilled facts also pass through a small messy-context resolver. A fact like
+`Dinner at Seven Shores Cafe on Friday at 6` becomes an unresolved
+`calendar_event` task. If another source later says the same event is at 7,
+the task keeps one document and flips to `status: conflict` with a
+`conflictReason`, so the disagreement travels with the task rather than beside
+it.
+
+Before each model call, Carat works out what the page in front of the user can
+actually finish. The host decides when it is one of Carat's own destinations
+(Calendar, Maps, Gmail) and then it decides alone; otherwise the capability has
+to be named by a control the model could type into, so an article that merely
+mentions a date does not claim to be a calendar. Retrieval is then two queries
+run side by side under a single deadline, over two different windows, because a
+task and a fact age differently:
+
+- **the task**: `<prefix>-tasks`, unresolved or in conflict, filtered to that
+  capability, from the last **5 minutes** — hot intent, the same window the
+  cleanup sweep expires tasks on. Ranked by relevance to the page rather than
+  recency, with conflicts boosted, and capped at one.
+- **the context behind it**: `<prefix>-observations` and `<prefix>-facts` from
+  the last **12 hours**, hybrid-ranked, capped at three.
+
+An ES|QL rollup adds one line counting what is still open, and only runs when
+the page can complete something. The result reaches the model as one `[task]`
+line naming the single thing to finish and a few `[elasticsearch]` lines
+supporting it, merged into the `<notes>` block that `predictAction` is given —
+the task line goes in front of the user's own notes, the supporting lines
+behind them, so retrieved context can never push out what the user actually
+read. When the task line says `conflict`, the prompt tells the
+model not to fill the disputed detail. Accepting or dismissing a chip runs a
+delete-by-query that closes the matching task out, so the loop ends where it
+started.
+
 ## Tests and eval
 
 ```

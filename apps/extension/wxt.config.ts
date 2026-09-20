@@ -7,7 +7,9 @@ export default defineConfig({
     // debugger: the engine reads every page through Accessibility.getFullAXTree and acts through CDP.
     // webNavigation: visits.ts logs every top-level navigation into the timeline.
     // search: the "open" kind runs a query with the user's own default engine.
-    permissions: ['debugger', 'storage', 'tabs', 'webNavigation', 'search'],
+    // alarms: the Elastic sweep expires open tasks off the prediction path, and
+    // a service worker is suspended too often for setInterval to be the timer.
+    permissions: ['debugger', 'storage', 'tabs', 'webNavigation', 'search', 'alarms'],
     host_permissions: ['<all_urls>'],
     commands: {
       'carat-suggest': {
