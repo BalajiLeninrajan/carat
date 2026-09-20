@@ -213,6 +213,10 @@ kbd.is-bump { animation: carat-bump var(--carat-bump-ms) ease-out; }
 .chip.is-banner .sub { font-size: 12px; }
 .chip.is-banner .pending { width: 9px; height: 9px; margin-left: -6px; }
 .chip.is-banner kbd { padding: 5px 10px; font-size: 13px; }
+/* The accept flash: the pill with one quiet line in it and nothing to press. */
+.chip.is-flash { padding: 8px 14px; cursor: default; opacity: 0.9; }
+.chip.is-flash .label { display: none; }
+.chip.is-flash .sub { font-size: 12px; }
 kbd {
   all: initial;
   display: inline-block;
