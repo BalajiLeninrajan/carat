@@ -11,7 +11,7 @@ import {
   type FieldInfo,
   type WorkerToContent,
 } from '../src/engine/shared/protocol';
-import { isSensitiveField, maskSensitive } from '../src/engine/shared/redact';
+import { isSensitiveField, looksSecret, maskSensitive } from '../src/engine/shared/redact';
 import { onMessage, safeSendMessage } from '../src/messaging';
 import { hasMoreBelow, scrollPageDown } from '../src/scroll';
 import { createStatusLine } from '../src/status';
@@ -706,6 +706,7 @@ export default defineContentScript({
         field: f ? fieldInfo(f) : null,
         moreBelow: hasMoreBelow(window, document),
         selection,
+        password: hasPasswordField(),
       });
       pageChanged = false;
     }
@@ -773,11 +774,15 @@ export default defineContentScript({
       return maskSensitive(lines.join('\n')).slice(0, MAX_SEEN_CHARS);
     }
 
+    function hasPasswordField(): boolean {
+      return document.querySelector('input[type=password]') !== null;
+    }
+
     function sendSeen(): void {
       if (!visibleSince || Date.now() - visibleSince < MIN_DWELL_MS) return;
       visibleSince = 0;
       // A page asking for a password is not one to remember.
-      if (document.querySelector('input[type=password]')) return;
+      if (hasPasswordField()) return;
       const text = visibleText();
       if (text.length >= 40) post({ type: 'seen', url: location.href, title: document.title, text });
     }
@@ -786,6 +791,53 @@ export default defineContentScript({
       if (document.visibilityState === 'hidden') sendSeen();
       else visibleSince = Date.now();
     });
+
+    // -----------------------------------------------------------------------
+    // Ours: what the user copies here. No permission is needed for this half —
+    // the page fires `copy` and `cut` at the content script already — so it is
+    // always on, and the text goes to the worker as it stands.
+
+    /** Below this a copy says nothing; a stray Ctrl+C on one character is not a fact. */
+    const MIN_COPY_CHARS = 2;
+    const MAX_COPY_CHARS = 1000;
+    /** The last copy sent, so one Ctrl+C held down does not send twice. */
+    let lastCopy = '';
+
+    /**
+     * What the copy will carry. A selection inside an input or a textarea is
+     * not part of the document's selection in every engine, so the focused
+     * field is read directly when it is the one with the selection in it.
+     */
+    function copiedText(): string {
+      const f = asTextField(deepActive());
+      if (f) {
+        if (isSensitiveField(f)) return '';
+        try {
+          const { selectionStart, selectionEnd } = f;
+          if (selectionStart != null && selectionEnd != null && selectionEnd > selectionStart) {
+            return f.value.slice(selectionStart, selectionEnd).replace(/\s+/g, ' ').trim();
+          }
+        } catch {
+          // no selection API on this input type
+        }
+      }
+      return (getSelection()?.toString() ?? '').replace(/\s+/g, ' ').trim();
+    }
+
+    function onCopy(): void {
+      if (!ctx.isValid) return;
+      // A page asking for a password is not one to copy out of.
+      if (hasPasswordField()) return;
+      const text = copiedText().slice(0, MAX_COPY_CHARS);
+      // A copy carries no field to judge it by, so the shape of the string decides.
+      if (text.length < MIN_COPY_CHARS || text === lastCopy || looksSecret(text)) return;
+      lastCopy = text;
+      post({ type: 'copied', url: location.href, title: document.title, text });
+      log(`copied "${clip(text, 60)}"`);
+    }
+
+    document.addEventListener('copy', onCopy, true);
+    document.addEventListener('cut', onCopy, true);
 
     // -----------------------------------------------------------------------
     // The status pill, and the two shortcuts the worker relays here

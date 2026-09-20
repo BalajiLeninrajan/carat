@@ -1,6 +1,6 @@
 import { sendMessage } from '@/src/messaging';
 import type { Settings } from '@/src/engine/shared/settings';
-import { readForm, renderForm } from './form';
+import { readForm, renderForm, setClipboardPermission } from './form';
 
 const app = document.getElementById('app') as HTMLElement;
 const form = document.getElementById('form') as HTMLFormElement;
@@ -53,6 +53,24 @@ form.addEventListener('submit', async (e) => {
 
 form.addEventListener('input', () => {
   if (status.textContent === 'Saved') setStatus('');
+});
+
+// Ours: the permission is asked for on the click itself, because Chrome only
+// prompts during a user gesture. A refusal puts the box back, and either way
+// the setting is saved at once rather than waiting for Save: the background
+// drops what it read from the clipboard the moment this goes off.
+const clipboardRead = form.elements.namedItem('clipboardRead') as HTMLInputElement;
+clipboardRead.addEventListener('change', async () => {
+  const want = clipboardRead.checked;
+  const granted = await setClipboardPermission(chrome.permissions, want);
+  clipboardRead.checked = granted;
+  if (want && !granted) setStatus('Chrome did not grant the clipboard permission', true);
+  try {
+    render(await withTimeout(sendMessage('setSettings', { clipboardRead: granted })));
+    if (granted === want) setStatus('Saved');
+  } catch (err) {
+    setStatus(err instanceof Error ? err.message : 'Save failed', true);
+  }
 });
 
 retryButton.addEventListener('click', () => void load());
