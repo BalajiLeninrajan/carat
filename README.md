@@ -63,6 +63,14 @@ Validation in the service worker is about safety, not taste. It never overrules 
 
 There is no denylist of destructive names. The model returns an `irreversible` flag, and a regex over the label and the control's name is the backstop. An irreversible chip arms on the first Tab: it turns amber and says `Press Tab again to click "Send reply"`. The second Tab within four seconds does it; any other key, or the four seconds, stands it down. Paying, buying and booking are irreversible actions like any other: two Tabs, and no setting hides them.
 
+## Feel
+
+A chip has to be found before it can be answered, and a Tab that lands has to be felt. A new chip springs in over 180 ms on an ease-out-back curve, and one soft ring expands off it and fades over 600 ms; a field chip also draws a 1.5 px accent hairline round the control it is about, which fades over 900 ms, so the pill and its target read as one thing. The bottom banner rises 8 px into place instead. When the model replaces what the placeholder offered, the words cross-fade and the keycap nods for 80 ms. A chip nobody has answered after eight seconds gets one gentle pulse, 400 ms, and then lets it be.
+
+Tab presses the keycap down for 90 ms, collapses the chip toward the control over 160 ms, and leaves a bloom on the control itself that grows from 2 px to 6 px over 450 ms, with a ripple out of a clicked button and a moment of 8% accent under a field carat just filled. A scroll banner sweeps upward as the page moves; an `open` or a `switch` shrinks toward the tab strip. An irreversible chip breathes amber on a 1.4 second cycle until its second Tab, which is the only thing here that loops besides the waiting dot. Esc fades the chip and drops it 4 px over 120 ms, and the offer that follows a refusal arrives on the same spring without the ring, so a second try is quieter than a first. Anything else the user does still clears the chip on the frame they do it, mid-animation or not. Every duration, easing and accent is a custom property on the chip's shadow root, so the whole feel is tuned in one block, and nothing carat draws is a style on the page's own elements, so no layout moves. Under `prefers-reduced-motion` none of it moves: the same states are there standing still, the pulse becomes a steady accent edge, and the ripple does not happen at all.
+
+"Sound on Tab" in the options page, on by default, adds a note to the same moments. Two sine partials around 880 and 1320 Hz for 70 ms when a chip is accepted, a softer 440 Hz for 50 ms when Esc turns one down, and a rising pair when an irreversible chip arms. They are synthesized in the page from the Web Audio API, so there is no audio file to ship, and the AudioContext is built on the first accepted Tab and never before: every sound follows a keypress, which is the gesture Chrome wants before a page may make one.
+
 ## How readily it offers
 
 | Level | Floor | The model's last rule |

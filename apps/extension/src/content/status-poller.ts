@@ -1,3 +1,4 @@
+import type { StatusInfo } from '../background/status';
 import type { StatusLine } from '../status';
 import type { ScriptContext } from './context';
 import { send } from './send';
@@ -8,6 +9,15 @@ export const STATUS_TIMING = {
   /** The snooze countdown on the pill moves a second at a time. */
   quietTickMs: 1000,
 } as const;
+
+export interface StatusOptions {
+  /**
+   * Every status the background answers with, not only the ones the line
+   * shows. The chip's sound setting rides on it, so a change on the options
+   * page reaches an open tab within a poll instead of on the next load.
+   */
+  onInfo?(info: StatusInfo): void;
+}
 
 export interface StatusHandle {
   /** Ask the background again now: after a request, on becoming visible. */
@@ -21,7 +31,7 @@ export interface StatusHandle {
  * Keeps the status line current. The background computes everything; the
  * content script never reads settings itself, so the key stays where it is.
  */
-export function startStatus(ctx: ScriptContext, line: StatusLine, doc: Document = document): StatusHandle {
+export function startStatus(ctx: ScriptContext, line: StatusLine, doc: Document = document, opts: StatusOptions = {}): StatusHandle {
   let seq = 0;
   let quietUntil: number | null = null;
   let quietTimer: number | null = null;
@@ -54,6 +64,7 @@ export function startStatus(ctx: ScriptContext, line: StatusLine, doc: Document 
     const mine = ++seq;
     const info = await send('getStatus', undefined);
     if (mine !== seq || !ctx.isValid || !info) return;
+    opts.onInfo?.(info);
     line.update(info);
   };
 
