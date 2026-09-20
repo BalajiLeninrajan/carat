@@ -16,6 +16,8 @@ const req: NextActionRequest = {
   eagerness: 'eager',
 };
 
+const GOAL = 'book a flight ZRH to LON on Friday, cheapest';
+
 describe('buildNextActionMessages', () => {
   it('is byte-stable for the same request', () => {
     expect(JSON.stringify(buildNextActionMessages(req))).toBe(JSON.stringify(buildNextActionMessages(req)));
@@ -52,6 +54,19 @@ describe('buildNextActionMessages', () => {
     expect(turn.indexOf('<history>')).toBeLessThan(turn.indexOf('<tabs>'));
     expect(turn.indexOf('<tabs>')).toBeLessThan(turn.indexOf('<page '));
     expect(turn.trimEnd().endsWith(`${req.outline}\n</page>`)).toBe(true);
+  });
+
+  it('puts the goal at the head of the prefix, in front of the notes', () => {
+    const turn = renderRequest({ ...req, goal: GOAL });
+    expect(turn).toContain(`<goal>\n${GOAL}\n</goal>`);
+    expect(turn.indexOf('<goal>')).toBeLessThan(turn.indexOf('<notes>'));
+    // And nowhere near the page, which is what a request pays for twice.
+    expect(turn.indexOf('<goal>')).toBeLessThan(turn.indexOf('<page '));
+  });
+
+  it('leaves the block out entirely when carat has no goal, so those requests send the bytes they always did', () => {
+    expect(renderRequest(req)).not.toContain('<goal>');
+    expect(renderPrefix({ ...req, goal: '   ' })).toBe(renderPrefix(req));
   });
 
   it('says so when a block is empty, rather than leaving it out', () => {
@@ -96,6 +111,18 @@ describe('the warm-up request', () => {
     // And byte for byte across the whole prompt up to where the page begins.
     const head = (msgs: ChatMessage[]): string => msgs.map((m) => `${m.role}\n${m.content}`).join('\n').split('<now>')[0]!;
     expect(head(warm)).toBe(head(real));
+  });
+
+  it('carries the goal too, so the bytes still match once carat has one', () => {
+    const withGoal = { ...req, goal: GOAL };
+    const warm = buildWarmupMessages(withGoal);
+    const real = buildNextActionMessages(withGoal);
+    expect(JSON.stringify(warm.slice(0, -1))).toBe(JSON.stringify(real.slice(0, -1)));
+    const prefix = renderPrefix(withGoal);
+    expect(real.at(-1)!.content.slice(0, prefix.length)).toBe(prefix);
+    expect(warm.at(-1)!.content.slice(0, prefix.length)).toBe(prefix);
+    // A goal that changes is a prefix that changes: the one cache miss this costs.
+    expect(prefix).not.toBe(renderPrefix(req));
   });
 
   it('is the same bytes whatever the outline and the clock were', () => {
