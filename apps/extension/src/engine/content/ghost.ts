@@ -5,10 +5,16 @@
  * exactly over the field, with the field's font, padding, border widths,
  * alignment and wrapping copied over. It holds the field's current text in a
  * transparent span (so glyph advance matches to the pixel) followed by the
- * suggestion in a dimmed span. The mirror scrolls with the field and never
- * takes pointer events. Its host is aria-hidden so the suggestion never shows
- * up in the accessibility tree Carat reads.
+ * suggestion in a dimmed span, and then the Tab keycap that takes it. The
+ * mirror scrolls with the field and never takes pointer events. Its host is
+ * aria-hidden so the suggestion never shows up in the accessibility tree
+ * Carat reads.
+ *
+ * None of this is in the field: the value, the caret and every measurement
+ * taken off them are the page's own and are never touched.
  */
+
+import { KEYCAP_CSS, TAB_GLYPH } from "../../chip/styles";
 
 type TextField = HTMLInputElement | HTMLTextAreaElement;
 
@@ -27,11 +33,30 @@ export class Ghost {
   private inner!: HTMLDivElement;
   private typedSpan!: HTMLSpanElement;
   private ghostSpan!: HTMLSpanElement;
+  /** The suggestion's last word and the keycap, kept on one line together. */
+  private tailSpan!: HTMLSpanElement;
+  private wordSpan!: HTMLSpanElement;
+  private hint!: HTMLElement;
   private field: TextField | null = null;
   private frame = 0;
 
   get element(): HTMLElement | null {
     return this.host;
+  }
+
+  /**
+   * What the mirror is drawing, for tests: the shadow root is closed, so
+   * there is no other way to see it. `line` is every glyph in order, which is
+   * what says the keycap comes after the last one of the suggestion.
+   */
+  get drawn(): { ghost: string; hint: string | null; tail: string; line: string } | null {
+    if (!this.host || this.host.style.display === "none") return null;
+    return {
+      ghost: (this.ghostSpan.textContent ?? "") + (this.wordSpan.textContent ?? ""),
+      hint: this.hint.hidden ? null : this.hint.textContent,
+      tail: this.tailSpan.textContent ?? "",
+      line: this.inner.textContent ?? "",
+    };
   }
 
   private mount(): void {
@@ -48,12 +73,24 @@ export class Ghost {
       .single .inner { white-space: pre; }
       .multi .inner { white-space: pre-wrap; }
       .typed { color: transparent; }
-      .ghost { opacity: .45; }
-    </style><div class="box"><div class="inner"><span class="typed"></span><span class="ghost"></span></div></div>`;
+      .ghost, .tail { opacity: .45; }
+      /* The last word and the key travel together, so the key is never left
+         sitting on a line of its own. */
+      .tail { white-space: nowrap; }
+      kbd.hint {
+        all: initial;${KEYCAP_CSS}
+        margin-left: 4px;
+        vertical-align: middle;
+      }
+      kbd.hint[hidden] { display: none; }
+    </style><div class="box"><div class="inner"><span class="typed"></span><span class="ghost"></span><span class="tail"><span class="word"></span><kbd class="hint" aria-label="Tab">${TAB_GLYPH}</kbd></span></div></div>`;
     this.box = root.querySelector(".box")!;
     this.inner = root.querySelector(".inner")!;
     this.typedSpan = root.querySelector(".typed")!;
     this.ghostSpan = root.querySelector(".ghost")!;
+    this.tailSpan = root.querySelector(".tail")!;
+    this.wordSpan = root.querySelector(".word")!;
+    this.hint = root.querySelector("kbd.hint")!;
     document.documentElement.appendChild(this.host);
   }
 
@@ -67,9 +104,15 @@ export class Ghost {
       for (const p of COPIED) (this.box.style as any)[p] = cs[p];
       this.box.className = "box " + (multiline ? "multi" : "single");
       this.ghostSpan.style.color = cs.color;
+      this.tailSpan.style.color = cs.color;
     }
     this.typedSpan.textContent = field.value;
-    this.ghostSpan.textContent = suggestion;
+    // The key that takes the suggestion goes after its last glyph, sharing a
+    // no-wrap span with the last word so the two wrap as one.
+    const lastWord = suggestion.search(/\S+$/);
+    this.ghostSpan.textContent = lastWord > 0 ? suggestion.slice(0, lastWord) : lastWord === 0 ? "" : suggestion;
+    this.wordSpan.textContent = lastWord >= 0 ? suggestion.slice(lastWord) : "";
+    this.hint.hidden = suggestion === "";
     this.host!.style.display = "";
     cancelAnimationFrame(this.frame);
     const loop = () => {

@@ -9,8 +9,12 @@
  * suspended context on every tab and an autoplay warning in the console.
  */
 
-/** Overall loudness. Low enough to sit under a page's own audio, not over it. */
-const GAIN = 0.08;
+/**
+ * Overall loudness. Low enough to sit under a page's own audio, not over it,
+ * and halved again with the rest of the chip's feel: the note is a
+ * confirmation, not an announcement.
+ */
+const GAIN = 0.04;
 
 interface Tone {
   hz: number;
