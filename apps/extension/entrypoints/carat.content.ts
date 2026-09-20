@@ -15,7 +15,7 @@ import {
 import { isSensitiveField, looksSecret, maskSensitive } from '../src/engine/shared/redact';
 import { onMessage, safeSendMessage } from '../src/messaging';
 import { createQuiet } from '../src/quiet';
-import { hasMoreBelow, scrollPageDown } from '../src/scroll';
+import { caratScrolling, hasMoreBelow, scrollPageDown } from '../src/scroll';
 import { createStatusLine, PAUSED_NOTICE } from '../src/status';
 
 /** How long the user must be still, after interacting, before Carat looks at the page. */
@@ -28,6 +28,8 @@ const STATUS_POLL_MS = 5000;
 const PAUSE_NOTICE_MS = 4000;
 /** A highlight settles before it counts as one: dragging a selection fires all the way. */
 const SELECTION_MS = 300;
+/** How still the page has to be, after the user scrolls it, before Carat asks about what is now on screen. */
+const SCROLL_SETTLE_MS = 600;
 /** What the model is told the user highlighted, at most. */
 const MAX_SELECTION = 300;
 /** The chip, the ring, the status pill and the debug panel each hang off an attribute of their own. */
@@ -754,6 +756,27 @@ export default defineContentScript({
     for (const type of ['keydown', 'input', 'pointerdown', 'click', 'change', 'focusin']) {
       document.addEventListener(type, onActivity, true);
     }
+
+    /**
+     * Scrolling is not on that list. It is not an answer to the offer, so the
+     * chip stays where it is and comes back when its control does. It is a
+     * new part of the page to look at, though, so once the scrolling stops
+     * the question goes out again and whatever lands replaces what is up.
+     *
+     * On its own timer rather than the activity one: a page that scrolls
+     * itself must not be able to hold the idle timer open forever. Carat's
+     * own scrolling is excluded, because it asks on its own when it lands.
+     */
+    let scrollSettle: ReturnType<typeof setTimeout> | undefined;
+    document.addEventListener(
+      'scroll',
+      () => {
+        if (caratScrolling()) return;
+        clearTimeout(scrollSettle);
+        scrollSettle = setTimeout(() => schedule('scroll'), SCROLL_SETTLE_MS);
+      },
+      { capture: true, passive: true },
+    );
 
     /**
      * React and friends rewrite the focused input's value attribute on every

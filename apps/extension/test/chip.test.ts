@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
-import { ARM_MS, AUTO_DISMISS_MS, CHIP_SETTLE_MS, CORNER_INSET_PX, PENDING_HINT, createChip, type Chip, type DismissReason } from '../src/chip';
+import { ARM_MS, AUTO_DISMISS_MS, CORNER_INSET_PX, PENDING_HINT, createChip, type Chip, type DismissReason } from '../src/chip';
 import { placeAt } from '../src/chip/position';
 import { ACCEPT_CODE, ACCEPT_GLYPH, ACCEPT_KEY_NAME } from '../src/chip/accept-key';
 import { CHIP_CSS, FX_CSS, KEYCAP, KEYCAP_CSS, KEYFRAME_CLASSES, LINE_PX, PILL, TIMING, TYPE } from '../src/chip/styles';
@@ -74,6 +74,11 @@ function ringHosts(): NodeListOf<Element> {
 function onScreen(el: Element, top = 100, left = 20): void {
   el.getBoundingClientRect = () =>
     ({ top, left, bottom: top + 30, right: left + 200, width: 200, height: 30 }) as DOMRect;
+}
+
+/** The same control, scrolled off the top of the page. */
+function offScreen(el: Element): void {
+  onScreen(el, -400);
 }
 
 /** One animation frame, which is how often the pill re-reads its control's box. */
@@ -403,14 +408,8 @@ describe('chip', () => {
   });
 
   describe('the user getting on with the page', () => {
-    /** Past the window that belongs to the scroll carat did to place this chip. */
-    const past = (): void => {
-      vi.advanceTimersByTime(CHIP_SETTLE_MS);
-    };
-
     it('goes on a pointerdown anywhere but the chip', () => {
       show();
-      past();
       document.body.dispatchEvent(new Event('pointerdown', { bubbles: true, composed: true }));
       expect(onDismiss).toHaveBeenCalledWith('acted');
       expect(chip.visible).toBe(false);
@@ -424,16 +423,58 @@ describe('chip', () => {
       expect(onDismiss).toHaveBeenCalledWith('acted');
     });
 
-    it('goes on a wheel, a touchmove or a scroll, but not inside its settle window', () => {
+    it('stays through a wheel, a touchmove and a scroll: reading on is not an answer', () => {
       for (const type of ['wheel', 'touchmove', 'scroll']) {
         show();
         window.dispatchEvent(new Event(type));
-        expect([type, chip.visible]).toEqual([type, true]);
-        past();
+        vi.advanceTimersByTime(FRAME_MS);
         window.dispatchEvent(new Event(type));
-        expect([type, chip.visible]).toEqual([type, false]);
-        expect(onDismiss).toHaveBeenLastCalledWith('scrolled');
+        expect([type, chip.visible]).toEqual([type, true]);
+        expect(onDismiss).not.toHaveBeenCalled();
+        chip.hide();
+        onDismiss.mockClear();
       }
+    });
+
+    it('goes off screen with its control and comes back with it, without being asked again', () => {
+      show();
+      const host = hosts()[0] as HTMLElement;
+      expect(host.style.display).not.toBe('none');
+
+      // The control scrolls off the top of the page.
+      offScreen(target);
+      window.dispatchEvent(new Event('scroll'));
+      vi.advanceTimersByTime(FRAME_MS);
+      expect(host.style.display).toBe('none');
+      expect(chip.visible).toBe(true);
+      expect(onDismiss).not.toHaveBeenCalled();
+
+      // And back. The same offer is on the same control: nothing was re-shown.
+      onScreen(target);
+      window.dispatchEvent(new Event('scroll'));
+      vi.advanceTimersByTime(FRAME_MS);
+      expect(host.style.display).toBe('block');
+      expect(chip.text).toBe('Fill Search with "Seven Shores Cafe"');
+    });
+
+    it('does not run out of time while it is off screen', () => {
+      show();
+      offScreen(target);
+      window.dispatchEvent(new Event('scroll'));
+      vi.advanceTimersByTime(FRAME_MS);
+
+      // Long past the point an answered-nowhere chip would have given up.
+      vi.advanceTimersByTime(AUTO_DISMISS_MS * 3);
+      expect(chip.visible).toBe(true);
+      expect(onDismiss).not.toHaveBeenCalled();
+
+      // The clock starts again when it is back, and then it does give up.
+      onScreen(target);
+      window.dispatchEvent(new Event('scroll'));
+      vi.advanceTimersByTime(FRAME_MS);
+      expect(chip.visible).toBe(true);
+      vi.advanceTimersByTime(AUTO_DISMISS_MS);
+      expect(onDismiss).toHaveBeenCalledWith('timeout');
     });
 
     it('goes when the focus lands on another control, and stays for the field it was filling', () => {
@@ -539,7 +580,6 @@ describe('chip', () => {
 
     it('gets on with the page instantly when the user does, with no exit at all', () => {
       show();
-      vi.advanceTimersByTime(CHIP_SETTLE_MS);
       document.body.dispatchEvent(new Event('pointerdown', { bubbles: true, composed: true }));
       expect(chip.classes).not.toContain('is-leaving');
     });

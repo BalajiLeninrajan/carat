@@ -1,6 +1,5 @@
 import { fromSurface } from '../dom/surfaces';
 import { Ring } from '../engine/content/ring';
-import { SCROLL_SETTLE_MS, caratScrolling } from '../scroll';
 import { createEffects } from './effects';
 import { placeChip } from './position';
 import { PREVIEW_CSS, PREVIEW_DELAY_MS } from './preview';
@@ -10,12 +9,14 @@ import { CHIP_CSS, TIMING } from './styles';
 
 /**
  * Why the chip went away. `escape` and `typed` are the user saying no to the
- * offer and are reported as such; `acted` and `scrolled` are the user getting
- * on with the page, which says nothing about it. `snoozed` is Shift+Tab, a
- * chord and so never a tap: it
- * says nothing about this offer either, it asks for a minute without any.
+ * offer and are reported as such; `acted` is the user getting on with the
+ * page, which says nothing about it. `snoozed` is Shift+Tab, a chord and so
+ * never a tap: it says nothing about this offer either, it asks for a minute
+ * without any. Scrolling is not on the list. A control carried off the edge
+ * of the screen has not been answered, so the offer waits there for it to
+ * come back rather than being thrown away.
  */
-export type DismissReason = 'escape' | 'timeout' | 'typed' | 'detached' | 'acted' | 'scrolled' | 'snoozed';
+export type DismissReason = 'escape' | 'timeout' | 'typed' | 'detached' | 'acted' | 'snoozed';
 
 /**
  * What the chip is offering. The chip does nothing with it but choose how to
@@ -127,12 +128,6 @@ export const ARM_MS = 4000;
 export const PENDING_HINT = 'checking with the model…';
 /** The second line a chip carries once the user has said no often enough to want the key. */
 export const QUIET_HINT = 'Shift+Tab: quiet for a minute';
-/**
- * A chip ignores scrolling for this long after it goes up: that tail belongs
- * to the scroll carat itself did to bring the target into view. Per chip, not
- * a flag shared with the scroller, which would leak between pages.
- */
-export const CHIP_SETTLE_MS = SCROLL_SETTLE_MS;
 /** Held down on their own these say nothing; the key that follows does. */
 const MODIFIER_KEYS = new Set(['Shift', 'Control', 'Alt', 'Meta', 'AltGraph', 'CapsLock', 'NumLock', 'ScrollLock', 'OS', 'Dead', 'Unidentified']);
 const HOST_ATTR = 'data-carat-chip';
@@ -314,19 +309,6 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
     dismiss('acted');
   };
 
-  /**
-   * A wheel, a drag or a scroll: the user is reading on, not answering. Two
-   * exceptions, both of them carat's own doing: a scroll it started and has
-   * not seen stop, and the first settle window of the chip's life, which is
-   * the tail of whatever brought this target into view.
-   */
-  const onUserScroll = (e: Event): void => {
-    if (!session || caratScrolling() || Date.now() - session.shownAt < CHIP_SETTLE_MS) return;
-    // Scrolling the debug panel's own log is not reading on down the page.
-    if (fromSurface(e)) return;
-    dismiss('scrolled');
-  };
-
   /** Focus landing on another control means the user picked their own next step. */
   const onFocusIn = (e: FocusEvent): void => {
     if (!session || !(e.target instanceof Element)) return;
@@ -392,7 +374,11 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
       anchored === null
         ? { top: 0, left: 0, visible: false }
         : placeChip(session.target, pill.offsetWidth, pill.offsetHeight, anchored);
+    const wasOnScreen = session.onScreen;
     session.onScreen = visible;
+    // The countdown is about an offer the user can see. One carried off the
+    // edge has not been turned down, so the clock stops until it is back.
+    if (visible !== wasOnScreen) countdown(session, visible);
     host.style.visibility = '';
     if (!visible) {
       host.style.display = 'none';
@@ -416,6 +402,12 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
     if (box === lastBox) return;
     lastBox = box;
     reposition();
+  }
+
+  /** Run, or stop, the twenty seconds after which an unanswered chip gives up. */
+  function countdown(s: Session, running: boolean): void {
+    clearTimeout(s.timer);
+    if (running) s.timer = setTimeout(() => dismiss('timeout'), AUTO_DISMISS_MS);
   }
 
   function startTracking(): void {
@@ -530,9 +522,6 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
     win.addEventListener('keyup', onKeyup, true);
     // The user acting on the page for themselves takes the chip with them, whatever shape it is.
     win.addEventListener('pointerdown', onPointerDown, true);
-    win.addEventListener('wheel', onUserScroll, { capture: true, passive: true });
-    win.addEventListener('touchmove', onUserScroll, { capture: true, passive: true });
-    win.addEventListener('scroll', onUserScroll, { capture: true, passive: true });
     win.addEventListener('focusin', onFocusIn, true);
     pill.addEventListener('click', onClick);
     pill.addEventListener('mousedown', onMousedown);
@@ -675,9 +664,6 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
     win.removeEventListener('keydown', onKeydown, true);
     win.removeEventListener('keyup', onKeyup, true);
     win.removeEventListener('pointerdown', onPointerDown, true);
-    win.removeEventListener('wheel', onUserScroll, true);
-    win.removeEventListener('touchmove', onUserScroll, true);
-    win.removeEventListener('scroll', onUserScroll, true);
     win.removeEventListener('focusin', onFocusIn, true);
     pill.removeEventListener('click', onClick);
     pill.removeEventListener('mousedown', onMousedown);
