@@ -13,10 +13,12 @@ export default defineConfig({
     // offscreen: a service worker can reach neither the clipboard nor the
     // microphone, and one document (the only one Chrome allows) serves both.
     permissions: ['debugger', 'storage', 'tabs', 'webNavigation', 'search', 'offscreen', 'alarms'],
-    // Never in `permissions`: reading the system clipboard is asked for from the
-    // options page, on the gesture that turns the setting on, and given back
-    // when it goes off. The microphone is asked for there the same way.
-    optional_permissions: ['clipboardRead'],
+    // Never in required `permissions`: reading the system clipboard is asked
+    // for from the options page, on the gesture that turns the setting on, and
+    // given back when it goes off. Microphone access is a web media permission,
+    // not a chrome.permissions optional permission, so it is prompted by
+    // getUserMedia from the options tab.
+    optional_permissions: ['clipboardRead'] as chrome.runtime.ManifestOptionalPermission[],
     host_permissions: ['<all_urls>'],
     commands: {
       'carat-suggest': {

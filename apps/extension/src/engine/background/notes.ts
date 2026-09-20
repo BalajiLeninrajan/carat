@@ -214,7 +214,7 @@ export async function recordSeen(msg: SeenMessage, settings: Settings): Promise<
  * Distill a batch of transcript. `context` is earlier speech already turned
  * into notes, included so a sentence that continues it still makes sense.
  */
-export async function recordHeard(lines: string[], context: string[], settings: Settings): Promise<void> {
+export async function recordHeard(lines: string[], context: string[], settings: Settings): Promise<Note[]> {
   const existing = (await load()).filter((n) => n.source === "heard");
   const content =
     `<already_noted>\n${existing.map((n) => `- ${n.text}`).join("\n") || "(none)"}\n</already_noted>\n` +
@@ -223,16 +223,17 @@ export async function recordHeard(lines: string[], context: string[], settings: 
 
   const started = performance.now();
   const facts = await extract(settings, HEARD_INSTRUCTIONS, content);
-  if (!facts) return;
+  if (!facts) return [];
   console.log(
     `[carat] noted ${facts.length} from the microphone · ${Math.round(performance.now() - started)}ms` +
       (facts.length ? "\n" + facts.map((f) => `  - ${f}`).join("\n") : ""),
   );
-  if (!facts.length) return;
+  if (!facts.length) return [];
 
   const now = Date.now();
   const added: Note[] = facts.map((text) => ({ at: now, source: "heard", url: "", title: "", text }));
   await chrome.storage.session.set({ [NOTES_KEY]: [...(await load()), ...added].slice(-MAX_NOTES) });
+  return added;
 }
 
 // ---------------------------------------------------------------------------
