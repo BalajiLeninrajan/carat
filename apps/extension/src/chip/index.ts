@@ -2,7 +2,6 @@ import { fromSurface } from '../dom/surfaces';
 import { Ring } from '../engine/content/ring';
 import { SCROLL_SETTLE_MS, caratScrolling } from '../scroll';
 import { createEffects } from './effects';
-import { deepActiveElement, shouldInterceptTab } from './keys';
 import { placeChip } from './position';
 import { PREVIEW_CSS, PREVIEW_DELAY_MS } from './preview';
 import { createSounds } from './sound';
@@ -141,7 +140,7 @@ interface SessionBase extends ChipCallbacks {
   /** When the chip went up, so a scroll right after it can be read as carat's own. */
   shownAt: number;
   onScreen: boolean;
-  /** When set, the key defers to a text field that has focus unless it is this or `interceptFrom`. */
+  /** The control the chip is about, when it has one; keys typed there dismiss as `typed`. */
   target: Element | null;
   interceptFrom: Element | null;
   irreversible: boolean;
@@ -243,9 +242,9 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
       return;
     }
     const bare = !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey;
-    // A banner has no control of its own to defer to; Tab is its whole interface.
-    const deferred = session.target !== null && !shouldInterceptTab(deepActiveElement(doc), session.target, session.interceptFrom);
-    if (e.key === 'Tab' && bare && !deferred) {
+    // While a chip is up, Tab is carat's wherever focus is. The page never
+    // sees it: tabbing between fields comes back the moment the chip is gone.
+    if (e.key === 'Tab' && bare) {
       e.preventDefault();
       e.stopImmediatePropagation();
       accept();
@@ -258,7 +257,7 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
 
   /**
    * Whether a key press means the user has moved on. Tab never does: it is
-   * carat's key, and one the chip may have let through on purpose. Nor does a
+   * carat's key whenever a chip is up. Nor does a
    * modifier held on its own, nor typing into the field the chip is about,
    * which the `input` listener reports as `typed` instead.
    */

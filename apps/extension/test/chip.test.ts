@@ -108,12 +108,12 @@ describe('chip', () => {
     expect(onAccept).toHaveBeenCalledTimes(1);
   });
 
-  it('lets Tab through when the user is in another text field', () => {
+  it('takes Tab even when the user is in another text field', () => {
     show();
     other.focus();
     const e = key(other, 'Tab');
-    expect(e.defaultPrevented).toBe(false);
-    expect(onAccept).not.toHaveBeenCalled();
+    expect(e.defaultPrevented).toBe(true);
+    expect(onAccept).toHaveBeenCalledTimes(1);
   });
 
   it('dismisses on Escape, on typing in the target, and on its own after the timeout', () => {
