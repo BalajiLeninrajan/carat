@@ -23,9 +23,6 @@ export type DismissReason = 'escape' | 'timeout' | 'typed' | 'detached' | 'acted
  */
 export type ChipKind = 'fill' | 'click' | 'select' | 'scroll' | 'open' | 'switch' | 'none';
 
-/** How the chip goes when the offer is taken, or taken back. */
-type Exit = 'collapse' | 'sweep' | 'shrink' | 'soft';
-
 /** Tab accepts everything now; an irreversible action simply wants it twice. */
 export type AcceptKey = 'Tab';
 
@@ -56,14 +53,8 @@ interface ChipText extends ChipCallbacks {
   pending?: boolean;
   /** Sending, paying, deleting: the first Tab arms the chip, the second acts. */
   irreversible?: boolean;
-  /** What will happen on Tab, which is what decides how the chip leaves. */
+  /** What will happen on Tab: the mark the control gets when the offer is taken. */
   kind?: ChipKind;
-  /**
-   * This offer follows one the user already refused. It arrives on the same
-   * spring as any other, but without the glow ring: a second try should be
-   * quieter than a first offer, not louder.
-   */
-  retry?: boolean;
 }
 
 export interface ChipShowOptions extends ChipText {
@@ -139,13 +130,6 @@ export const QUIET_HINT = 'Shift+Tab: quiet for a minute';
  * a flag shared with the scroller, which would leak between pages.
  */
 export const CHIP_SETTLE_MS = SCROLL_SETTLE_MS;
-/** How long each exit runs before the pill is taken off screen. */
-const EXIT_MS: Record<Exit, number> = {
-  collapse: TIMING.collapseMs,
-  sweep: TIMING.sweepMs,
-  shrink: TIMING.shrinkMs,
-  soft: TIMING.dismissMs,
-};
 /** Held down on their own these say nothing; the key that follows does. */
 const MODIFIER_KEYS = new Set(['Shift', 'Control', 'Alt', 'Meta', 'AltGraph', 'CapsLock', 'NumLock', 'ScrollLock', 'OS', 'Dead', 'Unidentified']);
 const HOST_ATTR = 'data-carat-chip';
@@ -161,8 +145,6 @@ interface SessionBase extends ChipCallbacks {
   irreversible: boolean;
   label: string;
   kind: ChipKind | null;
-  /** A second try after a refusal: same entrance, no glow. */
-  retry: boolean;
   /** The window of a same-origin child frame the target lives in; its keys never reach the top window. */
   targetWin: Window | null;
 }
@@ -226,7 +208,6 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
   // Every animation that outlives the call that started it, so a chip that
   // goes mid-spring takes its own frames with it.
   let enterTimer: ReturnType<typeof setTimeout> | undefined;
-  let glowTimer: ReturnType<typeof setTimeout> | undefined;
   let keyTimer: ReturnType<typeof setTimeout> | undefined;
   let exitTimer: ReturnType<typeof setTimeout> | undefined;
   // The frame loop that keeps the pill on its control, and the last box it saw.
@@ -441,7 +422,7 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
     }
   }
 
-  /** A new chip springs in; a first offer also gets one ring, so the eye finds it. */
+  /** A new chip fades up, and rises the 2px that says it arrived. */
   function enter(): void {
     if (reducedMotion()) {
       pill.classList.add('is-still');
@@ -452,27 +433,13 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
       enterTimer = undefined;
       pill.classList.remove('is-entering');
     }, TIMING.enterMs);
-    // A second try after a refusal arrives on the same spring without the ring.
-    if (session?.retry) return;
-    const glow = doc.createElement('span');
-    glow.className = 'glow';
-    pill.appendChild(glow);
-    pill.classList.add('has-glow');
-    glowTimer = setTimeout(() => {
-      glowTimer = undefined;
-      glow.remove();
-      pill.classList.remove('has-glow');
-    }, TIMING.glowMs);
   }
 
   /** The chip went before its entrance finished: drop the frames rather than let them play out. */
   function cancelEnter(): void {
     if (enterTimer !== undefined) clearTimeout(enterTimer);
     enterTimer = undefined;
-    if (glowTimer !== undefined) clearTimeout(glowTimer);
-    glowTimer = undefined;
-    pill.classList.remove('is-entering', 'has-glow');
-    pill.querySelector('.glow')?.remove();
+    pill.classList.remove('is-entering');
   }
 
   /** The keycap goes down under an accepted Tab, and back up on its own. */
@@ -482,62 +449,32 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
     keyTimer = setTimeout(cancelKey, TIMING.pressMs);
   }
 
-  /** The value on the chip just changed under the user: the keycap says so. */
-  function bump(): void {
-    if (reducedMotion()) return;
-    cancelKey();
-    key.classList.add('is-bump');
-    keyTimer = setTimeout(cancelKey, TIMING.bumpMs);
-  }
-
   function cancelKey(): void {
     if (keyTimer !== undefined) clearTimeout(keyTimer);
     keyTimer = undefined;
-    key.classList.remove('is-press', 'is-bump');
+    key.classList.remove('is-press');
   }
 
-  /** The model replaced what the placeholder offered: the words cross-fade, the keycap nods. */
+  /** The model replaced what the placeholder offered: the words cross-fade in place. */
   function freshen(): void {
     label.classList.remove('is-fresh');
     // Reading the box restarts the animation when two answers land in a row.
     void pill.offsetWidth;
     label.classList.add('is-fresh');
-    bump();
-  }
-
-  /** Where a collapse falls: toward the control, when the pill knows where that is. */
-  function aimAt(target: Element | null): void {
-    pill.style.removeProperty('--carat-origin');
-    if (!target) return;
-    const p = pill.getBoundingClientRect();
-    const t = target.getBoundingClientRect();
-    if (p.width <= 0 || p.height <= 0) return;
-    const pct = (v: number): string => `${Math.round(Math.min(100, Math.max(0, v)) * 100)}%`;
-    pill.style.setProperty(
-      '--carat-origin',
-      `${pct((t.left + t.width / 2 - p.left) / p.width)} ${pct((t.top + t.height / 2 - p.top) / p.height)}`,
-    );
-  }
-
-  /** A scroll sweeps up with the page; a tab shrinks toward the tab strip; everything else collapses. */
-  function exitOf(kind: ChipKind | null): Exit {
-    if (kind === 'scroll') return 'sweep';
-    if (kind === 'open' || kind === 'switch') return 'shrink';
-    return 'collapse';
   }
 
   /** The pill's last frames. It answers nothing by now: the session is already gone. */
-  function leave(exit: Exit): void {
+  function leave(): void {
     host.style.display = 'block';
-    pill.classList.add('is-leaving', `exit-${exit}`);
-    exitTimer = setTimeout(endExit, EXIT_MS[exit]);
+    pill.classList.add('is-leaving');
+    exitTimer = setTimeout(endExit, TIMING.exitMs);
   }
 
   /** The last frame is over, or something else wants the pill: take it off screen now. */
   function endExit(): void {
     if (exitTimer !== undefined) clearTimeout(exitTimer);
     exitTimer = undefined;
-    pill.classList.remove('is-leaving', 'exit-collapse', 'exit-sweep', 'exit-shrink', 'exit-soft', 'is-armed');
+    pill.classList.remove('is-leaving', 'is-armed');
     host.style.display = 'none';
   }
 
@@ -587,7 +524,6 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
       irreversible: opts.irreversible === true,
       label: opts.label,
       kind: opts.kind ?? null,
-      retry: opts.retry === true,
       targetWin: null,
       shownAt: Date.now(),
       timer: setTimeout(() => dismiss('timeout'), AUTO_DISMISS_MS),
@@ -693,12 +629,12 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
   }
 
   /**
-   * The chip goes. `exit` is the one case where its last frames outlive it:
+   * The chip goes. `fade` is the one case where its last frames outlive it:
    * the session, the listeners and every mark on the page are gone on the
    * spot, so the user acting is answered instantly either way, and what is
    * left on screen is a pill that can no longer do anything.
    */
-  function hide(exit?: Exit): void {
+  function hide(fade = false): void {
     const seen = session !== null && host.style.display !== 'none';
     const wasArmed = armed;
     endExit();
@@ -736,10 +672,10 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
     }
     setPending(false);
     pill.classList.remove('is-still');
-    if (exit && seen && !reducedMotion()) {
+    if (fade && seen && !reducedMotion()) {
       // An armed chip acts in amber, so the warning's colour stays on for the exit.
       if (wasArmed) pill.classList.add('is-armed');
-      leave(exit);
+      leave();
       return;
     }
     pill.classList.remove('is-armed');
@@ -780,20 +716,16 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
       arm();
       return;
     }
-    // An armed chip acts in amber: the same animation, the warning's colour.
+    // An armed chip acts in amber: the same fade, the warning's colour.
     const amber = armed;
     const control = s.target;
-    aimAt(s.mode === 'control' ? s.target : null);
-    hide(exitOf(s.kind));
+    hide(true);
     // The keycap and the sound belong to the press, so they come after the
     // teardown: the pill is still on screen for the length of its exit.
     press();
     sounds.accept();
     // And the control keeps the receipt for a moment after the chip has gone.
-    if (control?.isConnected) {
-      fx.flash(control, { tint: s.kind === 'fill', amber });
-      if (s.kind === 'click' || s.kind === 'select') fx.ripple(control, { amber });
-    }
+    if (control?.isConnected) fx.flash(control, { amber });
     s.onAccept();
   }
 
@@ -804,7 +736,7 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
     // chip has a moment to fade and drop out of the way. Everything else is
     // the user getting on with the page, and that clears the chip on the frame.
     const soft = why === 'escape' || why === 'typed';
-    hide(soft ? 'soft' : undefined);
+    hide(soft);
     // Only Esc gets a note: typing over the value is already making its own noise.
     if (why === 'escape') sounds.dismiss();
     s.onDismiss(why);
@@ -840,7 +772,7 @@ export function createChip(doc: Document = document, rings: Ring = new Ring()): 
     showBanner,
     ring,
     settle,
-    hide,
+    hide: () => hide(),
     destroy,
     relay,
     get visible() {

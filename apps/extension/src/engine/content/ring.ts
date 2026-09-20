@@ -29,7 +29,6 @@ const CSS = `
   .ring {
     position: fixed; box-sizing: border-box; border-radius: ${RING.radiusPx}px; pointer-events: none;
     border: ${RING.widthPx}px solid ${RING.accent}; box-shadow: 0 0 0 4px ${RING.halo};
-    transition: opacity .12s, border-color .12s, box-shadow .12s;
   }
   .ring.pending { border-style: dashed; opacity: .55; box-shadow: none; }
   .ring.armed { border-color: ${RING.armed}; box-shadow: 0 0 0 4px ${RING.armedHalo}; }
@@ -38,7 +37,6 @@ const CSS = `
     font: 600 12px/1 system-ui, -apple-system, "Segoe UI", sans-serif; color: #fff;
     background: #7c3aed; padding: 5px 8px 5px 5px; border-radius: 6px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, .25); pointer-events: none; max-width: 320px;
-    transition: background .12s;
   }
   .chip.armed { background: #d97706; }
   .chip.error { background: #b91c1c; }

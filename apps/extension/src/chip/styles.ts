@@ -1,32 +1,24 @@
 /**
- * Every duration, easing and accent the chip animates with is a custom
- * property on the shadow root, so the whole feel is tuned in one block rather
- * than hunted through keyframes. The JS reads the same numbers from `TIMING`
- * below; keep the two in step.
+ * Every duration and accent the chip animates with is a custom property on
+ * the shadow root, so the whole feel is tuned in one block rather than hunted
+ * through keyframes. The JS reads the same numbers from `TIMING` below; keep
+ * the two in step.
+ *
+ * The rule those numbers keep to: nothing runs longer than 200ms, nothing
+ * moves further than 2px, and nothing repeats. An offer should appear and go
+ * without ever being the thing you are looking at.
  */
 export const TIMING = {
-  /** The spring a new chip arrives on. */
-  enterMs: 180,
-  /** The one-time glow ring that expands off a first offer. */
-  glowMs: 600,
-  /** The accent outline a field chip draws round its control on arrival. */
-  outlineMs: 900,
-  /** The keycap's "that value just changed" bounce. */
-  bumpMs: 80,
-  /** The keycap held down under an accepted Tab. */
-  pressMs: 90,
-  /** The chip collapsing toward the control it just acted on. */
-  collapseMs: 160,
-  /** The scroll banner sweeping up with the page. */
-  sweepMs: 280,
-  /** The open/switch banner shrinking toward the tab strip. */
-  shrinkMs: 240,
-  /** Esc, and anything else the user says no with. */
-  dismissMs: 120,
-  /** The satisfaction flash on the control, and the tint under a filled field. */
-  flashMs: 450,
-  /** The ripple out of a clicked control's centre. */
-  rippleMs: 350,
+  /** The fade a new chip arrives on. */
+  enterMs: 120,
+  /** The keycap darkening under an accepted Tab. */
+  pressMs: 60,
+  /** A replaced value cross-fading in place. */
+  freshMs: 120,
+  /** The chip fading out, whichever way the offer went. */
+  exitMs: 100,
+  /** The accent outline left on the control the offer acted on. */
+  flashMs: 200,
 } as const;
 
 /**
@@ -69,7 +61,7 @@ export const KEYCAP = {
  * `prefers-reduced-motion` none of them is ever put on the pill; the static
  * states (`is-still`, `is-armed`, `is-press`) carry the meaning instead.
  */
-export const KEYFRAME_CLASSES = ['is-entering', 'has-glow', 'is-leaving'] as const;
+export const KEYFRAME_CLASSES = ['is-entering', 'is-leaving'] as const;
 
 // Inline so the chip needs no web-accessible resources and no page CSS can reach it.
 export const CHIP_CSS = `
@@ -85,16 +77,8 @@ export const CHIP_CSS = `
   --carat-accent: #89b4fa;
   --carat-amber: #f9e2af;
   --carat-enter-ms: ${TIMING.enterMs}ms;
-  --carat-enter-ease: cubic-bezier(0.34, 1.4, 0.64, 1);
-  --carat-glow-ms: ${TIMING.glowMs}ms;
-  --carat-bump-ms: ${TIMING.bumpMs}ms;
-  --carat-press-ms: ${TIMING.pressMs}ms;
-  --carat-collapse-ms: ${TIMING.collapseMs}ms;
-  --carat-sweep-ms: ${TIMING.sweepMs}ms;
-  --carat-shrink-ms: ${TIMING.shrinkMs}ms;
-  --carat-dismiss-ms: ${TIMING.dismissMs}ms;
-  /* Set from the target's side of the pill, so a collapse falls toward it. */
-  --carat-origin: 50% 50%;
+  --carat-fresh-ms: ${TIMING.freshMs}ms;
+  --carat-exit-ms: ${TIMING.exitMs}ms;
 }
 .chip {
   all: initial;
@@ -115,7 +99,6 @@ export const CHIP_CSS = `
   cursor: pointer;
   user-select: none;
   -webkit-user-select: none;
-  transform-origin: var(--carat-origin);
 }
 .chip:hover { background: #181825; }
 .text { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
@@ -138,69 +121,38 @@ export const CHIP_CSS = `
 }
 .pending[hidden] { display: none; }
 /* A replaced value arrives on the spot the old one held, so only the word changes. */
-.value.is-fresh, .label.is-fresh { animation: carat-fade 180ms ease-out; }
+.value.is-fresh, .label.is-fresh { animation: carat-fade var(--carat-fresh-ms) ease-out; }
 @keyframes carat-fade {
   from { opacity: 0; }
   to { opacity: 1; }
 }
 
 /* --- arrival --- */
-.chip.is-entering { animation: carat-enter var(--carat-enter-ms) var(--carat-enter-ease) both; }
-.chip.is-banner.is-entering { animation: carat-rise var(--carat-enter-ms) ease-out both; }
+/* A fade and a 2px rise. No spring, no overshoot, no ring off the edge. */
+.chip.is-entering { animation: carat-enter var(--carat-enter-ms) ease-out both; }
+/* The banner has no control to rise toward, so it fades where it stands. */
+.chip.is-banner.is-entering { animation: carat-fade var(--carat-enter-ms) ease-out both; }
 @keyframes carat-enter {
-  from { opacity: 0; transform: scale(0.92); }
-  to { opacity: 1; transform: scale(1); }
-}
-@keyframes carat-rise {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-/* One soft ring off a first offer, so the eye finds it. Never on a retry. */
-.glow {
-  position: absolute;
-  inset: -2px;
-  border-radius: inherit;
-  border: 2px solid var(--carat-accent);
-  box-shadow: 0 0 12px 2px rgba(137, 180, 250, 0.4);
-  pointer-events: none;
-  animation: carat-glow var(--carat-glow-ms) ease-out forwards;
-}
-@keyframes carat-glow {
-  from { opacity: 0.6; transform: scale(1); }
-  to { opacity: 0; transform: scale(1.3); }
-}
-/* --- the press --- */
-kbd.is-press { transform: translateY(1px); background: #232334; color: #9399b2; }
-.chip.is-armed kbd.is-press { background: #11111b; color: #d8c48d; }
-kbd.is-bump { animation: carat-bump var(--carat-bump-ms) ease-out; }
-@keyframes carat-bump {
-  50% { transform: translateY(-2px) scale(1.06); }
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: none; }
 }
 
+/* --- the press --- */
+/* The keycap darkens under an accepted Tab and comes back. It does not move. */
+kbd.is-press { background: #232334; color: #9399b2; }
+.chip.is-armed kbd.is-press { background: #11111b; color: #d8c48d; }
+
 /* --- leaving --- */
-.chip.is-leaving.exit-collapse { animation: carat-collapse var(--carat-collapse-ms) ease-in forwards; }
-.chip.is-leaving.exit-sweep { animation: carat-sweep var(--carat-sweep-ms) ease-in forwards; }
-.chip.is-leaving.exit-shrink { animation: carat-shrink var(--carat-shrink-ms) ease-in forwards; }
-.chip.is-leaving.exit-soft { animation: carat-soft var(--carat-dismiss-ms) ease-out forwards; }
-@keyframes carat-collapse {
-  to { opacity: 0; transform: scale(0.62); }
-}
-@keyframes carat-sweep {
-  to { opacity: 0; transform: translateY(-40px); }
-}
-@keyframes carat-shrink {
-  to { opacity: 0; transform: translateY(-28px) scale(0.5); }
-}
-@keyframes carat-soft {
-  to { opacity: 0; transform: translateY(4px); }
+/* One exit for every way an offer can end: the pill fades where it stands. */
+.chip.is-leaving { animation: carat-out var(--carat-exit-ms) ease-out forwards; }
+@keyframes carat-out {
+  to { opacity: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  /* All that is left to turn off are the fades. */
   .value.is-fresh, .label.is-fresh { animation: none; }
-  .chip.is-entering, .chip.is-banner.is-entering, kbd.is-bump { animation: none; }
-  .chip.is-leaving.exit-collapse, .chip.is-leaving.exit-sweep, .chip.is-leaving.exit-shrink, .chip.is-leaving.exit-soft { animation: none; }
-  .glow { display: none; }
-  kbd.is-press { transform: none; }
+  .chip.is-entering, .chip.is-banner.is-entering, .chip.is-leaving { animation: none; }
 }
 /* Armed: the first Tab landed on something that cannot be undone, so the chip turns amber until the second. */
 .chip.is-armed { background: var(--carat-amber); color: #1e1e2e; box-shadow: 0 6px 18px rgba(249, 226, 175, 0.35), 0 0 0 1px rgba(30, 30, 46, 0.2); }
@@ -238,10 +190,10 @@ kbd {
 `;
 
 /**
- * The marks carat leaves on the page's own controls: an outline, a bloom, a
- * tint, a ripple. All of them are carat's own overlay boxes over the
- * control's rect, never a style on the page's element, so nothing the page
- * laid out can move.
+ * The one mark carat leaves on a page's own control: a hairline accent
+ * outline over its box, fading out over `flashMs`, when an offer has just
+ * acted on it. It is carat's own overlay box, never a style on the page's
+ * element, so nothing the page laid out can move.
  */
 export const FX_CSS = `
 :host {
@@ -251,9 +203,7 @@ export const FX_CSS = `
   pointer-events: none;
   z-index: 2147483645;
   --carat-accent: 137, 180, 250;
-  --carat-outline-ms: ${TIMING.outlineMs}ms;
   --carat-flash-ms: ${TIMING.flashMs}ms;
-  --carat-ripple-ms: ${TIMING.rippleMs}ms;
 }
 .fx {
   position: absolute;
@@ -262,49 +212,17 @@ export const FX_CSS = `
   border-radius: 7px;
 }
 .fx.is-amber { --carat-accent: 249, 226, 175; }
-/* Arrival: a hairline round the control the chip is about. */
-.fx.outline {
-  border: 1.5px solid rgba(var(--carat-accent), 0.9);
-  animation: carat-fx-outline var(--carat-outline-ms) ease-out forwards;
-}
-.fx.outline.is-static { border-color: rgba(var(--carat-accent), 0.75); }
-@keyframes carat-fx-outline {
-  0% { opacity: 0; }
-  15% { opacity: 1; }
-  100% { opacity: 0; }
-}
-/* Accept: the outline blooms from 2px to 6px and goes. */
+/* Accept: one hairline round the control, and then it is gone. */
 .fx.flash {
   border: 1px solid rgba(var(--carat-accent), 0.9);
   animation: carat-fx-flash var(--carat-flash-ms) ease-out forwards;
 }
 .fx.flash.is-static { border-color: rgba(var(--carat-accent), 0.8); }
 @keyframes carat-fx-flash {
-  from { opacity: 1; box-shadow: 0 0 0 2px rgba(var(--carat-accent), 0.55); }
-  to { opacity: 0; box-shadow: 0 0 0 6px rgba(var(--carat-accent), 0); }
-}
-/* A fill gets a moment of accent under the words that just landed. */
-.fx.tint {
-  background: rgba(var(--carat-accent), 0.08);
-  animation: carat-fx-tint var(--carat-flash-ms) ease-out forwards;
-}
-.fx.tint.is-static { opacity: 1; }
-@keyframes carat-fx-tint {
   from { opacity: 1; }
   to { opacity: 0; }
 }
-/* A click gets a ripple out of the control's centre. */
-.fx.ripple {
-  border-radius: 50%;
-  background: rgba(var(--carat-accent), 0.35);
-  animation: carat-fx-ripple var(--carat-ripple-ms) ease-out forwards;
-}
-@keyframes carat-fx-ripple {
-  from { opacity: 0.55; transform: scale(0.2); }
-  to { opacity: 0; transform: scale(1); }
-}
 @media (prefers-reduced-motion: reduce) {
   .fx { animation: none !important; }
-  .fx.ripple { display: none; }
 }
 `;

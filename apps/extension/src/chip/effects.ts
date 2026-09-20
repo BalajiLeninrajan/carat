@@ -1,24 +1,18 @@
 import { FX_CSS, TIMING } from './styles';
 
 /**
- * The marks carat leaves on the page's own controls. Every one of them is an
- * overlay box of carat's own, positioned over the control's rect in a fixed,
+ * The mark carat leaves on a page's own control. It is an overlay box of
+ * carat's own, positioned over the control's rect in a fixed,
  * pointer-events-none host: nothing on the page is styled, so nothing the
  * page laid out can move.
  */
-export type FxKind = 'outline' | 'flash' | 'tint' | 'ripple';
+export type FxKind = 'flash';
 
 const FX_ATTR = 'data-carat-fx';
-/** The ripple's diameter before it grows; the spec's 40px circle. */
-const RIPPLE_PX = 40;
 
 export interface Effects {
-  /** A hairline round the control a new field chip is about. */
-  outline(el: Element): void;
-  /** The control carat just acted on: a bloom, plus a tint when a value went in. */
-  flash(el: Element, opts?: { tint?: boolean; amber?: boolean }): void;
-  /** A click: a circle out of the control's centre. */
-  ripple(el: Element, opts?: { amber?: boolean }): void;
+  /** The control carat just acted on, outlined for a moment as a receipt. */
+  flash(el: Element, opts?: { amber?: boolean }): void;
   /** Take every mark off now — the user acted, and carat is out of the way. */
   clear(): void;
   destroy(): void;
@@ -42,8 +36,7 @@ export function createEffects(doc: Document = document, still: () => boolean = (
     host.setAttribute(FX_ATTR, [...new Set(kinds)].sort().join(' '));
   }
 
-  function mark(kind: FxKind, ms: number, amber: boolean): HTMLElement | null {
-    if (still() && kind === 'ripple') return null;
+  function mark(kind: FxKind, ms: number, amber: boolean): HTMLElement {
     if (!host.isConnected) doc.documentElement.appendChild(host);
     const el = doc.createElement('div');
     el.className = `fx ${kind}`;
@@ -77,30 +70,8 @@ export function createEffects(doc: Document = document, still: () => boolean = (
   }
 
   return {
-    outline(target) {
-      const el = mark('outline', TIMING.outlineMs, false);
-      if (el) over(el, target, 2);
-      announce();
-    },
     flash(target, opts = {}) {
-      const amber = opts.amber === true;
-      const el = mark('flash', TIMING.flashMs, amber);
-      if (el) over(el, target, 2);
-      if (opts.tint === true) {
-        const tint = mark('tint', TIMING.flashMs, amber);
-        if (tint) over(tint, target, 0);
-      }
-      announce();
-    },
-    ripple(target, opts = {}) {
-      const el = mark('ripple', TIMING.rippleMs, opts.amber === true);
-      if (el) {
-        const r = target.getBoundingClientRect();
-        el.style.left = `${Math.round(r.left + r.width / 2 - RIPPLE_PX / 2)}px`;
-        el.style.top = `${Math.round(r.top + r.height / 2 - RIPPLE_PX / 2)}px`;
-        el.style.width = `${RIPPLE_PX}px`;
-        el.style.height = `${RIPPLE_PX}px`;
-      }
+      over(mark('flash', TIMING.flashMs, opts.amber === true), target, 2);
       announce();
     },
     clear() {

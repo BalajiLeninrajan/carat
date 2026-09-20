@@ -401,47 +401,44 @@ describe('chip', () => {
   });
 
   describe('how it feels', () => {
-    it('springs in with one glow ring, and drops both when it settles', () => {
+    it('fades up on arrival, with no glow ring behind it', () => {
       show();
-      expect(chip.classes).toEqual(expect.arrayContaining(['is-entering', 'has-glow']));
-      vi.advanceTimersByTime(TIMING.enterMs);
-      expect(chip.classes).not.toContain('is-entering');
-      vi.advanceTimersByTime(TIMING.glowMs);
-      expect(chip.classes).not.toContain('has-glow');
-    });
-
-    it('arrives without the ring when the offer before it was refused', () => {
-      show({ retry: true });
       expect(chip.classes).toContain('is-entering');
       expect(chip.classes).not.toContain('has-glow');
+      vi.advanceTimersByTime(TIMING.enterMs);
+      expect(chip.classes).not.toContain('is-entering');
     });
 
-    it('cancels the arrival when the chip goes mid-spring', () => {
+    it('cancels the arrival when the chip goes mid-fade', () => {
       show();
       vi.advanceTimersByTime(TIMING.enterMs / 2);
       key(target, 'Escape');
       expect(chip.classes).not.toContain('is-entering');
-      expect(chip.classes).not.toContain('has-glow');
       // Esc is the user answering, so the chip has a moment to get out of the way.
-      expect(chip.classes).toEqual(expect.arrayContaining(['is-leaving', 'exit-soft']));
-      vi.advanceTimersByTime(TIMING.dismissMs);
+      expect(chip.classes).toContain('is-leaving');
+      vi.advanceTimersByTime(TIMING.exitMs);
       expect(chip.classes).not.toContain('is-leaving');
     });
 
-    it('leaves the way the action goes', () => {
-      chip.show({ target, label: 'Click "Pay"', kind: 'click', onAccept, onDismiss });
-      key(target, 'Tab');
-      expect(chip.classes).toEqual(expect.arrayContaining(['is-leaving', 'exit-collapse']));
-      vi.advanceTimersByTime(TIMING.collapseMs);
+    it('leaves the same way whatever the action was', () => {
+      for (const kind of ['click', 'scroll', 'open'] as const) {
+        chip.showBanner({ label: 'Do the thing', kind, onAccept, onDismiss });
+        key(document.body, 'Tab');
+        expect([kind, chip.classes.includes('is-leaving')]).toEqual([kind, true]);
+        expect(chip.classes.filter((c) => c.startsWith('exit-'))).toEqual([]);
+        vi.advanceTimersByTime(TIMING.exitMs);
+        expect([kind, chip.classes.includes('is-leaving')]).toEqual([kind, false]);
+      }
+    });
 
-      chip.showBanner({ label: 'Scroll down', kind: 'scroll', onAccept, onDismiss });
-      key(document.body, 'Tab');
-      expect(chip.classes).toContain('exit-sweep');
-      vi.advanceTimersByTime(TIMING.sweepMs);
-
-      chip.showBanner({ label: 'Open "Seven Shores Cafe" in Google Maps', kind: 'open', onAccept, onDismiss });
-      key(document.body, 'Tab');
-      expect(chip.classes).toContain('exit-shrink');
+    it('keeps every animation short, still and one-shot', () => {
+      const durations = [...CHIP_CSS.matchAll(/(\d+)ms/g)].map((m) => Number(m[1]));
+      expect(durations.length).toBeGreaterThan(0);
+      expect(Math.max(...durations)).toBeLessThanOrEqual(200);
+      // The only movement left is the 2px the pill rises on arrival.
+      const shifts = [...CHIP_CSS.matchAll(/translateY\((-?[\d.]+)px\)/g)].map((m) => Math.abs(Number(m[1])));
+      expect(Math.max(0, ...shifts)).toBeLessThanOrEqual(2);
+      expect(CHIP_CSS).not.toContain('scale(');
     });
 
     it('gets on with the page instantly when the user does, with no exit at all', () => {
@@ -466,8 +463,8 @@ describe('chip', () => {
       key(target, 'Tab');
       expect(onAccept).toHaveBeenCalledTimes(1);
       // The colour stays for the exit.
-      expect(chip.classes).toEqual(expect.arrayContaining(['is-armed', 'is-leaving', 'exit-collapse']));
-      vi.advanceTimersByTime(TIMING.collapseMs);
+      expect(chip.classes).toEqual(expect.arrayContaining(['is-armed', 'is-leaving']));
+      vi.advanceTimersByTime(TIMING.exitMs);
       expect(chip.classes).not.toContain('is-armed');
     });
 
@@ -478,13 +475,13 @@ describe('chip', () => {
       for (const cls of KEYFRAME_CLASSES) expect(chip.classes).not.toContain(cls);
     });
 
-    it('leaves the arrival mark to the ring, and marks the control when the offer is taken', () => {
+    it('leaves the arrival mark to the ring, and outlines the control once the offer is taken', () => {
       const fx = (): string => document.querySelector('[data-carat-fx]')?.getAttribute('data-carat-fx') ?? '';
       chip.show({ target, label: 'Fill Search with "x"', kind: 'fill', onAccept, onDismiss });
       expect(fx()).toBe('');
       key(target, 'Tab');
-      // The arrival mark goes with the chip; the receipt stays a moment longer.
-      expect(fx().split(' ').sort()).toEqual(['flash', 'tint']);
+      // One outline, no tint and no ripple, and it is gone inside 200ms.
+      expect(fx()).toBe('flash');
       vi.advanceTimersByTime(TIMING.flashMs);
       expect(fx()).toBe('');
     });
@@ -509,7 +506,7 @@ describe('chip', () => {
       expect(chip.classes).not.toContain('is-leaving');
     });
 
-    it('leaves no ripple on a click', () => {
+    it('still marks the control it acted on, standing still', () => {
       chip.show({ target, label: 'Click "Pay"', kind: 'click', onAccept, onDismiss });
       key(target, 'Tab');
       expect(document.querySelector('[data-carat-fx]')?.getAttribute('data-carat-fx')).toBe('flash');
