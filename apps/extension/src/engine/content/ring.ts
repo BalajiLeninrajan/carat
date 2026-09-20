@@ -10,15 +10,20 @@
 import type { ActionKind } from "../shared/protocol";
 
 /**
- * The one description of the ring: colour, width, radius and how far outside
- * the control it sits. The chip is drawn against the same numbers, so the
- * ring, the control and the pill read as one mark rather than three.
+ * The one description of the ring: its colour, width, radius and how far
+ * outside the control it sits. The chip is drawn against the same record, so
+ * there is a single accent in the extension and the ring, the control and the
+ * pill read as one mark rather than three.
+ *
+ * The geometry is the prototype's. The colours are carat's own, which is why
+ * the rgb triples are here too: CSS cannot take a hex colour apart, and the
+ * marks on a control need the accent at several opacities.
  */
 export const RING = {
-  accent: "#7c3aed",
-  halo: "rgba(124, 58, 237, .18)",
-  armed: "#d97706",
-  armedHalo: "rgba(217, 119, 6, .25)",
+  accent: "#89b4fa",
+  accentRgb: "137, 180, 250",
+  armed: "#f9e2af",
+  armedRgb: "249, 226, 175",
   widthPx: 2,
   radiusPx: 7,
   padPx: 3,
@@ -28,17 +33,17 @@ const CSS = `
   :host { all: initial; }
   .ring {
     position: fixed; box-sizing: border-box; border-radius: ${RING.radiusPx}px; pointer-events: none;
-    border: ${RING.widthPx}px solid ${RING.accent}; box-shadow: 0 0 0 4px ${RING.halo};
+    border: ${RING.widthPx}px solid ${RING.accent}; box-shadow: 0 0 0 4px rgba(${RING.accentRgb}, .18);
   }
   .ring.pending { border-style: dashed; opacity: .55; box-shadow: none; }
-  .ring.armed { border-color: ${RING.armed}; box-shadow: 0 0 0 4px ${RING.armedHalo}; }
+  .ring.armed { border-color: ${RING.armed}; box-shadow: 0 0 0 4px rgba(${RING.armedRgb}, .25); }
   .chip {
     position: fixed; display: flex; align-items: center; gap: 6px; white-space: nowrap;
-    font: 600 12px/1 system-ui, -apple-system, "Segoe UI", sans-serif; color: #fff;
-    background: #7c3aed; padding: 5px 8px 5px 5px; border-radius: 6px;
+    font: 600 12px/1 system-ui, -apple-system, "Segoe UI", sans-serif; color: #cdd6f4;
+    background: #1e1e2e; padding: 5px 8px 5px 5px; border-radius: 6px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, .25); pointer-events: none; max-width: 320px;
   }
-  .chip.armed { background: #d97706; }
+  .chip.armed { background: ${RING.armed}; color: #1e1e2e; }
   .chip.error { background: #b91c1c; }
   .chip span.label { overflow: hidden; text-overflow: ellipsis; }
   kbd {

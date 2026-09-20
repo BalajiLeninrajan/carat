@@ -8,6 +8,8 @@
  * moves further than 2px, and nothing repeats. An offer should appear and go
  * without ever being the thing you are looking at.
  */
+import { RING } from '../engine/content/ring';
+
 export const TIMING = {
   /** The fade a new chip arrives on. */
   enterMs: 120,
@@ -74,8 +76,8 @@ export const CHIP_CSS = `
   pointer-events: auto;
 
   /* The whole feel, in one place. */
-  --carat-accent: #89b4fa;
-  --carat-amber: #f9e2af;
+  --carat-accent: ${RING.accent};
+  --carat-amber: ${RING.armed};
   --carat-enter-ms: ${TIMING.enterMs}ms;
   --carat-fresh-ms: ${TIMING.freshMs}ms;
   --carat-exit-ms: ${TIMING.exitMs}ms;
@@ -155,7 +157,7 @@ kbd.is-press { background: #232334; color: #9399b2; }
   .chip.is-entering, .chip.is-banner.is-entering, .chip.is-leaving { animation: none; }
 }
 /* Armed: the first Tab landed on something that cannot be undone, so the chip turns amber until the second. */
-.chip.is-armed { background: var(--carat-amber); color: #1e1e2e; box-shadow: 0 6px 18px rgba(249, 226, 175, 0.35), 0 0 0 1px rgba(30, 30, 46, 0.2); }
+.chip.is-armed { background: var(--carat-amber); color: #1e1e2e; box-shadow: 0 6px 18px rgba(${RING.armedRgb}, 0.35), 0 0 0 1px rgba(30, 30, 46, 0.2); }
 .chip.is-armed:hover { background: #f5d88a; }
 .chip.is-armed .value { color: #1e1e2e; }
 .chip.is-armed .sub { color: #4c4f69; }
@@ -202,16 +204,16 @@ export const FX_CSS = `
   inset: 0;
   pointer-events: none;
   z-index: 2147483645;
-  --carat-accent: 137, 180, 250;
+  --carat-accent: ${RING.accentRgb};
   --carat-flash-ms: ${TIMING.flashMs}ms;
 }
 .fx {
   position: absolute;
   box-sizing: border-box;
   pointer-events: none;
-  border-radius: 7px;
+  border-radius: ${RING.radiusPx}px;
 }
-.fx.is-amber { --carat-accent: 249, 226, 175; }
+.fx.is-amber { --carat-accent: ${RING.armedRgb}; }
 /* Accept: one hairline round the control, and then it is gone. */
 .fx.flash {
   border: 1px solid rgba(var(--carat-accent), 0.9);
