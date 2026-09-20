@@ -1,4 +1,5 @@
 import { sendMessage } from '@/src/messaging';
+import type { ActionAnalytics, ActionAnalyticsBucket } from '@/src/background/elastic';
 import type { Settings } from '@/src/engine/shared/settings';
 
 const app = document.getElementById('app') as HTMLElement;
@@ -12,6 +13,11 @@ const pausedRow = document.getElementById('paused-row') as HTMLElement;
 const resumeButton = document.getElementById('resume') as HTMLButtonElement;
 const retryButton = document.getElementById('retry') as HTMLButtonElement;
 const optionsLink = document.getElementById('options') as HTMLAnchorElement;
+const tabHome = document.getElementById('tab-home') as HTMLButtonElement;
+const tabAnalytics = document.getElementById('tab-analytics') as HTMLButtonElement;
+const panelHome = document.getElementById('panel-home') as HTMLElement;
+const panelAnalytics = document.getElementById('panel-analytics') as HTMLElement;
+const analyticsEl = document.getElementById('analytics') as HTMLElement;
 
 /** The host of the tab the popup was opened over; undefined on chrome:// and friends. */
 let activeHost: string | undefined;
@@ -82,6 +88,81 @@ function renderModel(settings: Settings): void {
   modelLine.textContent = settings.apiKey
     ? `${settings.actionModel} · ghost ${settings.textModel}`
     : 'no API key yet — open Settings';
+}
+
+function pct(n: number): string {
+  return `${Math.max(0, Math.min(100, Math.round(n)))}%`;
+}
+
+function hostLabel(host: string): string {
+  return host === 'all' ? 'All suggestions' : host.replace(/^www\./, '') || 'unknown';
+}
+
+function bar(bucket: ActionAnalyticsBucket): string {
+  return `
+    <div class="bar-row">
+      <div class="bar-top"><span class="bar-label">${escapeHtml(hostLabel(bucket.key))}</span><span>${bucket.accepted}/${bucket.suggested} · ${bucket.acceptanceRate}%</span></div>
+      <div class="bar-track"><span class="bar-fill" style="width:${pct(bucket.acceptanceRate)}"></span></div>
+    </div>
+  `;
+}
+
+function renderAnalytics(data: ActionAnalytics): void {
+  if (!data.enabled) {
+    analyticsEl.innerHTML = '<div class="empty">Connect Elasticsearch in Settings to see suggestion analytics.</div>';
+    return;
+  }
+  const totals = data.totals;
+  analyticsEl.innerHTML = `
+    <div class="metric-grid">
+      <div class="metric"><b>${totals.suggested}</b><span>suggested</span></div>
+      <div class="metric"><b>${totals.acceptanceRate}%</b><span>accepted</span></div>
+      <div class="metric"><b>${totals.alternative}</b><span>did different</span></div>
+    </div>
+    <div class="bars">${(data.byKind.length ? data.byKind : [totals]).slice(0, 4).map(bar).join('')}</div>
+    <div class="facts">${data.facts.map((fact) => `<div class="fact">${escapeHtml(fact)}</div>`).join('')}</div>
+    <div class="recent">
+      ${
+        data.recent.length
+          ? data.recent
+              .map(
+                (row) => `
+                  <div class="recent-row">
+                    <b>${escapeHtml(row.label)}</b>
+                    <span><span class="outcome-${row.outcome}">${row.outcome}</span> · ${escapeHtml(row.kind)} · ${escapeHtml(row.host || 'unknown')}</span>
+                    ${row.actual ? `<span>instead: ${escapeHtml(row.actual)}</span>` : ''}
+                  </div>
+                `,
+              )
+              .join('')
+          : '<div class="empty">No suggestion outcomes in the last day yet.</div>'
+      }
+    </div>
+  `;
+}
+
+function escapeHtml(text: string): string {
+  const span = document.createElement('span');
+  span.textContent = text;
+  return span.innerHTML;
+}
+
+async function loadAnalytics(): Promise<void> {
+  analyticsEl.innerHTML = '<div class="empty">Loading analytics…</div>';
+  try {
+    renderAnalytics(await withTimeout(sendMessage('getAnalytics', undefined)));
+  } catch {
+    analyticsEl.innerHTML = '<div class="empty">Analytics are unavailable right now.</div>';
+  }
+}
+
+function selectTab(which: 'home' | 'analytics'): void {
+  const analytics = which === 'analytics';
+  tabHome.setAttribute('aria-selected', String(!analytics));
+  tabAnalytics.setAttribute('aria-selected', String(analytics));
+  panelHome.classList.toggle('active', !analytics);
+  panelAnalytics.classList.toggle('active', analytics);
+  if (analytics) void loadAnalytics();
 }
 
 async function load(): Promise<void> {
@@ -173,6 +254,8 @@ resumeButton.addEventListener('click', async () => {
 });
 
 retryButton.addEventListener('click', () => void load());
+tabHome.addEventListener('click', () => selectTab('home'));
+tabAnalytics.addEventListener('click', () => selectTab('analytics'));
 
 optionsLink.addEventListener('click', (e) => {
   e.preventDefault();

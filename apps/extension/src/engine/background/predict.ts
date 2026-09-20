@@ -299,6 +299,14 @@ export function dismissAction(tabId: number, reqId: number): void {
   );
 }
 
+/** The user acted on the page instead. Drop the stale suggestion without teaching "never suggest this target again." */
+export function alternativeAction(tabId: number, reqId: number, actual: string): void {
+  const p = pending.get(tabId);
+  if (!p || p.reqId !== reqId) return;
+  pending.delete(tabId);
+  appendHistory(tabId, `did instead of suggestion: ${actual}`, p.url);
+}
+
 /** Ours: one line for the debug panel, only when it is open on this tab. */
 function trace(
   opts: { trace?: PredictionTrace },

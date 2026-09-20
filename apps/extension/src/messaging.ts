@@ -1,6 +1,7 @@
 import type { GetDataType, GetReturnType } from '@webext-core/messaging';
 import { defineExtensionMessaging } from '@webext-core/messaging';
 import type { DebugSnapshot } from './debug/log';
+import type { ActionAnalytics } from './background/elastic';
 import type { Settings } from './engine/shared/settings';
 import type { StatusInfo } from './status/info';
 
@@ -37,6 +38,8 @@ export interface Protocol {
   toggleDebug(): void;
   /** What the status line on a page may show: running or not, and the model in use. Never the key. */
   getStatus(): StatusInfo;
+  /** Recent suggestion outcomes and trends for the popup analytics tab. */
+  getAnalytics(): ActionAnalytics;
   /** Did the user press Cancel on Chrome's debugging bar over this tab? The popup asks about the tab it opened over. */
   isTabPaused(data: { tabId: number }): boolean;
   /** The popup's Resume button: unpause that tab and ask it for a suggestion straight away. */

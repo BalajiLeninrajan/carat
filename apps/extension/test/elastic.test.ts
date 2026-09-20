@@ -724,6 +724,69 @@ describe('ElasticMemory', () => {
     expect(deletes).toEqual([]);
   });
 
+  it('summarizes accepted, dismissed and alternative outcomes into behavioral analytics', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (url, init) => {
+      const path = String(url);
+      if (init?.method === 'HEAD') return new Response(null, { status: 200 });
+      if (path.includes('carat-test-actions/_search')) {
+        return Response.json({
+          hits: {
+            hits: [
+              { _source: { at: '2026-09-20T01:00:00Z', host: 'shop.example', kind: 'open', label: 'Open AirPods', outcome: 'alternative', actual: 'clicked button "Back"', accepted: false } },
+              { _source: { at: '2026-09-20T01:01:00Z', host: 'shop.example', kind: 'open', label: 'Open AirPods reviews', outcome: 'alternative', actual: 'clicked link "Reviews"', accepted: false } },
+              { _source: { at: '2026-09-20T01:02:00Z', host: 'shop.example', kind: 'click', label: 'Checkout', outcome: 'dismissed', accepted: false } },
+              { _source: { at: '2026-09-20T01:02:30Z', host: 'shop.example', kind: 'click', label: 'Add AirPods to cart', outcome: 'accepted', accepted: true } },
+              { _source: { at: '2026-09-20T01:03:00Z', host: 'calendar.google.com', kind: 'fill', label: 'Location', outcome: 'accepted', accepted: true } },
+            ],
+          },
+        });
+      }
+      return Response.json({ acknowledged: true });
+    });
+    const elastic = createElasticMemory({ settings: async () => settings(), fetchImpl });
+
+    const analytics = await elastic.analytics();
+
+    expect(analytics.enabled).toBe(true);
+    expect(analytics.totals).toMatchObject({ suggested: 5, accepted: 2, dismissed: 1, alternative: 2, acceptanceRate: 40 });
+    expect(analytics.byHost[0]).toMatchObject({ key: 'shop.example', suggested: 4, acceptanceRate: 25 });
+    expect(analytics.facts.some((fact) => /Cart commitment|Indecisive shopper|Window shopper/.test(fact))).toBe(true);
+    expect(analytics.facts.some((fact) => fact.includes('actions index'))).toBe(true);
+  });
+
+  it('returns action history as behavior context for the agent', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (url, init) => {
+      const path = String(url);
+      if (init?.method === 'HEAD') return new Response(null, { status: 200 });
+      if (path.includes('carat-test-actions/_search')) {
+        return Response.json({
+          hits: {
+            hits: [
+              { _source: { at: '2026-09-20T01:00:00Z', host: 'shop.example', kind: 'open', label: 'Open AirPods', outcome: 'alternative', actual: 'clicked Back', accepted: false } },
+              { _source: { at: '2026-09-20T01:01:00Z', host: 'shop.example', kind: 'click', label: 'Checkout', outcome: 'alternative', actual: 'clicked Reviews', accepted: false } },
+              { _source: { at: '2026-09-20T01:02:00Z', host: 'shop.example', kind: 'click', label: 'Add AirPods to cart', outcome: 'accepted', accepted: true } },
+            ],
+          },
+        });
+      }
+      return Response.json({ hits: { hits: [] } });
+    });
+    const elastic = createElasticMemory({ settings: async () => settings(), fetchImpl });
+
+    const lines = await elastic.retrieve(
+      {
+        ...req(),
+        url: 'https://shop.example/products/airpods',
+        title: 'AirPods',
+        text: 'main:\n  [1] button "Add to cart"\n  [2] button "Checkout"',
+        candidates: [{ n: 1, backendNodeId: 11, role: 'button', name: 'Add to cart' }],
+      },
+      1,
+    );
+
+    expect(lines.some((line) => line.startsWith('[elasticsearch] behavior:'))).toBe(true);
+  });
+
   it('names the outstanding fields and their values on the task line', async () => {
     const fetchImpl = vi.fn<typeof fetch>(async (url) => {
       if (String(url).includes('carat-test-tasks/_search')) {
