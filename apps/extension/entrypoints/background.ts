@@ -2,9 +2,11 @@ import { defineBackground } from 'wxt/utils/define-background';
 import { getTree } from '../src/engine/background/axmirror';
 import { browserContext } from '../src/engine/background/browser';
 import { CdpPausedError, isPaused, resume } from '../src/engine/background/cdp';
+import { createClipboardReader } from '../src/engine/background/clipboard';
 import { cancelCompletion, complete } from '../src/engine/background/complete';
 import { appendHistory, clearHistory, historyFor, sinceLastInteraction } from '../src/engine/background/history';
-import { clearNotes, notesFor, recordSeen } from '../src/engine/background/notes';
+import { clearNotes, dropSystemCopies, notesFor, recordCopied, recordSeen } from '../src/engine/background/notes';
+import { chromeClipboardDocument } from '../src/engine/background/offscreen';
 import { buildOutline } from '../src/engine/background/outline';
 import {
   acceptAction,
@@ -55,6 +57,51 @@ export default defineBackground(() => {
   /** Live content-script connections, so worker-side events can reach a tab. */
   const ports = new Map<number, (msg: WorkerToContent) => void>();
 
+  // -------------------------------------------------------------------------
+  // Ours: the clipboard.
+
+  /**
+   * Tabs whose content script last reported a visible password field. The
+   * system clipboard is never read while one of them is in front.
+   */
+  const passwordTabs = new Set<number>();
+
+  /**
+   * Text copied outside the browser. Off until the user turns the setting on
+   * and Chrome grants the optional permission. Copies made on a page arrive
+   * over the port instead and need none of this.
+   */
+  const clipboard = createClipboardReader({
+    settings: () => loadSettings(),
+    granted: async () => {
+      try {
+        return await chrome.permissions.contains({ permissions: ['clipboardRead'] });
+      } catch {
+        return false;
+      }
+    },
+    doc: chromeClipboardDocument(),
+    activeTab: async () => {
+      try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!tab) return undefined;
+        return { ...(tab.id !== undefined ? { id: tab.id } : {}), ...(tab.url ? { url: tab.url } : {}) };
+      } catch {
+        return undefined;
+      }
+    },
+    passwordTab: (tabId) => passwordTabs.has(tabId),
+    remember: (copy) => recordCopied(copy),
+  });
+
+  const pollClipboard = (): void => void clipboard.poll().catch(() => undefined);
+  chrome.tabs.onActivated.addListener(() => pollClipboard());
+  chrome.tabs.onRemoved.addListener((tabId) => passwordTabs.delete(tabId));
+  // A page the user just landed on is where what they copied elsewhere gets used.
+  chrome.webNavigation.onCommitted.addListener((d) => {
+    if (d.frameId === 0) pollClipboard();
+  });
+
   chrome.runtime.onConnect.addListener((port) => {
     if (port.name !== PORT_NAME) return;
     const tabId = port.sender?.tab?.id;
@@ -74,6 +121,9 @@ export default defineBackground(() => {
     port.onMessage.addListener(async (msg: ContentToWorker) => {
       switch (msg.type) {
         case 'idle':
+          // Ours: the one place the worker learns a tab is on a login form.
+          if (msg.password) passwordTabs.add(tabId);
+          else passwordTabs.delete(tabId);
           void onIdle(tabId, msg, post);
           break;
         case 'log':
@@ -95,6 +145,17 @@ export default defineBackground(() => {
           const settings = await loadSettings();
           if (!settings.enabled || !settings.memoryEnabled || !settings.apiKey || isBlocked(settings, msg.url)) break;
           recordSeen(msg, settings).catch((e) => console.error('[carat] noting failed:', e));
+          break;
+        }
+        // Ours: a copy made on the page. Stored as it stands, with no model
+        // call and no setting behind it: the page fires `copy` at the content
+        // script whatever else Carat is allowed to do.
+        case 'copied': {
+          const settings = await loadSettings();
+          if (!settings.enabled || isBlocked(settings, msg.url)) break;
+          recordCopied({ text: msg.text, url: msg.url, title: msg.title }).catch((e) =>
+            console.error('[carat] noting a copy failed:', e),
+          );
           break;
         }
       }
@@ -291,8 +352,17 @@ export default defineBackground(() => {
 
   onMessage('getSettings', () => loadSettings());
   onMessage('setSettings', async ({ data }) => {
+    const before = await loadSettings();
     await saveSettings(data as Partial<Settings>);
-    return loadSettings();
+    const after = await loadSettings();
+    // Ours: turning the system clipboard off takes the offscreen document down
+    // and drops what it read. Copies made in the browser stay: that half never
+    // needed the permission and is not what the user just switched off.
+    if (before.clipboardRead && !after.clipboardRead) {
+      await clipboard.forget();
+      await dropSystemCopies().catch(() => undefined);
+    }
+    return after;
   });
   onMessage('getStatus', async ({ sender }) => {
     const tabId = sender.tab?.id;

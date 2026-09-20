@@ -26,6 +26,13 @@ export interface Settings {
   listenEnabled: boolean;
   /** OpenAI speech-to-text model. */
   transcribeModel: string;
+  /**
+   * Ours: read the system clipboard, so text copied in another app or another
+   * Chrome profile is context too. Off until the user turns it on, and it does
+   * nothing until Chrome grants the optional `clipboardRead` permission. What
+   * the user copies inside the browser is remembered either way.
+   */
+  clipboardRead: boolean;
   /** Hostnames Carat never touches (suffix match). */
   blocklist: string[];
   /** Ours: the pill in the bottom-left corner that says whether Carat is running here. */
@@ -52,6 +59,7 @@ export const DEFAULT_SETTINGS: Settings = {
   memoryEnabled: false,
   listenEnabled: false,
   transcribeModel: "gpt-transcribe",
+  clipboardRead: false,
   blocklist: [],
   statusLine: false,
   sound: true,

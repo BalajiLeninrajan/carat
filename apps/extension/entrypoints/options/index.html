@@ -146,6 +146,21 @@
         </label>
         <span class="hint">When you leave a page, Carat asks the model to note the facts on it you might act on elsewhere, keeps them for an hour in session memory, and includes them in later prompts. The page's visible text is sent to the API to do this. Off by default. Skipped on blocklisted sites and pages with a password field.</span>
 
+        <h2>Clipboard</h2>
+
+        <p class="hint">
+          What you copy on a page is always a note: Carat sees the copy without asking for anything, and keeps the text
+          for an hour like everything else it reads. Nothing is kept from a copy made in a password, card or one-time-code
+          field, from a page showing a password field, or from a blocklisted site, and text shaped like a password, a key
+          or a card number is dropped whatever field it came from.
+        </p>
+
+        <label class="row">
+          <input type="checkbox" name="clipboardRead" />
+          <span class="name">Read the system clipboard</span>
+        </label>
+        <span class="hint">Off unless you turn it on, and it saves itself the moment you do. When on, Carat also reads what you last copied anywhere else on this computer, including other apps and other Chrome profiles. Chrome asks you for the permission when you tick the box and Carat gives it back when you untick it, along with everything that permission produced. It reads at most once every five seconds, only when you switch tabs or a page loads, never while the tab in front is blocklisted or showing a password field, and keeps only a hash of the last text between reads.</span>
+
         <h2>Display</h2>
 
         <label class="row">

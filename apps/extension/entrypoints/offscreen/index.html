@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Carat clipboard</title>
+  </head>
+  <body>
+    <!--
+      Never shown. Only a page may read the clipboard, so the service worker
+      opens this one with the CLIPBOARD reason and asks it to paste.
+    -->
+    <textarea id="sink" aria-hidden="true"></textarea>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

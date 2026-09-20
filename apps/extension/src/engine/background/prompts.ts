@@ -199,6 +199,7 @@ How to decide:
 - If the user has highlighted text, the next step is almost always about that text: open the site or thing it names (kind "open" with the URL if it names one, otherwise a search for it), put it into the focused field, or search the page's own search box for it. Do not scroll past a highlight.
 - Choose "scroll" only when the outline says the page continues below the viewport and nothing in view is the next step. Scrolling is what to do when the visible page has nothing to act on; a highlight, a focused field, a note that matches something on screen, or a link the user is likely to want all come first.
 - <notes> often explain why the user came to this page: if the page is where they would act on a note, the next step is usually to put the note's details into the page (fill the matching field, select the matching option) or to press the control that acts on it.
+- Text the user copied moments ago is the strongest hint of what they intend to paste or search for next.
 - The focused control and the controls near it are the strongest signal. "(required)" fields that are still empty come before submitting.
 - Only use numbers that appear in the outline. Never target a disabled control.
 - Do not repeat the action the user just took, and never propose something the history shows they dismissed.

@@ -6,20 +6,23 @@
  * - Read: when a page is hidden (tab switch, navigation away), the content
  *   script sends its visible text.
  * - Heard: background listening sends batches of transcribed speech.
+ * - Copied (ours): the user pressed Ctrl+C on a page, or Carat read the system
+ *   clipboard. This one skips the model: what they copied is already the fact.
  *
- * Either way a small model call distills the input into at most a few
- * self-contained facts. Only the facts are kept, for an hour, in
+ * Read and heard input goes through a small model call that distills it into
+ * at most a few self-contained facts. Only the facts are kept, for an hour, in
  * chrome.storage.session.
  */
 
-import type { SeenMessage } from "../shared/protocol";
+import type { CopiedMessage, SeenMessage } from "../shared/protocol";
+import { looksSecret } from "../shared/redact";
 import type { Settings } from "../shared/settings";
 import { streamResponse } from "./llm";
 
 export interface Note {
   at: number;
-  source: "read" | "heard";
-  /** Page the note came from ("" for heard notes). */
+  source: "read" | "heard" | "copied";
+  /** Page the note came from ("" for heard notes and for the system clipboard). */
   url: string;
   title: string;
   text: string;
@@ -30,6 +33,13 @@ const MAX_NOTES = 30;
 const TTL_MS = 60 * 60_000;
 /** Notes shown in a prompt. */
 const PROMPT_NOTES = 10;
+
+/** Ours: one copy, as it is stored and rendered. The same bound as a selection. */
+export const COPY_CHARS = 1000;
+/** Ours: below this a copy says nothing; a stray Ctrl+C on one character is not a fact. */
+export const MIN_COPY_CHARS = 2;
+/** Ours: how long a copy goes in front of every other note. */
+export const COPY_TOP_MS = 10 * 60_000;
 
 const COMMON_RULES = `Extract the facts the user is likely to act on soon, possibly on a different website: requests or plans addressed to them, things they agreed to, and the concrete details needed to act on them (names, places, dates and times, amounts, quantities, product or item names, reference numbers, addresses, links).
 
@@ -160,6 +170,51 @@ export async function recordHeard(lines: string[], context: string[], settings: 
 }
 
 // ---------------------------------------------------------------------------
+// Copied (ours)
+
+/** One copy. `url` is the page it was made on, or "" for the system clipboard. */
+export interface Copy {
+  text: string;
+  url: string;
+  title: string;
+  at?: number;
+}
+
+/**
+ * Remember text the user copied, as a note of its own. There is no model call:
+ * what they copied is already the fact, and a distiller would only blur it.
+ *
+ * Answers with the note, or null when the text was too short to say anything
+ * or reads like a secret. One note per distinct text: copying the same thing
+ * again moves its clock rather than filling the list with it.
+ */
+export async function recordCopied(copy: Copy): Promise<Note | null> {
+  const text = copy.text.replace(/\s+/g, " ").trim().slice(0, COPY_CHARS);
+  if (text.length < MIN_COPY_CHARS || looksSecret(text)) return null;
+  const note: Note = {
+    at: copy.at ?? Date.now(),
+    source: "copied",
+    url: copy.url,
+    title: copy.title,
+    text,
+  };
+  const key = text.toLowerCase();
+  const kept = (await load()).filter((n) => n.source !== "copied" || n.text.toLowerCase() !== key);
+  await chrome.storage.session.set({ [NOTES_KEY]: [...kept, note].slice(-MAX_NOTES) });
+  return note;
+}
+
+/**
+ * Drop what the system clipboard produced, keeping the copies made in the
+ * browser. Turning the setting off takes back what needed the permission; a
+ * Ctrl+C on a page never needed it and is not what the user switched off.
+ */
+export async function dropSystemCopies(): Promise<void> {
+  const kept = (await load()).filter((n) => n.source !== "copied" || n.url !== "");
+  await chrome.storage.session.set({ [NOTES_KEY]: kept });
+}
+
+// ---------------------------------------------------------------------------
 // Prompt
 
 function ago(ms: number): string {
@@ -170,18 +225,37 @@ function ago(ms: number): string {
 /**
  * Notes for a prompt on `currentUrl`. Read notes from that same page are left
  * out (it is on screen), and each source only counts while its feature is on.
+ * A copy made in the browser needs no setting, so it always counts; one read
+ * off the system clipboard only counts while that permission-backed setting is
+ * on, so a note outlives the switch by no longer than it takes to drop it.
+ *
+ * Ours: a copy from the last ten minutes goes in front of everything else. It
+ * is the freshest thing Carat has and the one piece of text the user has
+ * already said matters. After that it queues with the rest.
  */
 export async function notesFor(currentUrl: string, settings: Settings): Promise<string> {
-  const notes = (await load())
-    .filter((n) => (n.source === "read" ? settings.memoryEnabled && n.url !== currentUrl : settings.listenEnabled))
-    .slice(-PROMPT_NOTES);
-  if (!notes.length) return "(none)";
+  const eligible = (await load()).filter((n) =>
+    n.source === "read"
+      ? settings.memoryEnabled && n.url !== currentUrl
+      : n.source === "copied"
+        ? n.url !== "" || settings.clipboardRead
+        : settings.listenEnabled,
+  );
   const now = Date.now();
+  const isFresh = (n: Note): boolean => n.source === "copied" && now - n.at < COPY_TOP_MS;
+  const fresh = eligible.filter(isFresh).slice(-PROMPT_NOTES);
+  const room = PROMPT_NOTES - fresh.length;
+  const notes = [...fresh, ...(room > 0 ? eligible.filter((n) => !isFresh(n)).slice(-room) : [])];
+  if (!notes.length) return "(none)";
   return notes
-    .map((n) =>
-      n.source === "heard"
+    .map((n) => {
+      if (n.source === "copied") {
+        const where = n.url ? `, on ${hostOf(n.url)}` : ", from another app";
+        return `- the user copied "${n.text}" (${ago(now - n.at)}${where})`;
+      }
+      return n.source === "heard"
         ? `- ${n.text} (heard ${ago(now - n.at)})`
-        : `- ${n.text} (read ${ago(now - n.at)} on ${hostOf(n.url)}${n.title ? `, "${n.title.slice(0, 60)}"` : ""})`,
-    )
+        : `- ${n.text} (read ${ago(now - n.at)} on ${hostOf(n.url)}${n.title ? `, "${n.title.slice(0, 60)}"` : ""})`;
+    })
     .join("\n");
 }
