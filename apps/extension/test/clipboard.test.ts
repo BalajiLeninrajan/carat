@@ -245,9 +245,7 @@ describe('the clipboard permission toggle', () => {
 });
 
 describe('the built manifest', () => {
-  // Importing the build config pulls the whole of wxt in behind it, which is
-  // well past the default five seconds on a cold cache or a loaded machine.
-  it('keeps clipboardRead optional and never asks for it up front', { timeout: 30_000 }, async () => {
+  it('keeps clipboardRead optional and never asks for it up front', async () => {
     const config = (await import('../wxt.config')).default;
     const manifest = config.manifest as {
       permissions: string[];
